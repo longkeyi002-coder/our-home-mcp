@@ -33,7 +33,7 @@ Hermes 可以调用 MCP 工具参与推理和执行，但不是 Life Loop 的必
 - `src/worker.ts`：独立心跳、把生活上下文交给可替换的决策适配器、处理到期候选、调用通知适配器。
 - `POST /v1/phone/heartbeat` 和 `POST /v1/observations`：接收手机端明确授权上报的状态与观察。
 - `POST /v1/phone/register`：用已有的 phone ingest token 为一个 device ID 派生设备凭据；旧的共享 token 调用保持兼容。
-- JSON store：当前是原型持久化层，后续可替换数据库。
+- SQLite store：server 和独立 worker 通过同一个 SQLite 文件共享状态；写入使用事务，主动消息使用持久化 claim。
 
 配置决策 Webhook 后，worker 会把结构化 `LifeContext` 发给外部决策服务；决策服务返回候选消息，worker 再负责去重、到期判断和投递。这样可以接入任意模型或已有 Agent，但本项目本身不假装内置了一个模型。
 
@@ -60,8 +60,8 @@ Hermes 可以调用 MCP 工具参与推理和执行，但不是 Life Loop 的必
 
 ## 后续阶段
 
-1. **当前阶段**：JSON store + 独立 worker + 通用 webhook。
-2. **持久化阶段**：SQLite/Postgres、迁移、并发锁、用户级鉴权。
+1. **当前阶段**：SQLite store + 独立 worker + 通用 webhook。
+2. **持久化阶段**：继续完善 SQLite schema；后续如有需要再迁移到 Postgres，并继续完善用户级鉴权。
 3. **手机阶段**：手机 companion 只上传用户授权的状态摘要，不默认上传屏幕内容。
 4. **决策阶段**：接入模型决策器、冷却时间、安静时段、每日上限和人工确认。
 5. **渠道阶段**：分别实现 Telegram、系统推送或其他用户明确选择的渠道。

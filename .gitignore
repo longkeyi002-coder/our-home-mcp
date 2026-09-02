@@ -6,3 +6,7 @@ dist/
 **/.gradle/
 **/build/
 **/local.properties
+.gradle-user-home/
+.npm-cache/
+.android-user/
+.android-sdk-home/

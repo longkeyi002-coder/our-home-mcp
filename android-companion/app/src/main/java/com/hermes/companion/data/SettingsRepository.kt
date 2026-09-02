@@ -27,6 +27,11 @@ class SettingsRepository(context: Context) {
     fun recordSuccessfulUpload(at: Long) { prefs.edit().putLong(KEY_LAST_UPLOAD, at).remove(KEY_LAST_ERROR).apply() }
     fun lastError(): String = prefs.getString(KEY_LAST_ERROR, "") ?: ""
     fun recordApiError(value: String) { prefs.edit().putString(KEY_LAST_ERROR, value.take(300)).apply() }
+    fun stepBaselineDate(): String? = prefs.getString(KEY_STEP_BASELINE_DATE, null)
+    fun stepBaseline(): Long? = if (prefs.contains(KEY_STEP_BASELINE)) prefs.getLong(KEY_STEP_BASELINE, 0L) else null
+    fun saveStepBaseline(date: String, value: Long) { prefs.edit().putString(KEY_STEP_BASELINE_DATE, date).putLong(KEY_STEP_BASELINE, value).apply() }
+    fun realtimeEnabled(): Boolean = prefs.getBoolean(KEY_REALTIME_ENABLED, false)
+    fun saveRealtimeEnabled(value: Boolean) { prefs.edit().putBoolean(KEY_REALTIME_ENABLED, value).apply() }
 
     companion object {
         private const val KEY_SERVER_URL = "server_url"
@@ -36,5 +41,8 @@ class SettingsRepository(context: Context) {
         private const val KEY_LAST_UPLOAD = "last_upload"
         private const val KEY_LAST_HEARTBEAT = "last_heartbeat"
         private const val KEY_LAST_ERROR = "last_error"
+        private const val KEY_STEP_BASELINE_DATE = "step_baseline_date"
+        private const val KEY_STEP_BASELINE = "step_baseline"
+        private const val KEY_REALTIME_ENABLED = "realtime_enabled"
     }
 }

@@ -24,7 +24,7 @@ object DeviceStatusReader {
             batteryPercent = (level * 100 / scale.coerceAtLeast(1)).coerceIn(0, 100),
             charging = chargingState == BatteryManager.BATTERY_STATUS_CHARGING || chargingState == BatteryManager.BATTERY_STATUS_FULL,
             online = network?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true,
-            foregroundPackage = runCatching { currentForegroundPackage(context) }.getOrNull(),
+            foregroundPackage = currentForegroundPackage(context),
         )
     }
 

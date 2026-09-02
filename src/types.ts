@@ -13,6 +13,8 @@ export type ObservationKind =
   | "manual_status"
   | "device_presence"
   | "screen_app"
+  | "app_timeline"
+  | "steps"
   | "calendar"
   | "weather"
   | "note";
@@ -40,6 +42,7 @@ export interface RelationshipEvent {
   importance: "ordinary" | "major";
   approvalStatus: RelationshipApprovalStatus;
   approvedBy: Actor[];
+  approvalSubjects?: Partial<Record<Actor, string>>;
   createdAt: string;
   updatedAt: string;
 }
@@ -127,6 +130,8 @@ export interface ProactiveCandidate {
   lastError?: string;
   source: "AGENT_LIFE" | "HOME_STATE";
   dedupeKey?: string;
+  claimId?: string;
+  claimExpiresAt?: string;
 }
 
 export interface LifeContext {

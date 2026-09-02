@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { mkdir } from "node:fs/promises";
+import { resolve } from "node:path";
+import Database from "better-sqlite3";
 import type {
   ActionItem,
   ActionStatus,
@@ -162,28 +163,36 @@ function migrateData(value: unknown): OurHomeData {
 }
 
 export class JsonStore {
-  private data: OurHomeData;
-  private writeQueue: Promise<void> = Promise.resolve();
-
-  private constructor(private readonly filePath: string, data: OurHomeData) {
-    this.data = data;
-  }
+  private constructor(private readonly db: Database.Database) {}
 
   static async open(filePath: string, seed = true): Promise<JsonStore> {
     const resolvedPath = resolve(filePath);
-    try {
-      const raw = await readFile(resolvedPath, "utf8");
-      return new JsonStore(resolvedPath, migrateData(JSON.parse(raw)));
-    } catch (error: unknown) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      const store = new JsonStore(resolvedPath, seed ? seedData() : emptyData());
-      await store.persist();
-      return store;
+    await mkdir(resolve(resolvedPath, ".."), { recursive: true });
+    const db = new Database(resolvedPath);
+    db.pragma("journal_mode = WAL");
+    db.pragma("busy_timeout = 5000");
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS our_home_state (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        payload TEXT NOT NULL
+      )
+    `);
+    const existing = db.prepare("SELECT payload FROM our_home_state WHERE id = 1").get() as { payload: string } | undefined;
+    if (!existing) {
+      db.prepare("INSERT INTO our_home_state (id, payload) VALUES (1, ?)").run(JSON.stringify(seed ? seedData() : emptyData()));
+    } else {
+      const migrated = migrateData(JSON.parse(existing.payload));
+      if (JSON.stringify(migrated) !== existing.payload) {
+        db.prepare("UPDATE our_home_state SET payload = ? WHERE id = 1").run(JSON.stringify(migrated));
+      }
     }
+    return new JsonStore(db);
   }
 
   snapshot(): OurHomeData {
-    return structuredClone(this.data);
+    const row = this.db.prepare("SELECT payload FROM our_home_state WHERE id = 1").get() as { payload: string } | undefined;
+    if (!row) throw new Error("Our Home SQLite state is missing");
+    return migrateData(JSON.parse(row.payload));
   }
 
   getLifeContext(observedAt = now()): LifeContext {
@@ -191,7 +200,12 @@ export class JsonStore {
     return {
       observedAt,
       observations: data.observations.filter(
-        (item) => !item.expiresAt || item.expiresAt >= observedAt,
+        (item) => {
+          if (!item.expiresAt) return true;
+          const expiresAt = Date.parse(item.expiresAt);
+          const observedAtMs = Date.parse(observedAt);
+          return Number.isFinite(expiresAt) && Number.isFinite(observedAtMs) && expiresAt >= observedAtMs;
+        },
       ).slice(0, 50),
       routines: data.routines.filter((item) => item.enabled),
       recentHeartbeats: data.heartbeats.slice(0, 10),
@@ -202,8 +216,16 @@ export class JsonStore {
   }
 
   async update(mutator: (data: OurHomeData) => void): Promise<OurHomeData> {
-    mutator(this.data);
-    await this.persist();
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const data = this.snapshot();
+      mutator(data);
+      this.db.prepare("UPDATE our_home_state SET payload = ? WHERE id = 1").run(JSON.stringify(data));
+      this.db.exec("COMMIT");
+    } catch (error) {
+      try { this.db.exec("ROLLBACK"); } catch { /* preserve the original error */ }
+      throw error;
+    }
     return this.snapshot();
   }
 
@@ -313,20 +335,22 @@ export class JsonStore {
         deviceId: input.deviceId,
         metadata: input.metadata,
       };
-      const foregroundObservation: LifeObservation | undefined = input.foregroundPackage
+      const foregroundObservation = input.foregroundPackage
         ? {
             id: randomUUID(),
-            kind: "screen_app",
+            kind: "screen_app" as const,
             label: "当前前台应用包名",
             value: input.foregroundPackage,
             observedAt: input.observedAt,
-            source: "phone",
-            confidence: "observed",
+            source: "phone" as const,
+            confidence: "observed" as const,
             deviceId: input.deviceId,
             metadata: { heartbeatObservationId: observation.id },
           }
         : undefined;
-      data.observations.unshift(...[observation, foregroundObservation].filter((item): item is LifeObservation => Boolean(item)));
+      data.observations.unshift(
+        ...[observation, foregroundObservation].filter((item): item is LifeObservation => Boolean(item)),
+      );
       appendActivity(data, {
         kind: "observation_recorded",
         title: "记录一条手机心跳",
@@ -387,21 +411,23 @@ export class JsonStore {
     dueAt: string;
     dedupeKey?: string;
   }): Promise<ProactiveCandidate> {
-    if (input.dedupeKey) {
-      const existing = this.data.proactiveQueue.find(
-        (item) => item.status === "pending" && item.dedupeKey === input.dedupeKey,
-      );
-      if (existing) return structuredClone(existing);
-    }
-    const candidate: ProactiveCandidate = {
-      id: randomUUID(),
-      ...input,
-      status: "pending",
-      createdAt: now(),
-      attempts: 0,
-      source: "AGENT_LIFE",
-    };
+    let candidate: ProactiveCandidate | undefined;
     await this.update((data) => {
+      const existing = input.dedupeKey
+        ? data.proactiveQueue.find((item) => item.status === "pending" && item.dedupeKey === input.dedupeKey)
+        : undefined;
+      if (existing) {
+        candidate = structuredClone(existing);
+        return;
+      }
+      candidate = {
+        id: randomUUID(),
+        ...input,
+        status: "pending",
+        createdAt: now(),
+        attempts: 0,
+        source: "AGENT_LIFE",
+      };
       data.proactiveQueue.unshift(candidate);
       appendActivity(data, {
         kind: "proactive_candidate_scheduled",
@@ -410,36 +436,76 @@ export class JsonStore {
         source: "AGENT_LIFE",
       });
     });
+    if (!candidate) throw new Error("Failed to schedule proactive candidate");
     return candidate;
   }
 
   listDueProactiveMessages(asOf = new Date().toISOString()): ProactiveCandidate[] {
+    const asOfMs = Date.parse(asOf);
     return this.snapshot().proactiveQueue
-      .filter((item) => item.status === "pending" && item.dueAt <= asOf)
-      .sort((left, right) => left.dueAt.localeCompare(right.dueAt));
+      .filter((item) => {
+        const dueAt = Date.parse(item.dueAt);
+        const claimExpiresAt = item.claimExpiresAt ? Date.parse(item.claimExpiresAt) : NaN;
+        return item.status === "pending" && Number.isFinite(dueAt) && dueAt <= asOfMs &&
+          (!item.claimExpiresAt || (Number.isFinite(claimExpiresAt) && claimExpiresAt <= asOfMs));
+      })
+      .sort((left, right) => Date.parse(left.dueAt) - Date.parse(right.dueAt));
   }
 
-  async recordProactiveAttempt(id: string, error?: string): Promise<ProactiveCandidate> {
+  async claimDueProactiveMessages(asOf = new Date(), limit = 100, leaseMs = 5 * 60_000): Promise<ProactiveCandidate[]> {
+    const asOfIso = asOf.toISOString();
+    const asOfMs = asOf.getTime();
+    const claimExpiresAt = new Date(asOfMs + leaseMs).toISOString();
+    const claimId = randomUUID();
+    let claimed: ProactiveCandidate[] = [];
+    await this.update((data) => {
+      claimed = data.proactiveQueue
+        .filter((item) => {
+          const dueAt = Date.parse(item.dueAt);
+          const claimExpires = item.claimExpiresAt ? Date.parse(item.claimExpiresAt) : NaN;
+          return item.status === "pending" && Number.isFinite(dueAt) && dueAt <= asOfMs &&
+            (!item.claimExpiresAt || (Number.isFinite(claimExpires) && claimExpires <= asOfMs));
+        })
+        .sort((left, right) => Date.parse(left.dueAt) - Date.parse(right.dueAt))
+        .slice(0, limit);
+      for (const item of claimed) {
+        item.claimId = claimId;
+        item.claimExpiresAt = claimExpiresAt;
+      }
+      claimed = structuredClone(claimed);
+    });
+    return claimed;
+  }
+
+  async recordProactiveAttempt(id: string, error?: string, claimId?: string, releaseClaim = false): Promise<ProactiveCandidate> {
     let result: ProactiveCandidate | undefined;
     await this.update((data) => {
       result = data.proactiveQueue.find((item) => item.id === id);
       if (!result) throw new Error(`Proactive candidate not found: ${id}`);
+      if (claimId && result.claimId !== claimId) throw new Error("Proactive candidate claim is no longer valid");
       result.attempts += 1;
       result.lastAttemptAt = now();
       result.lastError = error;
+      if (releaseClaim) {
+        delete result.claimId;
+        delete result.claimExpiresAt;
+      }
     });
     if (!result) throw new Error(`Proactive candidate not found: ${id}`);
     return result;
   }
 
-  async resolveProactiveMessage(id: string, status: Exclude<ProactiveCandidateStatus, "pending">): Promise<ProactiveCandidate> {
+  async resolveProactiveMessage(id: string, status: Exclude<ProactiveCandidateStatus, "pending">, claimId?: string): Promise<ProactiveCandidate> {
     let result: ProactiveCandidate | undefined;
     await this.update((data) => {
       result = data.proactiveQueue.find((item) => item.id === id);
       if (!result) throw new Error(`Proactive candidate not found: ${id}`);
+      if (claimId && result.claimId !== claimId) throw new Error("Proactive candidate claim is no longer valid");
       result.status = status;
       if (status === "delivered") result.deliveredAt = now();
       if (status === "dismissed") result.dismissedAt = now();
+      delete result.claimId;
+      delete result.claimExpiresAt;
     });
     if (!result) throw new Error(`Proactive candidate not found: ${id}`);
     return result;
@@ -516,7 +582,7 @@ export class JsonStore {
     return event;
   }
 
-  async approveRelationshipEvent(id: string, approvedBy: Actor): Promise<RelationshipEvent> {
+  async approveRelationshipEvent(id: string, approvedBy: Actor, subject: string = approvedBy): Promise<RelationshipEvent> {
     let result: RelationshipEvent | undefined;
     await this.update((data) => {
       result = data.relationshipEvents.find((item) => item.id === id);
@@ -524,7 +590,13 @@ export class JsonStore {
       if (result.approvalStatus === "rejected") {
         throw new Error("A rejected relationship event cannot be approved");
       }
+      result.approvalSubjects ??= {};
+      const otherActor: Actor = approvedBy === "user" ? "agent" : "user";
+      if (result.approvalSubjects[otherActor] === subject) {
+        throw new Error("Major relationship events require two distinct authenticated identities");
+      }
       if (!result.approvedBy.includes(approvedBy)) result.approvedBy.push(approvedBy);
+      result.approvalSubjects[approvedBy] = subject;
       const fullyApproved =
         result.importance === "ordinary" ||
         (result.approvedBy.includes("user") && result.approvedBy.includes("agent"));
@@ -552,15 +624,6 @@ export class JsonStore {
     return result;
   }
 
-  private async persist(): Promise<void> {
-    this.writeQueue = this.writeQueue.then(async () => {
-      await mkdir(dirname(this.filePath), { recursive: true });
-      const temporaryPath = `${this.filePath}.tmp`;
-      await writeFile(temporaryPath, `${JSON.stringify(this.data, null, 2)}\n`, "utf8");
-      await rename(temporaryPath, this.filePath);
-    });
-    return this.writeQueue;
-  }
 }
 
 export function parseBoolean(value: string | undefined, fallback: boolean): boolean {

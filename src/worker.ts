@@ -3,7 +3,7 @@ import { z } from "zod";
 import type { LifeContext, ProactiveCandidate } from "./types.js";
 
 export interface ProactiveNotifier {
-  deliver(candidate: ProactiveCandidate): Promise<void>;
+  deliver(candidate: ProactiveCandidate, idempotencyKey: string): Promise<void>;
 }
 
 export interface LifeDecisionEngine {
@@ -39,6 +39,7 @@ export class WebhookDecisionEngine implements LifeDecisionEngine {
       method: "POST",
       headers,
       body: JSON.stringify({ type: "our_home.life_context", context }),
+      signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error(`Decision engine returned HTTP ${response.status}`);
     const parsed = decisionResponseSchema.safeParse(await response.json());
@@ -48,7 +49,7 @@ export class WebhookDecisionEngine implements LifeDecisionEngine {
 }
 
 export class NoopNotifier implements ProactiveNotifier {
-  async deliver(candidate: ProactiveCandidate): Promise<void> {
+  async deliver(candidate: ProactiveCandidate, _idempotencyKey: string): Promise<void> {
     throw new Error(`No notifier configured for proactive candidate ${candidate.id}`);
   }
 }
@@ -59,14 +60,15 @@ export class WebhookNotifier implements ProactiveNotifier {
     private readonly token?: string,
   ) {}
 
-  async deliver(candidate: ProactiveCandidate): Promise<void> {
-    const headers: Record<string, string> = { "content-type": "application/json" };
+  async deliver(candidate: ProactiveCandidate, idempotencyKey: string): Promise<void> {
+    const headers: Record<string, string> = { "content-type": "application/json", "idempotency-key": idempotencyKey };
     if (this.token) headers.authorization = `Bearer ${this.token}`;
     const response = await fetch(this.url, {
       method: "POST",
       headers,
       body: JSON.stringify({
         type: "our_home.proactive_message",
+        idempotencyKey,
         id: candidate.id,
         title: candidate.title,
         message: candidate.message,
@@ -75,12 +77,28 @@ export class WebhookNotifier implements ProactiveNotifier {
         dueAt: candidate.dueAt,
         source: candidate.source,
       }),
+      signal: AbortSignal.timeout(10_000),
     });
     if (!response.ok) throw new Error(`Notifier returned HTTP ${response.status}`);
   }
 }
 
-export async function runProactiveCycle(
+let activeCycle: Promise<{ heartbeatId: string; dueCount: number; deliveredCount: number; failedCount: number }> | undefined;
+
+export function runProactiveCycle(
+  store: JsonStore,
+  notifier: ProactiveNotifier,
+  asOf = new Date(),
+  decisionEngine?: LifeDecisionEngine,
+): Promise<{ heartbeatId: string; dueCount: number; deliveredCount: number; failedCount: number }> {
+  if (activeCycle) return activeCycle;
+  activeCycle = runProactiveCycleInternal(store, notifier, asOf, decisionEngine).finally(() => {
+    activeCycle = undefined;
+  });
+  return activeCycle;
+}
+
+async function runProactiveCycleInternal(
   store: JsonStore,
   notifier: ProactiveNotifier,
   asOf = new Date(),
@@ -102,20 +120,21 @@ export async function runProactiveCycle(
       process.stderr.write(`[our-home] decision engine failed: ${message}\n`);
     }
   }
-  const due = store.listDueProactiveMessages(asOf.toISOString());
+  const due = await store.claimDueProactiveMessages(asOf);
   let deliveredCount = 0;
   let failedCount = 0;
 
   for (const candidate of due) {
     try {
-      await notifier.deliver(candidate);
-      await store.recordProactiveAttempt(candidate.id);
-      await store.resolveProactiveMessage(candidate.id, "delivered");
+      const idempotencyKey = `our-home:${candidate.id}`;
+      await notifier.deliver(candidate, idempotencyKey);
+      await store.recordProactiveAttempt(candidate.id, undefined, candidate.claimId);
+      await store.resolveProactiveMessage(candidate.id, "delivered", candidate.claimId);
       deliveredCount += 1;
     } catch (error) {
       failedCount += 1;
       const message = error instanceof Error ? error.message : "Unknown notifier error";
-      await store.recordProactiveAttempt(candidate.id, message);
+      await store.recordProactiveAttempt(candidate.id, message, candidate.claimId, true);
       process.stderr.write(`[our-home] proactive delivery failed: ${candidate.id}: ${message}\n`);
     }
   }
@@ -123,7 +142,7 @@ export async function runProactiveCycle(
   return { heartbeatId: heartbeat.id, dueCount: due.length, deliveredCount, failedCount };
 }
 
-const dataFile = process.env.OUR_HOME_DATA_FILE ?? "./data/our-home.json";
+const dataFile = process.env.OUR_HOME_DATA_FILE ?? "./data/our-home.sqlite";
 const seed = parseBoolean(process.env.OUR_HOME_SEED, true);
 const intervalMs = Number(process.env.OUR_HOME_WORKER_INTERVAL_MS ?? "60000");
 const webhookUrl = process.env.OUR_HOME_NOTIFY_WEBHOOK_URL;

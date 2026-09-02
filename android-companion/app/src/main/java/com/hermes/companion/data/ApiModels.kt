@@ -31,5 +31,12 @@ data class ObservationRequest(
     val metadata: Map<String, String>? = null,
 )
 
+data class AppTimelineEntry(
+    val packageName: String,
+    val startedAt: String,
+    val endedAt: String?,
+    val durationMs: Long,
+)
+
 @Serializable
 data class ApiAck(val dataSource: String? = null)

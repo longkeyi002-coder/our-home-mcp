@@ -1,17 +1,19 @@
+import { spawn } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import assert from "node:assert/strict";
+import { pathToFileURL } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createOurHomeServer } from "../src/server.js";
+import { createOurHomeServer, type AuthContext } from "../src/server.js";
 import { JsonStore } from "../src/store.js";
 import { WebhookDecisionEngine, runProactiveCycle } from "../src/worker.js";
 
-async function connectedClient(store: JsonStore) {
-  const server = createOurHomeServer(store);
+async function connectedClient(store: JsonStore, auth: AuthContext = { actor: "agent", subject: "agent-test" }) {
+  const server = createOurHomeServer(store, auth);
   const client = new Client({ name: "our-home-test-client", version: "0.1.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -20,7 +22,7 @@ async function connectedClient(store: JsonStore) {
 
 test("persists structured records without losing source metadata", async () => {
   const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
-  const filePath = join(directory, "our-home.json");
+  const filePath = join(directory, "our-home.sqlite");
   const store = await JsonStore.open(filePath, false);
   const entry = await store.addDiary({
     title: "测试记录",
@@ -29,17 +31,15 @@ test("persists structured records without losing source metadata", async () => {
     visibility: "shared",
   });
 
-  const persisted = JSON.parse(await readFile(filePath, "utf8")) as { diaries: Array<{ id: string; source: string }> };
-  assert.equal(persisted.diaries[0]?.id, entry.id);
-  assert.equal(persisted.diaries[0]?.source, "AGENT_LIFE");
-
   const reopened = await JsonStore.open(filePath, false);
   assert.equal(reopened.snapshot().diaries[0]?.body, "这是一条 Agent Life 记录。");
+  assert.equal(reopened.snapshot().diaries[0]?.id, entry.id);
+  assert.equal(reopened.snapshot().diaries[0]?.source, "AGENT_LIFE");
 });
 
 test("exposes focused read and write tools through MCP", async () => {
   const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
-  const store = await JsonStore.open(join(directory, "our-home.json"), true);
+  const store = await JsonStore.open(join(directory, "our-home.sqlite"), true);
   const { client, server } = await connectedClient(store);
 
   const listed = await client.listTools();
@@ -54,7 +54,6 @@ test("exposes focused read and write tools through MCP", async () => {
     arguments: {
       title: "MCP 测试",
       body: "通过 MCP 写入。",
-      author: "agent",
       visibility: "shared",
     },
   });
@@ -75,7 +74,7 @@ test("exposes focused read and write tools through MCP", async () => {
 
 test("does not expose private diaries unless explicitly requested", async () => {
   const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
-  const store = await JsonStore.open(join(directory, "our-home.json"), false);
+  const store = await JsonStore.open(join(directory, "our-home.sqlite"), false);
   await store.addDiary({ title: "共享", body: "共享内容", author: "agent", visibility: "shared" });
   await store.addDiary({ title: "私密", body: "私密内容", author: "agent", visibility: "private" });
   const { client, server } = await connectedClient(store);
@@ -95,15 +94,14 @@ test("does not expose private diaries unless explicitly requested", async () => 
 
 test("major relationship events require both approvals", async () => {
   const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
-  const store = await JsonStore.open(join(directory, "our-home.json"), false);
-  const { client, server } = await connectedClient(store);
+  const store = await JsonStore.open(join(directory, "our-home.sqlite"), false);
+  const { client, server } = await connectedClient(store, { actor: "user", subject: "user-1" });
 
   const proposed = await client.callTool({
     name: "home.propose_relationship_event",
     arguments: {
       title: "重要节点",
       occurredAt: "2026-09-01T00:00:00Z",
-      proposedBy: "user",
       importance: "major",
     },
   });
@@ -112,43 +110,52 @@ test("major relationship events require both approvals", async () => {
 
   const firstApproval = await client.callTool({
     name: "home.approve_relationship_event",
-    arguments: { eventId: event.id, approvedBy: "user" },
+    arguments: { eventId: event.id, approvedBy: "agent" },
   });
   assert.equal((firstApproval.structuredContent as { event: { approvalStatus: string } }).event.approvalStatus, "proposed");
 
-  const secondApproval = await client.callTool({
+  const spoofedAgain = await client.callTool({
     name: "home.approve_relationship_event",
     arguments: { eventId: event.id, approvedBy: "agent" },
   });
+  assert.equal((spoofedAgain.structuredContent as { event: { approvalStatus: string } }).event.approvalStatus, "proposed");
+
+  const agent = await connectedClient(store, { actor: "agent", subject: "agent-1" });
+  const secondApproval = await agent.client.callTool({ name: "home.approve_relationship_event", arguments: { eventId: event.id } });
   assert.equal((secondApproval.structuredContent as { event: { approvalStatus: string } }).event.approvalStatus, "approved");
 
   await client.close();
   await server.close();
+  await agent.client.close();
+  await agent.server.close();
 });
 
-test("migrates a v1 data file without losing existing records", async () => {
+test("independent SQLite processes do not lose concurrent writes", async () => {
   const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
-  const filePath = join(directory, "our-home.json");
-  await writeFile(filePath, JSON.stringify({
-    schemaVersion: 1,
-    diaries: [],
-    relationshipEvents: [],
-    actions: [],
-    activities: [],
-    proactiveMessages: [],
-    homeState: { presence: "unknown", updatedAt: "2026-09-01T00:00:00.000Z", source: "HOME_STATE" },
-  }), "utf8");
-
+  const filePath = join(directory, "our-home.sqlite");
   const store = await JsonStore.open(filePath, false);
-  const snapshot = store.snapshot();
-  assert.equal(snapshot.schemaVersion, 2);
-  assert.deepEqual(snapshot.observations, []);
-  assert.deepEqual(snapshot.proactiveQueue, []);
+  const storeModule = pathToFileURL(join(process.cwd(), "src/store.ts")).href;
+  const runWriter = (workerId: string) => new Promise<void>((resolve, reject) => {
+    const source = [
+      `import { JsonStore } from ${JSON.stringify(storeModule)};`,
+      `const store = await JsonStore.open(${JSON.stringify(filePath)}, false);`,
+      `for (let index = 0; index < 20; index += 1) await store.addAction({ title: ${JSON.stringify(`进程 ${workerId} 写入`)} + index });`,
+    ].join("\n");
+    const child = spawn(process.execPath, ["--import", "tsx", "--input-type=module", "--eval", source], {
+      cwd: process.cwd(),
+      stdio: "ignore",
+    });
+    child.once("error", reject);
+    child.once("close", (code) => code === 0 ? resolve() : reject(new Error(`writer ${workerId} exited with ${code}`)));
+  });
+
+  await Promise.all([runWriter("A"), runWriter("B")]);
+  assert.equal(store.snapshot().actions.length, 40);
 });
 
 test("independent life-loop cycle delivers due candidates without Hermes", async () => {
   const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
-  const store = await JsonStore.open(join(directory, "our-home.json"), false);
+  const store = await JsonStore.open(join(directory, "our-home.sqlite"), false);
   const candidate = await store.scheduleProactiveMessage({
     title: "心跳测试",
     message: "这条消息由独立 Life Loop 投递。",
@@ -167,9 +174,49 @@ test("independent life-loop cycle delivers due candidates without Hermes", async
   assert.equal(store.snapshot().heartbeats.length, 1);
 });
 
+test("concurrent notification cycles deliver a candidate only once", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
+  const store = await JsonStore.open(join(directory, "our-home.sqlite"), false);
+  await store.scheduleProactiveMessage({
+    title: "只投递一次",
+    message: "幂等通知测试",
+    reason: "并发 cycle",
+    dueAt: "2026-09-01T00:00:00Z",
+  });
+  let deliveries = 0;
+  const notifier = {
+    deliver: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      deliveries += 1;
+    },
+  };
+  await Promise.all([
+    runProactiveCycle(store, notifier, new Date("2026-09-01T00:01:00Z")),
+    runProactiveCycle(store, notifier, new Date("2026-09-01T00:01:00Z")),
+  ]);
+  assert.equal(deliveries, 1);
+  assert.equal(store.snapshot().proactiveQueue[0]?.attempts, 1);
+});
+
+test("a single authenticated identity cannot perform both approvals", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
+  const store = await JsonStore.open(join(directory, "our-home.sqlite"), false);
+  const user = await connectedClient(store, { actor: "user", subject: "same-person" });
+  const proposed = await user.client.callTool({
+    name: "home.propose_relationship_event",
+    arguments: { title: "审批身份", occurredAt: "2026-09-01T00:00:00Z", importance: "major" },
+  });
+  const eventId = (proposed.structuredContent as { event: { id: string } }).event.id;
+  await user.client.callTool({ name: "home.approve_relationship_event", arguments: { eventId } });
+  const second = await user.client.callTool({ name: "home.approve_relationship_event", arguments: { eventId, approvedBy: "agent" } });
+  assert.equal((second.structuredContent as { event: { approvalStatus: string } }).event.approvalStatus, "proposed");
+  await user.client.close();
+  await user.server.close();
+});
+
 test("failed proactive delivery remains pending for retry", async () => {
   const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
-  const store = await JsonStore.open(join(directory, "our-home.json"), false);
+  const store = await JsonStore.open(join(directory, "our-home.sqlite"), false);
   const candidate = await store.scheduleProactiveMessage({
     title: "失败测试",
     message: "这条消息应当保留待重试。",
@@ -208,7 +255,7 @@ test("decision webhook receives life context and creates a deduplicated candidat
   const port = typeof address === "object" && address ? address.port : 0;
 
   const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
-  const store = await JsonStore.open(join(directory, "our-home.json"), false);
+  const store = await JsonStore.open(join(directory, "our-home.sqlite"), false);
   await store.recordObservation({
     kind: "screen_app",
     label: "当前前台应用",

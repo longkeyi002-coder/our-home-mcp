@@ -13,10 +13,12 @@ object ApiClient {
     fun create(baseUrl: String): HermesApi {
         val normalized = baseUrl.trim().let { if (it.endsWith('/')) it else "$it/" }
         val uri = runCatching { URI(normalized) }.getOrNull()
-        val localHttp = uri?.scheme == "http" && uri.host == "localhost"
-        require(uri?.scheme == "https" || localHttp) {
-            "Server URL must use HTTPS (HTTP is allowed only for local development)"
+        val parsedUri = requireNotNull(uri) { "Server URL is invalid" }
+        require(parsedUri.scheme.equals("https", ignoreCase = true) ||
+            (parsedUri.scheme.equals("http", ignoreCase = true) && parsedUri.host.equals("localhost", ignoreCase = true))) {
+            "Server URL must use HTTPS; HTTP is only allowed for localhost development"
         }
+        require(!parsedUri.host.isNullOrBlank()) { "Server URL must include a host" }
         return Retrofit.Builder()
             .baseUrl(normalized)
             .client(OkHttpClient.Builder().build())

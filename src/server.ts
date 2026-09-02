@@ -6,6 +6,11 @@ import type { ActionStatus, Actor, DiaryVisibility } from "./types.js";
 const actorSchema = z.enum(["user", "agent"]);
 const dateSchema = z.string().datetime({ offset: true });
 
+export type AuthContext = {
+  actor: Actor;
+  subject: string;
+};
+
 function text(text: string) {
   return { content: [{ type: "text" as const, text }] };
 }
@@ -22,7 +27,7 @@ function toolError(error: unknown) {
   return { isError: true, ...text(message) };
 }
 
-export function createOurHomeServer(store: JsonStore): McpServer {
+export function createOurHomeServer(store: JsonStore, auth: AuthContext = { actor: "agent", subject: "agent" }): McpServer {
   const server = new McpServer(
     { name: "our-home", version: "0.1.0" },
     {
@@ -128,7 +133,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
       title: "Record a life observation",
       description: "Store an explicitly supplied observation from the user, phone, screen, calendar, or another adapter. This tool does not claim the observation is independently verified.",
       inputSchema: {
-        kind: z.enum(["manual_status", "device_presence", "screen_app", "calendar", "weather", "note"]),
+        kind: z.enum(["manual_status", "device_presence", "screen_app", "app_timeline", "steps", "calendar", "weather", "note"]),
         label: z.string().trim().min(1).max(200),
         value: z.string().trim().max(2_000).optional(),
         observedAt: dateSchema,
@@ -157,7 +162,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
       title: "List life observations",
       description: "List explicitly recorded life observations. Expired observations are excluded by default.",
       inputSchema: {
-        kind: z.enum(["manual_status", "device_presence", "screen_app", "calendar", "weather", "note"]).optional(),
+        kind: z.enum(["manual_status", "device_presence", "screen_app", "app_timeline", "steps", "calendar", "weather", "note"]).optional(),
         source: z.enum(["user", "phone", "screen", "calendar", "system", "mock"]).optional(),
         includeExpired: z.boolean().default(false),
         limit: z.number().int().min(1).max(200).default(50),
@@ -166,13 +171,17 @@ export function createOurHomeServer(store: JsonStore): McpServer {
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ kind, source, includeExpired, limit }) => {
-      const timestamp = new Date().toISOString();
+      const timestampMs = Date.now();
       const observations = store
         .snapshot()
         .observations
         .filter((item) => !kind || item.kind === kind)
         .filter((item) => !source || item.source === source)
-        .filter((item) => includeExpired || !item.expiresAt || item.expiresAt >= timestamp)
+        .filter((item) => {
+          if (includeExpired || !item.expiresAt) return true;
+          const expiresAtMs = Date.parse(item.expiresAt);
+          return Number.isFinite(expiresAtMs) && expiresAtMs >= timestampMs;
+        })
         .slice(0, limit);
       return structured({ observations, dataSource: "local-mock" as const });
     },
@@ -338,15 +347,14 @@ export function createOurHomeServer(store: JsonStore): McpServer {
       inputSchema: {
         title: z.string().trim().min(1).max(200),
         body: z.string().trim().min(1).max(20_000),
-        author: actorSchema,
         visibility: z.enum(["private", "shared"]),
       },
       outputSchema: z.object({ entry: z.record(z.string(), z.unknown()), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ title, body, author, visibility }) => {
+    async ({ title, body, visibility }) => {
       try {
-        const entry = await store.addDiary({ title, body, author, visibility });
+        const entry = await store.addDiary({ title, body, author: auth.actor, visibility });
         return structured({ entry, dataSource: "local-mock" as const });
       } catch (error) {
         return toolError(error);
@@ -466,15 +474,14 @@ export function createOurHomeServer(store: JsonStore): McpServer {
         title: z.string().trim().min(1).max(200),
         description: z.string().trim().max(5_000).optional(),
         occurredAt: dateSchema,
-        proposedBy: actorSchema,
         importance: z.enum(["ordinary", "major"]),
       },
       outputSchema: z.object({ event: z.record(z.string(), z.unknown()), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ title, description, occurredAt, proposedBy, importance }) => {
+    async ({ title, description, occurredAt, importance }) => {
       try {
-        const event = await store.proposeRelationshipEvent({ title, description, occurredAt, proposedBy, importance });
+        const event = await store.proposeRelationshipEvent({ title, description, occurredAt, proposedBy: auth.actor, importance });
         return structured({ event, dataSource: "local-mock" as const });
       } catch (error) {
         return toolError(error);
@@ -487,13 +494,13 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     {
       title: "Approve a relationship event",
       description: "Record one person's approval. Major events become approved only after both user and agent approve.",
-      inputSchema: { eventId: z.string().trim().min(1), approvedBy: actorSchema },
+      inputSchema: { eventId: z.string().trim().min(1) },
       outputSchema: z.object({ event: z.record(z.string(), z.unknown()), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ eventId, approvedBy }) => {
+    async ({ eventId }) => {
       try {
-        const event = await store.approveRelationshipEvent(eventId, approvedBy as Actor);
+        const event = await store.approveRelationshipEvent(eventId, auth.actor, auth.subject);
         return structured({ event, dataSource: "local-mock" as const });
       } catch (error) {
         return toolError(error);

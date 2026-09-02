@@ -2,7 +2,7 @@
 
 独立的 Our Home 生活系统 MCP 和 Life Loop，既可以供 Hermes Agent 调用，也可以独立运行。它不修改 Hermes 核心，也不包含前端。
 
-当前版本使用本地 JSON 数据层，目的是先固定 MCP 工具契约、持续上下文和数据真实性边界。真实 Home Backend 接入后，可以替换 `JsonStore`，不需要改变 Hermes 侧工具名称。
+当前版本使用 SQLite 数据层，server 和独立 worker 可以安全共享同一个数据库文件。真实 Home Backend 接入后，可以替换 `JsonStore`，不需要改变 Hermes 侧工具名称。
 
 ## 重要边界
 
@@ -63,7 +63,7 @@ npm run check
 
 ```bash
 npm run build
-OUR_HOME_DATA_FILE=./data/our-home.json \
+OUR_HOME_DATA_FILE=./data/our-home.sqlite \
 OUR_HOME_WORKER_INTERVAL_MS=60000 \
 npm run worker
 ```
@@ -83,7 +83,7 @@ npm run dev:worker
 
 发送出去的事件类型是 `our_home.proactive_message`。它是通用 Webhook，不绑定 Telegram、微信或其他具体渠道；后续可以单独增加手机通知适配器。
 
-手机端可以通过受保护的 HTTP API 上报状态：
+手机端可以通过受保护的 HTTPS API 上报状态（仅 localhost 开发地址允许 HTTP）：
 
 首次安装先注册设备（注册需要同一个 `OUR_HOME_INGEST_TOKEN`）：
 
@@ -125,7 +125,7 @@ npm run build
   "command": "node",
   "args": ["/absolute/path/to/our-home-mcp/dist/index.js"],
   "env": {
-    "OUR_HOME_DATA_FILE": "/absolute/path/to/our-home-data.json"
+    "OUR_HOME_DATA_FILE": "/absolute/path/to/our-home-data.sqlite"
   }
 }
 ```
@@ -149,7 +149,7 @@ npm run dev
 
 默认不开放跨域；只有浏览器客户端确实需要调用时，才设置 `OUR_HOME_MCP_CORS_ORIGIN`。
 
-当前 Token 是服务级别的共享密钥，不是完整的用户级鉴权；在接入真实个人数据或公网部署前，必须再增加用户身份、权限范围和写入审批。
+MCP HTTP 模式支持 `OUR_HOME_MCP_USER_TOKEN` 和 `OUR_HOME_MCP_AGENT_TOKEN` 两个不同的认证上下文；`home.write_diary`、`home.propose_relationship_event` 和 `home.approve_relationship_event` 的身份来自认证上下文，不接受调用参数伪造。公网部署必须配置不同的 user/agent token，并在 HTTPS 反向代理后运行。
 
 ## 数据边界
 
@@ -161,7 +161,9 @@ npm run dev
 
 ## 后续替换点
 
-1. 用真实数据库替换 `src/store.ts` 的 `JsonStore`。
+1. 用真实 Home Backend 替换 `src/store.ts` 的 `JsonStore`。
 2. 增加 Hermes 事件只读适配器，将 Tool Call、Session、任务活动归类为 `REALITY`。
 3. 给写工具增加用户级鉴权和更细粒度审批。
 4. 再决定是否加入 MCP Apps UI；当前不需要可视化组件。
+
+<!-- test push from Hermes Agent v0.21.0 -->

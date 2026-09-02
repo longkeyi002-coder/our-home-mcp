@@ -1,10 +1,14 @@
 package com.hermes.companion
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.Build
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -40,15 +44,14 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import com.hermes.companion.data.HeartbeatRequest
+import com.hermes.companion.data.CompanionCapture
 import com.hermes.companion.data.ObservationRequest
-import com.hermes.companion.data.PeriodicHeartbeatWorker
 import com.hermes.companion.data.QueueRepository
 import com.hermes.companion.data.SettingsRepository
+import com.hermes.companion.data.UploadWorker
 import com.hermes.companion.platform.DeviceStatus
 import com.hermes.companion.platform.DeviceStatusReader
 import java.time.Instant
-import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -72,16 +75,19 @@ data class CompanionUiState(
     val lastError: String = "",
     val usageAccess: Boolean = false,
     val diagnostics: Boolean = false,
+    val realtimeEnabled: Boolean = false,
+    val timelineCount: Int = 0,
+    val steps: Long? = null,
 )
 
 class CompanionViewModel(private val appContext: android.content.Context) : ViewModel() {
     private val settings = SettingsRepository(appContext)
     private val queue = QueueRepository.create(appContext)
-    private val _state = MutableStateFlow(CompanionUiState(deviceId = settings.deviceId(), serverUrl = settings.serverUrl(), lastHeartbeat = settings.lastHeartbeat()))
+    private val _state = MutableStateFlow(CompanionUiState(deviceId = settings.deviceId(), serverUrl = settings.serverUrl(), lastHeartbeat = settings.lastHeartbeat(), realtimeEnabled = settings.realtimeEnabled()))
     val state: StateFlow<CompanionUiState> = _state
 
     init {
-        PeriodicHeartbeatWorker.schedule(appContext)
+        UploadWorker.schedulePeriodic(appContext)
         refresh()
     }
 
@@ -97,6 +103,7 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
                 lastHeartbeat = settings.lastHeartbeat(),
                 lastError = settings.lastError(),
                 usageAccess = DeviceStatusReader.hasUsageAccess(appContext),
+                realtimeEnabled = settings.realtimeEnabled(),
             )
         }
     }
@@ -109,21 +116,16 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
 
     fun sendHeartbeat() {
         viewModelScope.launch {
-            val now = Instant.now().toString()
-            val status = DeviceStatusReader.read(appContext)
-            queue.enqueueHeartbeat(HeartbeatRequest(
-                deviceId = settings.deviceId(),
-                batteryPercent = status.batteryPercent,
-                charging = status.charging,
-                appVersion = BuildConfig.VERSION_NAME,
-                connectivityState = if (status.online) "online" else "offline",
-                foregroundPackage = status.foregroundPackage,
-                observedAt = now,
-                clientEventId = UUID.randomUUID().toString(),
-            ))
-            settings.recordHeartbeat(System.currentTimeMillis())
-            val result = queue.uploadPending()
-            _state.value = _state.value.copy(lastHeartbeat = System.currentTimeMillis(), connected = result.error == null, lastError = result.error.orEmpty())
+            val captured = CompanionCapture.captureAndUpload(appContext)
+            val result = captured.upload
+            if (result.error == null) settings.recordHeartbeat(System.currentTimeMillis())
+            _state.value = _state.value.copy(
+                lastHeartbeat = if (result.error == null) System.currentTimeMillis() else _state.value.lastHeartbeat,
+                connected = result.error == null,
+                lastError = result.error.orEmpty(),
+                timelineCount = captured.timelineCount,
+                steps = captured.steps,
+            )
             refresh()
         }
     }
@@ -144,6 +146,14 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
     }
 
     fun toggleDiagnostics() { _state.value = _state.value.copy(diagnostics = !_state.value.diagnostics) }
+
+    fun toggleRealtime() {
+        val enabled = !settings.realtimeEnabled()
+        settings.saveRealtimeEnabled(enabled)
+        val intent = Intent(appContext, RealtimeCaptureService::class.java)
+        if (enabled) ContextCompat.startForegroundService(appContext, intent) else appContext.stopService(intent)
+        refresh()
+    }
 
     companion object {
         fun factory(context: android.content.Context) = object : ViewModelProvider.Factory {
@@ -177,6 +187,19 @@ fun HermesCompanionApp(model: CompanionViewModel) {
             OutlinedButton(onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }, modifier = Modifier.fillMaxWidth()) {
                 Text(if (state.usageAccess) "使用权限: 已授予" else "使用权限: 打开设置")
             }
+            if (Build.VERSION.SDK_INT >= 29 && ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) != PackageManager.PERMISSION_GRANTED) {
+                OutlinedButton(onClick = { (context as? ComponentActivity)?.requestPermissions(arrayOf(Manifest.permission.ACTIVITY_RECOGNITION), 1001) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("授予步数权限")
+                }
+            }
+            if (Build.VERSION.SDK_INT >= 33 && ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                OutlinedButton(onClick = { (context as? ComponentActivity)?.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1002) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("授予通知权限")
+                }
+            }
+            Button(onClick = model::toggleRealtime, modifier = Modifier.fillMaxWidth()) {
+                Text(if (state.realtimeEnabled) "关闭实时模式" else "开启实时模式")
+            }
             TextButton(onClick = model::toggleDiagnostics) { Text(if (state.diagnostics) "隐藏诊断信息" else "调试 / 诊断") }
             if (state.diagnostics) Diagnostics(state)
             SettingsPanel(state, model)
@@ -194,6 +217,8 @@ private fun InfoCard(state: CompanionUiState) {
             Text("Foreground App: ${state.device.foregroundPackage ?: if (state.usageAccess) "not detected" else "需要权限"}")
             Text("Last heartbeat: ${state.lastHeartbeat.asTime()}")
             Text("Pending events: ${state.pending}")
+            Text("Timeline entries: ${state.timelineCount}")
+            Text("Today steps: ${state.steps ?: "permission or sensor unavailable"}")
         }
     }
 }
@@ -204,7 +229,7 @@ private fun SettingsPanel(state: CompanionUiState, model: CompanionViewModel) {
     var token by rememberSaveable { mutableStateOf("") }
     HorizontalDivider()
     Text("设置", style = MaterialTheme.typography.titleMedium)
-    OutlinedTextField(server, { server = it }, label = { Text("服务器地址 (HTTP)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(server, { server = it }, label = { Text("服务器地址 (HTTPS)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     OutlinedTextField(token, { token = it }, label = { Text("注册令牌") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
     Text("Device: ${state.deviceId}")
     Button(onClick = { model.saveServer(server, token); model.sendHeartbeat() }, modifier = Modifier.fillMaxWidth()) { Text("保存并测试连接") }

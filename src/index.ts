@@ -3,16 +3,16 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { createOurHomeServer } from "./server.js";
+import { createOurHomeServer, type AuthContext } from "./server.js";
 import { JsonStore, parseBoolean } from "./store.js";
 
 const transportMode = process.env.OUR_HOME_MCP_TRANSPORT ?? "stdio";
-const dataFile = process.env.OUR_HOME_DATA_FILE ?? "./data/our-home.json";
+const dataFile = process.env.OUR_HOME_DATA_FILE ?? "./data/our-home.sqlite";
 const seed = parseBoolean(process.env.OUR_HOME_SEED, true);
 const store = await JsonStore.open(dataFile, seed);
 
 const phoneObservationSchema = z.object({
-  kind: z.enum(["manual_status", "device_presence", "screen_app", "calendar", "weather", "note"]),
+  kind: z.enum(["manual_status", "device_presence", "screen_app", "app_timeline", "steps", "calendar", "weather", "note"]),
   label: z.string().trim().min(1).max(200),
   value: z.string().trim().max(2_000).optional(),
   observedAt: z.string().datetime({ offset: true }).optional(),
@@ -56,12 +56,24 @@ async function startHttpServer(): Promise<void> {
   const host = process.env.OUR_HOME_MCP_HOST ?? "127.0.0.1";
   const port = Number(process.env.OUR_HOME_MCP_PORT ?? "8787");
   const token = process.env.OUR_HOME_MCP_TOKEN;
+  const userToken = process.env.OUR_HOME_MCP_USER_TOKEN;
+  const agentToken = process.env.OUR_HOME_MCP_AGENT_TOKEN;
+  const legacyActor = process.env.OUR_HOME_MCP_ACTOR ?? "agent";
+  if (legacyActor !== "user" && legacyActor !== "agent") throw new Error("OUR_HOME_MCP_ACTOR must be user or agent");
+  const legacySubject = process.env.OUR_HOME_MCP_SUBJECT ?? `legacy-${legacyActor}`;
+  const tokenContexts: Array<{ token: string; auth: AuthContext }> = [];
+  if (token) tokenContexts.push({ token, auth: { actor: legacyActor, subject: legacySubject } });
+  if (userToken) tokenContexts.push({ token: userToken, auth: { actor: "user", subject: process.env.OUR_HOME_MCP_USER_SUBJECT ?? "user" } });
+  if (agentToken) tokenContexts.push({ token: agentToken, auth: { actor: "agent", subject: process.env.OUR_HOME_MCP_AGENT_SUBJECT ?? "agent" } });
+  if (new Set(tokenContexts.map((entry) => entry.token)).size !== tokenContexts.length) {
+    throw new Error("MCP actor tokens must be unique");
+  }
   const corsOrigin = process.env.OUR_HOME_MCP_CORS_ORIGIN;
 
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
     throw new Error("OUR_HOME_MCP_PORT must be a valid TCP port");
   }
-  if (host !== "127.0.0.1" && host !== "localhost" && !token) {
+  if (host !== "127.0.0.1" && host !== "localhost" && tokenContexts.length === 0) {
     throw new Error("Refusing non-local HTTP binding without OUR_HOME_MCP_TOKEN");
   }
 
@@ -102,7 +114,8 @@ async function startHttpServer(): Promise<void> {
       return;
     }
 
-    if (token && request.headers.authorization !== `Bearer ${token}`) {
+    const auth = authenticateMcpRequest(request, tokenContexts);
+    if (tokenContexts.length > 0 && !auth) {
       response.writeHead(401, { "content-type": "application/json", "www-authenticate": "Bearer" }).end(JSON.stringify({ error: "Unauthorized" }));
       return;
     }
@@ -113,7 +126,7 @@ async function startHttpServer(): Promise<void> {
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
       });
-      const server = createOurHomeServer(store);
+      const server = createOurHomeServer(store, auth ?? { actor: "agent", subject: "local-http" });
       response.on("close", () => void transport.close());
       await server.connect(transport);
       await transport.handleRequest(request, response, body);
@@ -130,6 +143,22 @@ async function startHttpServer(): Promise<void> {
   httpServer.listen(port, host, () => {
     process.stderr.write(`Our Home MCP listening at http://${host}:${port}/mcp\n`);
   });
+}
+
+function authenticateMcpRequest(
+  request: import("node:http").IncomingMessage,
+  tokenContexts: Array<{ token: string; auth: AuthContext }>,
+): AuthContext | undefined {
+  const authorization = request.headers.authorization;
+  const token = authorization?.startsWith("Bearer ") ? authorization.slice("Bearer ".length) : undefined;
+  if (!token) return undefined;
+  return tokenContexts.find((entry) => constantTimeEqual(token, entry.token))?.auth;
+}
+
+function constantTimeEqual(left: string, right: string): boolean {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
 }
 
 async function handlePhoneObservations(
@@ -196,12 +225,12 @@ async function handlePhoneHeartbeat(
       ...(parsed.data.clientEventId === undefined ? {} : { clientEventId: parsed.data.clientEventId }),
     };
     const result = await store.recordPhoneHeartbeat({
+      observedAt,
       deviceId: parsed.data.deviceId,
       status: parsed.data.status,
-      observedAt,
-      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
       clientEventId: parsed.data.clientEventId,
       foregroundPackage: parsed.data.foregroundPackage,
+      metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     });
     response.writeHead(result.created ? 201 : 200, { "content-type": "application/json" }).end(JSON.stringify({
       observation: result.observation,
