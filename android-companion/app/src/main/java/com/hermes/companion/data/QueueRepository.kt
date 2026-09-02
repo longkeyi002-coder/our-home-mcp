@@ -67,7 +67,7 @@ class QueueRepository private constructor(
                 val attempts = event.attempts + 1
                 val delay = min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * (1L shl min(attempts, 8)))
                 val message = error.safeMessage()
-                firstError ??= message
+                if (firstError == null) firstError = message
                 dao.recordFailure(event.id, message, now + delay)
                 settings.recordApiError(message)
             }
