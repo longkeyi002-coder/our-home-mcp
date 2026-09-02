@@ -162,8 +162,8 @@ fun HermesCompanionApp(model: CompanionViewModel) {
             modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("Hermes Companion", style = MaterialTheme.typography.headlineMedium)
-            Text(if (state.connected) "Connection: Connected" else "Connection: Offline", color = if (state.connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+            Text("赫尔墨斯伴侣", style = MaterialTheme.typography.headlineMedium)
+            Text(if (state.connected) "连接状态: 已连接" else "连接状态: 离线", color = if (state.connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
             InfoCard(state)
             Text("手动状态", style = MaterialTheme.typography.titleMedium)
             val statuses = listOf("在家", "上班", "通勤", "忙", "休息", "睡觉", "累")
@@ -173,11 +173,11 @@ fun HermesCompanionApp(model: CompanionViewModel) {
             var showCustom by rememberSaveable { mutableStateOf(false) }
             OutlinedButton(onClick = { showCustom = true }, modifier = Modifier.fillMaxWidth()) { Text("自定义状态") }
             if (showCustom) CustomStatusDialog(onDismiss = { showCustom = false }, onSend = { showCustom = false; model.sendManualStatus(it) })
-            Button(onClick = model::sendHeartbeat, modifier = Modifier.fillMaxWidth()) { Text("Send heartbeat now") }
+            Button(onClick = model::sendHeartbeat, modifier = Modifier.fillMaxWidth()) { Text("立即发送心跳") }
             OutlinedButton(onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (state.usageAccess) "Usage Access: granted" else "Usage Access: open settings")
+                Text(if (state.usageAccess) "使用权限: 已授予" else "使用权限: 打开设置")
             }
-            TextButton(onClick = model::toggleDiagnostics) { Text(if (state.diagnostics) "Hide Diagnostics" else "Debug / Diagnostics") }
+            TextButton(onClick = model::toggleDiagnostics) { Text(if (state.diagnostics) "隐藏诊断信息" else "调试 / 诊断") }
             if (state.diagnostics) Diagnostics(state)
             SettingsPanel(state, model)
             LaunchedEffect(Unit) { model.refresh() }
@@ -191,7 +191,7 @@ private fun InfoCard(state: CompanionUiState) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Server: ${state.serverUrl.ifBlank { "Not configured" }}")
             Text("Battery: ${state.device.batteryPercent}%${if (state.device.charging) " · charging" else ""}")
-            Text("Foreground App: ${state.device.foregroundPackage ?: if (state.usageAccess) "not detected" else "Permission required"}")
+            Text("Foreground App: ${state.device.foregroundPackage ?: if (state.usageAccess) "not detected" else "需要权限"}")
             Text("Last heartbeat: ${state.lastHeartbeat.asTime()}")
             Text("Pending events: ${state.pending}")
         }
@@ -203,11 +203,11 @@ private fun SettingsPanel(state: CompanionUiState, model: CompanionViewModel) {
     var server by rememberSaveable(state.serverUrl) { mutableStateOf(state.serverUrl) }
     var token by rememberSaveable { mutableStateOf("") }
     HorizontalDivider()
-    Text("Settings", style = MaterialTheme.typography.titleMedium)
-    OutlinedTextField(server, { server = it }, label = { Text("Server HTTPS Base URL") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-    OutlinedTextField(token, { token = it }, label = { Text("Registration token") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+    Text("设置", style = MaterialTheme.typography.titleMedium)
+    OutlinedTextField(server, { server = it }, label = { Text("服务器地址 (HTTP)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(token, { token = it }, label = { Text("注册令牌") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
     Text("Device: ${state.deviceId}")
-    Button(onClick = { model.saveServer(server, token); model.sendHeartbeat() }, modifier = Modifier.fillMaxWidth()) { Text("Save and connection test") }
+    Button(onClick = { model.saveServer(server, token); model.sendHeartbeat() }, modifier = Modifier.fillMaxWidth()) { Text("保存并测试连接") }
 }
 
 @Composable
@@ -230,10 +230,10 @@ private fun CustomStatusDialog(onDismiss: () -> Unit, onSend: (String) -> Unit) 
     var value by remember { mutableStateOf("") }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Custom status") },
-        text = { OutlinedTextField(value, { value = it }, label = { Text("Status") }, singleLine = true) },
-        confirmButton = { TextButton(onClick = { if (value.isNotBlank()) onSend(value.trim()) }) { Text("Send") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        title = { Text("自定义状态") },
+        text = { OutlinedTextField(value, { value = it }, label = { Text("状态") }, singleLine = true) },
+        confirmButton = { TextButton(onClick = { if (value.isNotBlank()) onSend(value.trim()) }) { Text("发送") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
     )
 }
 
