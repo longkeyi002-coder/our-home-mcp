@@ -165,3 +165,5 @@ npm run dev
 2. 增加 Hermes 事件只读适配器，将 Tool Call、Session、任务活动归类为 `REALITY`。
 3. 给写工具增加用户级鉴权和更细粒度审批。
 4. 再决定是否加入 MCP Apps UI；当前不需要可视化组件。
+
+<!-- test push from Hermes Agent v0.21.0 -->
