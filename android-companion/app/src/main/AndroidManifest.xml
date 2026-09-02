@@ -4,6 +4,7 @@
     <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" tools:ignore="ProtectedPermissions" />
 
     <application
+        android:name=".HermesCompanionApplication"
         android:allowBackup="false"
         android:label="Hermes Companion"
         android:networkSecurityConfig="@xml/network_security_config"

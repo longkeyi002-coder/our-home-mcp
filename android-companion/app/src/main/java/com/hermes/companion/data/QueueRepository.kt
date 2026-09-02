@@ -15,16 +15,18 @@ class QueueRepository private constructor(
 ) {
     private val json = Json { encodeDefaults = true }
 
-    suspend fun enqueueHeartbeat(request: HeartbeatRequest) = enqueue(
+    suspend fun enqueueHeartbeat(request: HeartbeatRequest, scheduleUpload: Boolean = true) = enqueue(
         type = TYPE_HEARTBEAT,
         payload = json.encodeToString(request),
         dedupeKey = "heartbeat:${request.clientEventId}",
+        scheduleUpload = scheduleUpload,
     )
 
-    suspend fun enqueueObservation(request: ObservationRequest) = enqueue(
+    suspend fun enqueueObservation(request: ObservationRequest, scheduleUpload: Boolean = true) = enqueue(
         type = TYPE_OBSERVATION,
         payload = json.encodeToString(request),
         dedupeKey = "observation:${request.deviceId}:${request.observedAt}:${request.kind}:${request.value.orEmpty()}",
+        scheduleUpload = scheduleUpload,
     )
 
     suspend fun pendingCount(): Int = dao.count()
@@ -42,7 +44,7 @@ class QueueRepository private constructor(
                 val response = api.register("Bearer ${bootstrap!!}", RegisterRequest(settings.deviceId(), BuildConfig.VERSION_NAME))
                 settings.saveDeviceToken(response.token)
                 "Bearer ${response.token}"
-            } else "Bearer $deviceToken"
+            } else "Bearer ${deviceToken}"
         } catch (error: Exception) {
             return fail(error.safeMessage())
         }
@@ -73,9 +75,9 @@ class QueueRepository private constructor(
         return UploadResult(0, message)
     }
 
-    private suspend fun enqueue(type: String, payload: String, dedupeKey: String) {
+    private suspend fun enqueue(type: String, payload: String, dedupeKey: String, scheduleUpload: Boolean) {
         dao.insert(PendingEvent(UUID.randomUUID().toString(), type, payload, dedupeKey, System.currentTimeMillis()))
-        UploadWorker.enqueue(settings.context)
+        if (scheduleUpload) UploadWorker.enqueue(settings.context)
     }
 
     data class UploadResult(val uploaded: Int, val error: String?)

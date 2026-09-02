@@ -44,7 +44,6 @@ import com.hermes.companion.data.HeartbeatRequest
 import com.hermes.companion.data.ObservationRequest
 import com.hermes.companion.data.QueueRepository
 import com.hermes.companion.data.SettingsRepository
-import com.hermes.companion.data.UploadWorker
 import com.hermes.companion.platform.DeviceStatus
 import com.hermes.companion.platform.DeviceStatusReader
 import java.time.Instant
@@ -81,7 +80,6 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
     val state: StateFlow<CompanionUiState> = _state
 
     init {
-        UploadWorker.schedulePeriodic(appContext)
         refresh()
     }
 
