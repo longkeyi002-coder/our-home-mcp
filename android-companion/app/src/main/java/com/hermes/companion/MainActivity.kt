@@ -165,7 +165,7 @@ fun HermesCompanionApp(model: CompanionViewModel) {
             Text("Hermes Companion", style = MaterialTheme.typography.headlineMedium)
             Text(if (state.connected) "Connection: Connected" else "Connection: Offline", color = if (state.connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
             InfoCard(state)
-            Text("Manual Status", style = MaterialTheme.typography.titleMedium)
+            Text("手动状态", style = MaterialTheme.typography.titleMedium)
             val statuses = listOf("在家", "上班", "通勤", "忙", "休息", "睡觉", "累")
             LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.height(180.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(statuses) { label -> Button(onClick = { model.sendManualStatus(label) }, modifier = Modifier.fillMaxWidth()) { Text(label) } }
