@@ -1,24 +1,28 @@
 package com.hermes.companion.data
 
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 
 @Serializable
-data class RegisterRequest(val deviceId: String, val appVersion: String)
+data class RegisterRequest(
+    @SerialName("deviceId") val deviceId: String,
+    @SerialName("appVersion") val appVersion: String,
+)
 
 @Serializable
 data class RegisterResponse(val deviceId: String, val token: String)
 
 @Serializable
 data class HeartbeatRequest(
-    val deviceId: String,
-    val status: String = "online",
-    val batteryPercent: Int,
-    val charging: Boolean,
-    val appVersion: String,
-    val connectivityState: String,
-    val foregroundPackage: String? = null,
-    val observedAt: String,
-    val clientEventId: String,
+    @SerialName("deviceId") val deviceId: String,
+    @SerialName("status") val status: String = "online",
+    @SerialName("batteryPercent") val batteryPercent: Int,
+    @SerialName("charging") val charging: Boolean,
+    @SerialName("appVersion") val appVersion: String,
+    @SerialName("connectivityState") val connectivityState: String,
+    @SerialName("foregroundPackage") val foregroundPackage: String? = null,
+    @SerialName("observedAt") val observedAt: String,
+    @SerialName("clientEventId") val clientEventId: String,
 )
 
 @Serializable
@@ -29,6 +33,13 @@ data class ObservationRequest(
     val observedAt: String,
     val deviceId: String,
     val metadata: Map<String, String>? = null,
+)
+
+data class AppTimelineEntry(
+    val packageName: String,
+    val startedAt: String,
+    val endedAt: String?,
+    val durationMs: Long,
 )
 
 @Serializable
