@@ -21,3 +21,4 @@ object HeartbeatRequestFactory {
         observedAt = observedAt,
         clientEventId = clientEventId,
     )
+}
