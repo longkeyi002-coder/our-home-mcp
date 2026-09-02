@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.hermes.companion.data.HeartbeatRequest
 import com.hermes.companion.data.ObservationRequest
+import com.hermes.companion.data.PeriodicHeartbeatWorker
 import com.hermes.companion.data.QueueRepository
 import com.hermes.companion.data.SettingsRepository
 import com.hermes.companion.platform.DeviceStatus
@@ -80,6 +81,7 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
     val state: StateFlow<CompanionUiState> = _state
 
     init {
+        PeriodicHeartbeatWorker.schedule(appContext)
         refresh()
     }
 

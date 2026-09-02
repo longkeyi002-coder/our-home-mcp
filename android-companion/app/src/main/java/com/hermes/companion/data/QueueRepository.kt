@@ -7,6 +7,7 @@ import java.util.UUID
 import kotlin.math.min
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import retrofit2.HttpException
 
 class QueueRepository private constructor(
     private val dao: PendingEventDao,
@@ -50,6 +51,7 @@ class QueueRepository private constructor(
         }
 
         var uploaded = 0
+        var firstError: String? = null
         for (event in dao.ready(now, 20)) {
             try {
                 when (event.type) {
@@ -61,13 +63,16 @@ class QueueRepository private constructor(
                 uploaded += 1
                 settings.recordSuccessfulUpload(System.currentTimeMillis())
             } catch (error: Exception) {
+                if (error is HttpException && error.code() == 401) settings.clearDeviceToken()
                 val attempts = event.attempts + 1
                 val delay = min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * (1L shl min(attempts, 8)))
-                dao.recordFailure(event.id, error.safeMessage(), now + delay)
-                settings.recordApiError(error.safeMessage())
+                val message = error.safeMessage()
+                firstError ??= message
+                dao.recordFailure(event.id, message, now + delay)
+                settings.recordApiError(message)
             }
         }
-        return UploadResult(uploaded, null)
+        return UploadResult(uploaded, firstError)
     }
 
     private fun fail(message: String): UploadResult {

@@ -19,7 +19,7 @@ class ApiClientTest {
 
     @Test
     fun heartbeatSerializationUsesServerFieldNames() {
-        val request = HeartbeatRequest("android-test", batteryPercent = 82, charging = true, appVersion = "0.1.0", connectivityState = "online", observedAt = "2026-09-02T00:00:00Z", clientEventId = "event-1")
+        val request = HeartbeatRequest("android-test", batteryPercent = 82, charging = true, appVersion = "0.2.0", connectivityState = "online", observedAt = "2026-09-02T00:00:00Z", clientEventId = "event-1")
         val json = Json.encodeToString(request)
         assertEquals(82, Json.parseToJsonElement(json).jsonObject["batteryPercent"]?.toString()?.toInt())
         assertEquals("online", Json.parseToJsonElement(json).jsonObject["connectivityState"]?.toString()?.trim('"'))

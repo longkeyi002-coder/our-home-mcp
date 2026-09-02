@@ -19,6 +19,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 
 @RunWith(AndroidJUnit4::class)
 class QueueRepositoryTest {
@@ -43,6 +44,20 @@ class QueueRepositoryTest {
         repository.enqueueHeartbeat(sampleHeartbeat())
         val result = repository.uploadPending()
         assertEquals(0, result.uploaded)
+        assertNotNull(result.error)
+        assertEquals(1, database.pendingEventDao().count())
+        assertEquals(0, database.pendingEventDao().ready(System.currentTimeMillis(), 20).size)
+    }
+
+    @Test
+    fun duplicateHeartbeatIsQueuedOnlyOnce() = runBlocking {
+        val settings = SettingsRepository(ApplicationProvider.getApplicationContext())
+        val repository = QueueRepository.forTest(database.pendingEventDao(), settings) { successfulApi() }
+        val heartbeat = sampleHeartbeat()
+
+        repository.enqueueHeartbeat(heartbeat)
+        repository.enqueueHeartbeat(heartbeat)
+
         assertEquals(1, database.pendingEventDao().count())
     }
 
@@ -58,7 +73,7 @@ class QueueRepositoryTest {
         assertEquals(0, database.pendingEventDao().count())
     }
 
-    private fun sampleHeartbeat() = HeartbeatRequest("android-test", batteryPercent = 82, charging = false, appVersion = "0.1.0", connectivityState = "online", observedAt = "2026-09-02T00:00:00Z", clientEventId = "event-${System.nanoTime()}")
+    private fun sampleHeartbeat() = HeartbeatRequest("android-test", batteryPercent = 82, charging = false, appVersion = "0.2.0", connectivityState = "online", observedAt = "2026-09-02T00:00:00Z", clientEventId = "event-${System.nanoTime()}")
 
     private fun successfulApi() = object : HermesApi {
         override suspend fun register(authorization: String, request: RegisterRequest) = RegisterResponse(request.deviceId, "device-token")

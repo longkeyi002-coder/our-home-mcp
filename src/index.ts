@@ -188,16 +188,6 @@ async function handlePhoneHeartbeat(
       return;
     }
     const observedAt = parsed.data.observedAt ?? new Date().toISOString();
-    const existing = parsed.data.clientEventId
-      ? store.snapshot().observations.find((item) => item.deviceId === parsed.data.deviceId && item.metadata?.clientEventId === parsed.data.clientEventId)
-      : undefined;
-    if (existing) {
-      const foregroundObservation = parsed.data.foregroundPackage
-        ? store.snapshot().observations.find((item) => item.kind === "screen_app" && item.deviceId === parsed.data.deviceId && item.observedAt === observedAt && item.value === parsed.data.foregroundPackage)
-        : undefined;
-      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ observation: existing, foregroundObservation, dataSource: "phone-ingest" }));
-      return;
-    }
     const metadata = {
       ...(parsed.data.batteryPercent === undefined ? {} : { batteryPercent: parsed.data.batteryPercent }),
       ...(parsed.data.charging === undefined ? {} : { charging: parsed.data.charging }),
@@ -205,29 +195,19 @@ async function handlePhoneHeartbeat(
       ...(parsed.data.connectivityState === undefined ? {} : { connectivityState: parsed.data.connectivityState }),
       ...(parsed.data.clientEventId === undefined ? {} : { clientEventId: parsed.data.clientEventId }),
     };
-    const observation = await store.recordObservation({
-      kind: "device_presence",
-      label: `手机 ${parsed.data.status}`,
-      value: parsed.data.status,
-      observedAt,
-      source: "phone",
-      confidence: "observed",
+    const result = await store.recordPhoneHeartbeat({
       deviceId: parsed.data.deviceId,
+      status: parsed.data.status,
+      observedAt,
       metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
+      clientEventId: parsed.data.clientEventId,
+      foregroundPackage: parsed.data.foregroundPackage,
     });
-    let foregroundObservation;
-    if (parsed.data.foregroundPackage) {
-      foregroundObservation = await store.recordObservation({
-        kind: "screen_app",
-        label: "当前前台应用包名",
-        value: parsed.data.foregroundPackage,
-        observedAt,
-        source: "phone",
-        confidence: "observed",
-        deviceId: parsed.data.deviceId,
-      });
-    }
-    response.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({ observation, foregroundObservation, dataSource: "phone-ingest" }));
+    response.writeHead(result.created ? 201 : 200, { "content-type": "application/json" }).end(JSON.stringify({
+      observation: result.observation,
+      foregroundObservation: result.foregroundObservation,
+      dataSource: "phone-ingest",
+    }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Phone heartbeat failed";
     response.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: message }));

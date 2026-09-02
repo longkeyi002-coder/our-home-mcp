@@ -276,6 +276,68 @@ export class JsonStore {
     return observation;
   }
 
+  async recordPhoneHeartbeat(input: {
+    deviceId: string;
+    status: string;
+    observedAt: string;
+    foregroundPackage?: string;
+    metadata?: Record<string, string | number | boolean>;
+    clientEventId?: string;
+  }): Promise<{ observation: LifeObservation; foregroundObservation?: LifeObservation; created: boolean }> {
+    let result!: { observation: LifeObservation; foregroundObservation?: LifeObservation; created: boolean };
+    await this.update((data) => {
+      const existing = input.clientEventId
+        ? data.observations.find(
+            (item) => item.deviceId === input.deviceId && item.metadata?.clientEventId === input.clientEventId,
+          )
+        : undefined;
+      if (existing) {
+        result = {
+          observation: existing,
+          foregroundObservation: data.observations.find(
+            (item) => item.metadata?.heartbeatObservationId === existing.id,
+          ),
+          created: false,
+        };
+        return;
+      }
+
+      const observation: LifeObservation = {
+        id: randomUUID(),
+        kind: "device_presence",
+        label: `手机 ${input.status}`,
+        value: input.status,
+        observedAt: input.observedAt,
+        source: "phone",
+        confidence: "observed",
+        deviceId: input.deviceId,
+        metadata: input.metadata,
+      };
+      const foregroundObservation: LifeObservation | undefined = input.foregroundPackage
+        ? {
+            id: randomUUID(),
+            kind: "screen_app",
+            label: "当前前台应用包名",
+            value: input.foregroundPackage,
+            observedAt: input.observedAt,
+            source: "phone",
+            confidence: "observed",
+            deviceId: input.deviceId,
+            metadata: { heartbeatObservationId: observation.id },
+          }
+        : undefined;
+      data.observations.unshift(...[observation, foregroundObservation].filter((item): item is LifeObservation => Boolean(item)));
+      appendActivity(data, {
+        kind: "observation_recorded",
+        title: "记录一条手机心跳",
+        summary: observation.label,
+        source: "HOME_STATE",
+      });
+      result = { observation, foregroundObservation, created: true };
+    });
+    return structuredClone(result);
+  }
+
   async addRoutine(input: {
     label: string;
     weekdays: number[];
