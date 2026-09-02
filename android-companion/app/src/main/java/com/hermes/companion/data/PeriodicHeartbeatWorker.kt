@@ -14,20 +14,20 @@ class PeriodicHeartbeatWorker(context: Context, params: WorkerParameters) : Coro
     override suspend fun doWork(): Result = runCatching {
         val settings = SettingsRepository(applicationContext)
         val queue = QueueRepository.create(applicationContext)
-        val status = DeviceStatusReader.read(applicationContext)
 
-        queue.enqueueHeartbeat(
-            HeartbeatRequestFactory.create(
-                deviceId = settings.deviceId(),
-                appVersion = BuildConfig.VERSION_NAME,
-                status = status,
-            ),
-            scheduleUpload = false,
+        runHeartbeatCycle(
+            createHeartbeat = {
+                HeartbeatRequestFactory.create(
+                    deviceId = settings.deviceId(),
+                    appVersion = BuildConfig.VERSION_NAME,
+                    status = DeviceStatusReader.read(applicationContext),
+                )
+            },
+            enqueueHeartbeat = { queue.enqueueHeartbeat(it, scheduleUpload = false) },
+            recordHeartbeat = { settings.recordHeartbeat(System.currentTimeMillis()) },
+            uploadPending = { queue.uploadPending().error == null },
+            scheduleRecoveryUpload = { UploadWorker.enqueue(applicationContext) },
         )
-        settings.recordHeartbeat(System.currentTimeMillis())
-
-        val upload = queue.uploadPending()
-        if (upload.error != null) UploadWorker.enqueue(applicationContext)
         Result.success()
     }.getOrElse {
         Result.retry()
@@ -45,4 +45,17 @@ class PeriodicHeartbeatWorker(context: Context, params: WorkerParameters) : Coro
             )
         }
     }
+}
+
+internal suspend fun runHeartbeatCycle(
+    createHeartbeat: () -> HeartbeatRequest,
+    enqueueHeartbeat: suspend (HeartbeatRequest) -> Unit,
+    recordHeartbeat: () -> Unit,
+    uploadPending: suspend () -> Boolean,
+    scheduleRecoveryUpload: () -> Unit,
+) {
+    val heartbeat = createHeartbeat()
+    enqueueHeartbeat(heartbeat)
+    recordHeartbeat()
+    if (!uploadPending()) scheduleRecoveryUpload()
 }
