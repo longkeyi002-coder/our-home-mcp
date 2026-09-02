@@ -4,6 +4,7 @@ import com.hermes.companion.data.ApiClient
 import com.hermes.companion.data.HeartbeatRequest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonObject
 import org.junit.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith

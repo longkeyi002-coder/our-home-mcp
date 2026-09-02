@@ -2,6 +2,7 @@ package com.hermes.companion.data
 
 import android.content.Context
 import androidx.room.Room
+import com.hermes.companion.BuildConfig
 import java.util.UUID
 import kotlin.math.min
 import kotlinx.serialization.encodeToString
