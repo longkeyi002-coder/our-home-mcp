@@ -19,6 +19,9 @@ export type ObservationKind =
 export type ObservationSource = "user" | "phone" | "screen" | "calendar" | "system" | "mock";
 export type ObservationConfidence = "observed" | "declared" | "inferred";
 export type ProactiveCandidateStatus = "pending" | "delivered" | "dismissed";
+export type LifeActivity = "active_on_phone" | "probably_idle" | "charging" | "offline" | "unknown";
+export type DevicePresence = "online" | "screen_on" | "screen_off" | "idle" | "unknown";
+export type ConnectivityState = "online" | "offline" | "unknown";
 
 export interface DiaryEntry {
   id: string;
@@ -92,6 +95,19 @@ export interface LifeObservation {
   metadata?: Record<string, string | number | boolean>;
 }
 
+export interface LifeState {
+  lastObservedAt: string | null;
+  lastPhoneActivityAt: string | null;
+  devicePresence: DevicePresence;
+  foregroundPackage: string | null;
+  batteryPercent: number | null;
+  charging: boolean | null;
+  connectivityState: ConnectivityState;
+  currentActivity: LifeActivity;
+  confidence: number;
+  reasons: string[];
+}
+
 export interface RoutineWindow {
   id: string;
   label: string;
@@ -131,6 +147,7 @@ export interface ProactiveCandidate {
 
 export interface LifeContext {
   observedAt: string;
+  lifeState: LifeState;
   observations: LifeObservation[];
   routines: RoutineWindow[];
   recentHeartbeats: HeartbeatRecord[];

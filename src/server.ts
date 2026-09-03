@@ -105,6 +105,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
       outputSchema: z.object({
         observedAt: z.string(),
         dataSource: z.literal("local-mock"),
+        lifeState: z.record(z.string(), z.unknown()),
         observations: z.array(z.record(z.string(), z.unknown())),
         routines: z.array(z.record(z.string(), z.unknown())),
         recentHeartbeats: z.array(z.record(z.string(), z.unknown())),

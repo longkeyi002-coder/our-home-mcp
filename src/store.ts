@@ -20,6 +20,7 @@ import type {
   RelationshipEvent,
   RoutineWindow,
 } from "./types.js";
+import { deriveLifeState } from "./life-state.js";
 
 const now = () => new Date().toISOString();
 
@@ -188,8 +189,10 @@ export class JsonStore {
 
   getLifeContext(observedAt = now()): LifeContext {
     const data = this.snapshot();
+    const lifeState = deriveLifeState(data.observations, observedAt);
     return {
       observedAt,
+      lifeState,
       observations: data.observations.filter(
         (item) => !item.expiresAt || item.expiresAt >= observedAt,
       ).slice(0, 50),

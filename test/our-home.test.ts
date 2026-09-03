@@ -73,6 +73,29 @@ test("exposes focused read and write tools through MCP", async () => {
   await server.close();
 });
 
+test("home.get_life_context returns the derived life state", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
+  const store = await JsonStore.open(join(directory, "our-home.json"), false);
+  const observedAt = new Date(Date.now() - 30_000).toISOString();
+  await store.recordObservation({
+    kind: "screen_app",
+    label: "当前前台应用包名",
+    value: "com.example.app",
+    observedAt,
+    source: "phone",
+    confidence: "observed",
+  });
+  const { client, server } = await connectedClient(store);
+
+  const result = await client.callTool({ name: "home.get_life_context", arguments: {} });
+  const context = result.structuredContent as { lifeState: { currentActivity: string; foregroundPackage: string | null } };
+  assert.equal(context.lifeState.currentActivity, "active_on_phone");
+  assert.equal(context.lifeState.foregroundPackage, "com.example.app");
+
+  await client.close();
+  await server.close();
+});
+
 test("does not expose private diaries unless explicitly requested", async () => {
   const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
   const store = await JsonStore.open(join(directory, "our-home.json"), false);
