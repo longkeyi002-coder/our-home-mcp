@@ -58,7 +58,7 @@ class ApiClientTest {
     fun tokenRefreshTriggersRegistration() = runTest {
         val calls = mutableListOf<Pair<String?, String>>()
         PushRegistration.handleRefresh("fid-refresh", "token-refresh") { fid, token -> calls += fid to token }
-        assertEquals(listOf("fid-refresh" to "token-refresh"), calls)
+        assertEquals(listOf<Pair<String?, String>>("fid-refresh" to "token-refresh"), calls)
     }
 
     @Test
