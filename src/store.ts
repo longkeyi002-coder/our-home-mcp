@@ -63,7 +63,10 @@ function compactUsageSummaryObservations(data: OurHomeData, asOf = Date.now()): 
     // Only periodic client events are compacted; user/imported summaries remain historical records.
     if (!clientEventId?.startsWith("usage-summary:")) return true;
     const day = typeof item.metadata?.day === "string" ? item.metadata.day : item.observedAt.slice(0, 10);
-    const key = (item.deviceId ?? "") + ":" + day;
+    // Keep one latest periodic summary per device, day, and UTC hour. Content is inserted
+    // newest-first, so the first observation encountered wins its hourly bucket.
+    const hour = Number.isFinite(observedAt) ? new Date(observedAt).toISOString().slice(11, 13) : item.observedAt.slice(11, 13);
+    const key = (item.deviceId ?? "") + ":" + day + ":" + hour;
     if (seenBuckets.has(key)) return false;
     seenBuckets.add(key);
     return true;
