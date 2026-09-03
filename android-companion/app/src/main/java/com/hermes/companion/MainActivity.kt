@@ -1,6 +1,8 @@
 package com.hermes.companion
 
 import android.content.Intent
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.os.Bundle
 import android.os.Build
 import android.Manifest
@@ -46,6 +48,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import com.hermes.companion.data.HeartbeatRequest
+import com.hermes.companion.data.CompanionMode
+import com.hermes.companion.local.LocalMcpServer
 import com.hermes.companion.data.ObservationRequest
 import com.hermes.companion.data.QueueRepository
 import com.hermes.companion.data.SettingsRepository
@@ -90,6 +94,8 @@ data class CompanionUiState(
     val serverUrl: String = "",
     val deviceId: String = "",
     val connected: Boolean = false,
+    val localMode: Boolean = false,
+    val localMcpUrl: String = "",
     val pending: Int = 0,
     val lastSuccessfulUpload: Long = 0,
     val lastManualHeartbeat: Long = 0,
@@ -126,6 +132,8 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
             _state.value = _state.value.copy(
                 device = status,
                 serverUrl = settings.serverUrl(),
+                localMode = settings.isLocalMode(),
+                localMcpUrl = LocalMcpServer.endpoint(appContext),
                 deviceId = settings.deviceId(),
                 pending = queue.pendingCount(),
                 lastSuccessfulUpload = settings.lastSuccessfulUpload(),
@@ -142,6 +150,13 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
     /** Called from Activity.onResume, including when Usage Access Settings closes. */
     fun consumeUsageAccessInitialGuide(): Boolean =
         usageAccessOnboarding.consumeInitialGuide(DeviceStatusReader.hasUsageAccess(appContext))
+
+    fun setMode(mode: CompanionMode) {
+        settings.setMode(mode)
+        LocalMcpServer.ensureForCurrentMode(appContext)
+        if (mode == CompanionMode.CLOUD) UploadWorker.schedulePeriodic(appContext)
+        refresh()
+    }
 
     fun saveServer(value: String, bootstrapToken: String) {
         settings.saveServerUrl(value)
@@ -283,6 +298,7 @@ private fun InfoCard(state: CompanionUiState) {
 
 @Composable
 private fun SettingsPanel(state: CompanionUiState, model: CompanionViewModel) {
+    val context = LocalContext.current
     var server by rememberSaveable(state.serverUrl) { mutableStateOf(state.serverUrl) }
     var token by rememberSaveable { mutableStateOf("") }
     HorizontalDivider()
@@ -290,7 +306,13 @@ private fun SettingsPanel(state: CompanionUiState, model: CompanionViewModel) {
     OutlinedTextField(server, { server = it }, label = { Text("服务器地址 (HTTP)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     OutlinedTextField(token, { token = it }, label = { Text("注册令牌") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
     Text("Device: ${state.deviceId}")
-    Button(onClick = { model.saveAndTestConnection(server, token) }, modifier = Modifier.fillMaxWidth()) { Text("保存并测试连接") }
+    Text("Mode: ${if (state.localMode) "LOCAL" else "CLOUD"}")
+    OutlinedButton(onClick = { model.setMode(CompanionMode.LOCAL) }, modifier = Modifier.fillMaxWidth()) { Text("Use Local MCP Mode") }
+    OutlinedButton(onClick = { model.setMode(CompanionMode.CLOUD) }, modifier = Modifier.fillMaxWidth()) { Text("Use Cloud Mode") }
+    if (state.localMode) {
+        Text(state.localMcpUrl)
+        OutlinedButton(onClick = { (context.getSystemService(ClipboardManager::class.java)).setPrimaryClip(ClipData.newPlainText("Our Home Local MCP", state.localMcpUrl)) }, modifier = Modifier.fillMaxWidth()) { Text("Copy Local MCP URL") }
+    } else Button(onClick = { model.saveAndTestConnection(server, token) }, modifier = Modifier.fillMaxWidth()) { Text("保存并测试连接") }
 }
 
 @Composable
