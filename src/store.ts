@@ -174,6 +174,7 @@ function migrateData(value: unknown): OurHomeData {
     wakeEvents?: OurHomeData["wakeEvents"];
     wakeEngineState?: OurHomeData["wakeEngineState"];
     phoneDeviceRegistrations?: OurHomeData["phoneDeviceRegistrations"];
+    activePhoneDeviceId?: OurHomeData["activePhoneDeviceId"];
   };
   const hasBaseShape =
     Array.isArray(candidate.diaries) &&
@@ -212,6 +213,7 @@ function migrateData(value: unknown): OurHomeData {
     wakeEvents: candidate.wakeEvents ?? [],
     wakeEngineState: candidate.wakeEngineState ?? emptyWakeEngineState(),
     phoneDeviceRegistrations: candidate.phoneDeviceRegistrations ?? [],
+    activePhoneDeviceId: candidate.activePhoneDeviceId ?? candidate.phoneDeviceRegistrations?.find((item) => item.active)?.deviceId,
   };
 }
 
@@ -242,11 +244,14 @@ export class JsonStore {
 
   getLifeContext(observedAt = now()): LifeContext {
     const data = this.snapshot();
-    const lifeState = deriveLifeState(data.observations, observedAt);
+    const activePhoneDeviceId = data.activePhoneDeviceId;
+    const activeObservations = activePhoneDeviceId ? data.observations.filter((item) => item.deviceId === activePhoneDeviceId) : [];
+    const lifeState = deriveLifeState(activeObservations, observedAt);
     return {
       observedAt,
       lifeState,
-      observations: data.observations.filter(
+      activePhoneDeviceId,
+      observations: activeObservations.filter(
         (item) => !item.expiresAt || item.expiresAt >= observedAt,
       ).slice(0, 50),
       routines: data.routines.filter((item) => item.enabled),
@@ -261,7 +266,7 @@ export class JsonStore {
   }
 
   async evaluateWakeEvents(observedAt = now()): Promise<WakeEvent[]> {
-    const current = deriveLifeState(this.data.observations, observedAt);
+    const current = deriveLifeState(this.data.activePhoneDeviceId ? this.data.observations.filter((item) => item.deviceId === this.data.activePhoneDeviceId) : [], observedAt);
     const previous = this.data.wakeEngineState.lastLifeState;
     if (!previous) {
       await this.update((data) => {
@@ -366,12 +371,15 @@ export class JsonStore {
     await this.update((data) => {
       const existing = data.phoneDeviceRegistrations.find((item) => item.deviceId === input.deviceId);
       const next: PhoneDeviceRegistration = {
+        active: true,
         deviceId: input.deviceId,
         ...(input.appVersion === undefined ? {} : { appVersion: input.appVersion }),
         ...(input.pushFid === undefined ? {} : { pushFid: input.pushFid }),
         ...(input.pushToken === undefined ? {} : { pushToken: input.pushToken }),
         updatedAt: now(),
       };
+      data.activePhoneDeviceId = input.deviceId;
+      data.phoneDeviceRegistrations.forEach((item) => { item.active = item.deviceId === input.deviceId; });
       if (existing) {
         Object.assign(existing, next);
         registration = existing;
@@ -383,12 +391,13 @@ export class JsonStore {
     return structuredClone(registration!);
   }
 
-  /** V0.1 targets one primary Companion: the most recently registered token. */
+  /** FCM may only target the active device; old registrations remain historical. */
   getPrimaryPushDevice(): PhoneDeviceRegistration | undefined {
-    return this.snapshot().phoneDeviceRegistrations
-      .filter((item) => Boolean(item.pushToken))
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.deviceId.localeCompare(right.deviceId))[0];
+    const data = this.snapshot();
+    return data.phoneDeviceRegistrations.find((item) => item.deviceId === data.activePhoneDeviceId && Boolean(item.pushToken));
   }
+
+  getActivePhoneDeviceId(): string | undefined { return this.snapshot().activePhoneDeviceId; }
 
   async addDiary(input: {
     title: string;
