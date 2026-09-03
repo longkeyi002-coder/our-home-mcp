@@ -22,6 +22,9 @@ export type ProactiveCandidateStatus = "pending" | "delivered" | "dismissed";
 export type LifeActivity = "active_on_phone" | "probably_idle" | "charging" | "offline" | "unknown";
 export type DevicePresence = "online" | "screen_on" | "screen_off" | "idle" | "unknown";
 export type ConnectivityState = "online" | "offline" | "unknown";
+export type WakeEventType = "became_active" | "became_idle" | "device_offline" | "charging_started" | "battery_low";
+export type WakeEventStatus = "pending" | "handled" | "dismissed";
+export type WakeEventPriority = "low" | "normal" | "high";
 
 export interface DiaryEntry {
   id: string;
@@ -108,6 +111,24 @@ export interface LifeState {
   reasons: string[];
 }
 
+export interface WakeEvent {
+  id: string;
+  type: WakeEventType;
+  status: WakeEventStatus;
+  priority: WakeEventPriority;
+  createdAt: string;
+  observedAt: string;
+  reason: string;
+  dedupeKey: string;
+  lifeState: LifeState;
+  previousLifeState: LifeState;
+}
+
+export interface WakeEngineState {
+  lastLifeState: LifeState | null;
+  lastEventAt: Partial<Record<WakeEventType, string>>;
+}
+
 export interface RoutineWindow {
   id: string;
   label: string;
@@ -152,6 +173,7 @@ export interface LifeContext {
   routines: RoutineWindow[];
   recentHeartbeats: HeartbeatRecord[];
   pendingProactiveMessages: ProactiveCandidate[];
+  pendingWakeEvents: WakeEvent[];
 }
 
 export interface OurHomeData {
@@ -166,6 +188,8 @@ export interface OurHomeData {
   routines: RoutineWindow[];
   heartbeats: HeartbeatRecord[];
   proactiveQueue: ProactiveCandidate[];
+  wakeEvents: WakeEvent[];
+  wakeEngineState: WakeEngineState;
 }
 
 export interface DataStatus {

@@ -19,8 +19,12 @@ import type {
   ProactiveMessage,
   RelationshipEvent,
   RoutineWindow,
+  WakeEngineState,
+  WakeEvent,
+  WakeEventStatus,
 } from "./types.js";
 import { deriveLifeState } from "./life-state.js";
+import { deriveWakeEventDrafts } from "./wake-engine.js";
 
 const now = () => new Date().toISOString();
 
@@ -58,7 +62,13 @@ function emptyData(): OurHomeData {
     routines: [],
     heartbeats: [],
     proactiveQueue: [],
+    wakeEvents: [],
+    wakeEngineState: emptyWakeEngineState(),
   };
+}
+
+function emptyWakeEngineState(): WakeEngineState {
+  return { lastLifeState: null, lastEventAt: {} };
 }
 
 function seedData(): OurHomeData {
@@ -110,6 +120,8 @@ function seedData(): OurHomeData {
     routines: [],
     heartbeats: [],
     proactiveQueue: [],
+    wakeEvents: [],
+    wakeEngineState: emptyWakeEngineState(),
   };
 }
 
@@ -129,6 +141,8 @@ function migrateData(value: unknown): OurHomeData {
     routines?: OurHomeData["routines"];
     heartbeats?: OurHomeData["heartbeats"];
     proactiveQueue?: OurHomeData["proactiveQueue"];
+    wakeEvents?: OurHomeData["wakeEvents"];
+    wakeEngineState?: OurHomeData["wakeEngineState"];
   };
   const hasBaseShape =
     Array.isArray(candidate.diaries) &&
@@ -148,6 +162,8 @@ function migrateData(value: unknown): OurHomeData {
       routines: [],
       heartbeats: [],
       proactiveQueue: [],
+      wakeEvents: [],
+      wakeEngineState: emptyWakeEngineState(),
     };
   }
   if (
@@ -159,7 +175,11 @@ function migrateData(value: unknown): OurHomeData {
   ) {
     throw new Error("Unsupported or corrupt Our Home data file");
   }
-  return candidate as OurHomeData;
+  return {
+    ...(candidate as OurHomeData),
+    wakeEvents: candidate.wakeEvents ?? [],
+    wakeEngineState: candidate.wakeEngineState ?? emptyWakeEngineState(),
+  };
 }
 
 export class JsonStore {
@@ -201,7 +221,63 @@ export class JsonStore {
       pendingProactiveMessages: data.proactiveQueue
         .filter((item) => item.status === "pending")
         .slice(0, 20),
+      pendingWakeEvents: data.wakeEvents
+        .filter((item) => item.status === "pending")
+        .slice(0, 20),
     };
+  }
+
+  async evaluateWakeEvents(observedAt = now()): Promise<WakeEvent[]> {
+    const current = deriveLifeState(this.data.observations, observedAt);
+    const previous = this.data.wakeEngineState.lastLifeState;
+    if (!previous) {
+      await this.update((data) => {
+        data.wakeEngineState.lastLifeState = current;
+      });
+      return [];
+    }
+
+    const drafts = deriveWakeEventDrafts(
+      previous,
+      current,
+      observedAt,
+      this.data.wakeEngineState.lastEventAt,
+    );
+    const events: WakeEvent[] = [];
+    await this.update((data) => {
+      data.wakeEngineState.lastLifeState = current;
+      for (const draft of drafts) {
+        const duplicate = data.wakeEvents.some(
+          (item) => item.status === "pending" && item.dedupeKey === draft.dedupeKey,
+        );
+        if (duplicate) continue;
+        const event: WakeEvent = {
+          id: randomUUID(),
+          ...draft,
+          status: "pending",
+          createdAt: observedAt,
+          observedAt,
+          lifeState: structuredClone(current),
+          previousLifeState: structuredClone(previous),
+        };
+        data.wakeEvents.unshift(event);
+        data.wakeEngineState.lastEventAt[draft.type] = observedAt;
+        events.push(event);
+      }
+      data.wakeEvents = data.wakeEvents.slice(0, 200);
+    });
+    return structuredClone(events);
+  }
+
+  async resolveWakeEvent(id: string, status: Exclude<WakeEventStatus, "pending">): Promise<WakeEvent> {
+    let result: WakeEvent | undefined;
+    await this.update((data) => {
+      result = data.wakeEvents.find((item) => item.id === id);
+      if (!result) throw new Error(`Wake event not found: ${id}`);
+      result.status = status;
+    });
+    if (!result) throw new Error(`Wake event not found: ${id}`);
+    return result;
   }
 
   async update(mutator: (data: OurHomeData) => void): Promise<OurHomeData> {

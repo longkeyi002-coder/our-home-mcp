@@ -85,8 +85,9 @@ export async function runProactiveCycle(
   notifier: ProactiveNotifier,
   asOf = new Date(),
   decisionEngine?: LifeDecisionEngine,
-): Promise<{ heartbeatId: string; dueCount: number; deliveredCount: number; failedCount: number }> {
+): Promise<{ heartbeatId: string; wakeEventCount: number; dueCount: number; deliveredCount: number; failedCount: number }> {
   const heartbeat = await store.recordHeartbeat("独立 Life Loop 心跳：检查主动消息队列。");
+  const wakeEvents = await store.evaluateWakeEvents(asOf.toISOString());
   if (decisionEngine) {
     try {
       const candidates = await decisionEngine.evaluate(store.getLifeContext(asOf.toISOString()));
@@ -120,7 +121,7 @@ export async function runProactiveCycle(
     }
   }
 
-  return { heartbeatId: heartbeat.id, dueCount: due.length, deliveredCount, failedCount };
+  return { heartbeatId: heartbeat.id, wakeEventCount: wakeEvents.length, dueCount: due.length, deliveredCount, failedCount };
 }
 
 const dataFile = process.env.OUR_HOME_DATA_FILE ?? "./data/our-home.json";

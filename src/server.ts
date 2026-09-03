@@ -110,6 +110,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
         routines: z.array(z.record(z.string(), z.unknown())),
         recentHeartbeats: z.array(z.record(z.string(), z.unknown())),
         pendingProactiveMessages: z.array(z.record(z.string(), z.unknown())),
+        pendingWakeEvents: z.array(z.record(z.string(), z.unknown())),
       }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
@@ -120,6 +121,47 @@ export function createOurHomeServer(store: JsonStore): McpServer {
         dataSource: "local-mock" as const,
         ...context,
       });
+    },
+  );
+
+  server.registerTool(
+    "home.list_wake_events",
+    {
+      title: "List wake events",
+      description: "Read persistent wake events produced by Life State transitions. Pending events are available to the next Decision Engine.",
+      inputSchema: {
+        status: z.enum(["pending", "handled", "dismissed"]).optional(),
+        limit: z.number().int().min(1).max(100).default(50),
+      },
+      outputSchema: z.object({ wakeEvents: z.array(z.record(z.string(), z.unknown())), dataSource: z.literal("local-mock") }),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ status, limit }) => {
+      const wakeEvents = store
+        .snapshot()
+        .wakeEvents
+        .filter((item) => !status || item.status === status)
+        .slice(0, limit);
+      return structured({ wakeEvents, dataSource: "local-mock" as const });
+    },
+  );
+
+  server.registerTool(
+    "home.dismiss_wake_event",
+    {
+      title: "Dismiss a wake event",
+      description: "Mark a pending wake event as dismissed without deleting its persisted transition context.",
+      inputSchema: { eventId: z.string().trim().min(1) },
+      outputSchema: z.object({ wakeEvent: z.record(z.string(), z.unknown()), dataSource: z.literal("local-mock") }),
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ eventId }) => {
+      try {
+        const wakeEvent = await store.resolveWakeEvent(eventId, "dismissed");
+        return structured({ wakeEvent, dataSource: "local-mock" as const });
+      } catch (error) {
+        return toolError(error);
+      }
     },
   );
 
