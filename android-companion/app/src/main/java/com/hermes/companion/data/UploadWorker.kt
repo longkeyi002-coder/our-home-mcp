@@ -64,6 +64,12 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             WorkManager.getInstance(context).enqueueUniqueWork(IMMEDIATE_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
         }
 
+        /** Cancel both periodic and queued Cloud uploads before entering LOCAL mode. */
+        fun cancelCloudWork(context: Context) {
+            WorkManager.getInstance(context).cancelUniqueWork(IMMEDIATE_NAME)
+            WorkManager.getInstance(context).cancelUniqueWork(PERIODIC_WORK_NAME)
+        }
+
         fun schedulePeriodic(context: Context) {
             val request = PeriodicWorkRequestBuilder<UploadWorker>(15, TimeUnit.MINUTES)
                 .setInputData(workDataOf(KEY_PERIODIC_RUN to true))
