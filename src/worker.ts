@@ -87,14 +87,49 @@ export async function runProactiveCycle(
   const wakeEvents = await store.evaluateWakeEvents(asOf.toISOString());
   if (decisionEngine) {
     for (const wakeEvent of store.listWakeEvents("pending", 5)) {
+      const isHermesActivation = decisionEngine instanceof HermesDecisionEngine;
+      if (isHermesActivation) {
+        await store.recordRuntimeDiagnostic("lastHermesActivation", {
+          occurredAt: asOf.toISOString(),
+          status: "started",
+          wakeEventId: wakeEvent.id,
+        });
+      }
       try {
         const decision = decisionResponseSchema.parse(await decisionEngine.evaluate({
           wakeEvent,
           context: store.getLifeContext(asOf.toISOString()),
         }));
         await store.applyWakeDecision(wakeEvent.id, decision, asOf.toISOString());
+        await store.recordRuntimeDiagnostic("lastWakeDecision", {
+          occurredAt: asOf.toISOString(),
+          status: "succeeded",
+          wakeEventId: wakeEvent.id,
+          action: decision.action,
+        });
+        if (isHermesActivation) {
+          await store.recordRuntimeDiagnostic("lastHermesActivation", {
+            occurredAt: asOf.toISOString(),
+            status: "succeeded",
+            wakeEventId: wakeEvent.id,
+          });
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Unknown decision engine error";
+        await store.recordRuntimeDiagnostic("lastWakeDecision", {
+          occurredAt: asOf.toISOString(),
+          status: "failed",
+          wakeEventId: wakeEvent.id,
+          detail: message,
+        });
+        if (isHermesActivation) {
+          await store.recordRuntimeDiagnostic("lastHermesActivation", {
+            occurredAt: asOf.toISOString(),
+            status: "failed",
+            wakeEventId: wakeEvent.id,
+            detail: message,
+          });
+        }
         process.stderr.write(`[our-home] wake decision failed: ${wakeEvent.id}: ${message}\n`);
       }
     }
@@ -108,11 +143,22 @@ export async function runProactiveCycle(
       await notifier.deliver(candidate);
       await store.recordProactiveAttempt(candidate.id);
       await store.resolveProactiveMessage(candidate.id, "delivered");
+      await store.recordRuntimeDiagnostic("lastProactiveDelivery", {
+        occurredAt: asOf.toISOString(),
+        status: "succeeded",
+        candidateId: candidate.id,
+      });
       deliveredCount += 1;
     } catch (error) {
       failedCount += 1;
       const message = error instanceof Error ? error.message : "Unknown notifier error";
       await store.recordProactiveAttempt(candidate.id, message);
+      await store.recordRuntimeDiagnostic("lastProactiveDelivery", {
+        occurredAt: asOf.toISOString(),
+        status: "failed",
+        candidateId: candidate.id,
+        detail: message,
+      });
       process.stderr.write(`[our-home] proactive delivery failed: ${candidate.id}: ${message}\n`);
     }
   }
