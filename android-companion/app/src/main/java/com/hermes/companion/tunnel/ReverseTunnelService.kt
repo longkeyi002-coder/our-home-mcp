@@ -14,6 +14,7 @@ import androidx.core.app.NotificationCompat
 import com.hermes.companion.data.SettingsRepository
 import com.hermes.companion.push.HermesNotifications
 import java.util.concurrent.TimeUnit
+import java.net.URLEncoder
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -75,20 +76,19 @@ class ReverseTunnelService : Service() {
             return
         }
         socket?.cancel()
-        val request = Request.Builder().url(relayUrl).header("Authorization", "Bearer $token").build()
+        val separator = if (relayUrl.contains("?")) "&" else "?"
+        val relayWithToken = relayUrl + separator + "token=" + URLEncoder.encode(token, Charsets.UTF_8.name())
+        val request = Request.Builder().url(relayWithToken).build()
         socket = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 reconnectAttempt = 0
-                webSocket.send(RelayProtocol.hello(settings.deviceId()))
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
                 if (text.toByteArray(Charsets.UTF_8).size > MAX_FRAME_BYTES) return
                 val request = RelayProtocol.parseRequest(text) ?: return
-                handler.handle(request.params).fold(
-                    onSuccess = { result -> webSocket.send(RelayProtocol.response(request.requestId, result)) },
-                    onFailure = { error -> webSocket.send(RelayProtocol.error(request.requestId, "tool_error", error.message ?: "Request failed")) },
-                )
+                val body = handler.handleMcp(request.body)
+                webSocket.send(RelayProtocol.response(request.id, 200, body))
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) = scheduleReconnect()
