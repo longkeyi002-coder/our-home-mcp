@@ -146,9 +146,9 @@ export function createOurHomeServer(store: JsonStore): McpServer {
           lastObservationReceived: activeObservations[0] ?? null,
           currentLifeState: context.lifeState,
           pendingWakeEvents: context.pendingWakeEvents,
-          lastHermesActivation: null,
-          lastWakeDecision: data.wakeEvents.find((item) => item.status === "handled") ?? null,
-          lastProactiveDelivery: data.proactiveQueue.find((item) => item.status === "delivered") ?? null,
+          lastHermesActivation: data.runtimeDiagnostics.lastHermesActivation ?? null,
+          lastWakeDecision: data.runtimeDiagnostics.lastWakeDecision ?? null,
+          lastProactiveDelivery: data.runtimeDiagnostics.lastProactiveDelivery ?? null,
         },
       });
     },
