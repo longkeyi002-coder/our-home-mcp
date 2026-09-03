@@ -27,10 +27,28 @@ class SettingsRepository(context: Context) {
         secure.put(KEY_PUSH_FID, fid)
         secure.put(KEY_PUSH_TOKEN, token)
     }
-    fun lastUpload(): Long = prefs.getLong(KEY_LAST_UPLOAD, 0L)
-    fun lastHeartbeat(): Long = prefs.getLong(KEY_LAST_HEARTBEAT, 0L)
-    fun recordHeartbeat(at: Long) { prefs.edit().putLong(KEY_LAST_HEARTBEAT, at).apply() }
-    fun recordSuccessfulUpload(at: Long) { prefs.edit().putLong(KEY_LAST_UPLOAD, at).remove(KEY_LAST_ERROR).apply() }
+    fun lastSuccessfulUpload(): Long = prefs.getLong(KEY_LAST_SUCCESSFUL_UPLOAD, prefs.getLong(KEY_LAST_UPLOAD_LEGACY, 0L))
+    fun lastUpload(): Long = lastSuccessfulUpload()
+    fun lastManualHeartbeat(): Long = prefs.getLong(KEY_LAST_MANUAL_HEARTBEAT, prefs.getLong(KEY_LAST_HEARTBEAT_LEGACY, 0L))
+    fun lastHeartbeat(): Long = lastManualHeartbeat()
+    fun lastPeriodicCollection(): Long = prefs.getLong(KEY_LAST_PERIODIC_COLLECTION, 0L)
+    fun recordManualHeartbeat(at: Long) {
+        prefs.edit()
+            .putLong(KEY_LAST_MANUAL_HEARTBEAT, at)
+            .putLong(KEY_LAST_HEARTBEAT_LEGACY, at)
+            .apply()
+    }
+    fun recordHeartbeat(at: Long) = recordManualHeartbeat(at)
+    fun recordPeriodicCollection(at: Long) {
+        prefs.edit().putLong(KEY_LAST_PERIODIC_COLLECTION, at).apply()
+    }
+    fun recordSuccessfulUpload(at: Long) {
+        prefs.edit()
+            .putLong(KEY_LAST_SUCCESSFUL_UPLOAD, at)
+            .putLong(KEY_LAST_UPLOAD_LEGACY, at)
+            .remove(KEY_LAST_ERROR)
+            .apply()
+    }
     fun lastError(): String = prefs.getString(KEY_LAST_ERROR, "") ?: ""
     fun recordApiError(value: String) { prefs.edit().putString(KEY_LAST_ERROR, value.take(300)).apply() }
 
@@ -41,8 +59,11 @@ class SettingsRepository(context: Context) {
         private const val KEY_DEVICE_TOKEN = "device_token"
         private const val KEY_PUSH_FID = "push_fid"
         private const val KEY_PUSH_TOKEN = "push_token"
-        private const val KEY_LAST_UPLOAD = "last_upload"
-        private const val KEY_LAST_HEARTBEAT = "last_heartbeat"
+        private const val KEY_LAST_SUCCESSFUL_UPLOAD = "last_successful_upload"
+        private const val KEY_LAST_MANUAL_HEARTBEAT = "last_manual_heartbeat"
+        private const val KEY_LAST_PERIODIC_COLLECTION = "last_periodic_collection"
+        private const val KEY_LAST_UPLOAD_LEGACY = "last_upload"
+        private const val KEY_LAST_HEARTBEAT_LEGACY = "last_heartbeat"
         private const val KEY_LAST_ERROR = "last_error"
     }
 }

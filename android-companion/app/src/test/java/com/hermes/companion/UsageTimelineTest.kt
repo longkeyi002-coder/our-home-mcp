@@ -12,7 +12,7 @@ class UsageTimelineTest {
         val tracker = UsageTimelineTracker()
         tracker.onForeground("com.example.video", 1_000)
         tracker.onForeground("com.example.video", 2_000)
-        tracker.onBackground(5_000)
+        tracker.onBackground("com.example.video", 5_000)
 
         val summary = tracker.summary(5_000, 0)
         assertEquals(1, summary.sessions.size)
@@ -44,7 +44,35 @@ class UsageTimelineTest {
     fun noCurrentAppWhenSessionEnded() {
         val tracker = UsageTimelineTracker()
         tracker.onForeground("com.example.app", 1_000)
-        tracker.onBackground(2_000)
+        tracker.onBackground("com.example.app", 2_000)
         assertNull(tracker.summary(2_000, 0).currentPackageName)
+    }
+}
+
+    @Test
+    fun delayedStopForOldPackageDoesNotCloseCurrentSession() {
+        val tracker = UsageTimelineTracker()
+        tracker.onForeground("com.example.first", 1_000)
+        tracker.onForeground("com.example.second", 4_000)
+        tracker.onBackground("com.example.first", 5_000)
+
+        val summary = tracker.summary(6_000, 0)
+
+        assertEquals(listOf("com.example.first", "com.example.second"), summary.sessions.map { it.packageName })
+        assertEquals(listOf(3_000L, 2_000L), summary.sessions.map { it.durationMs })
+        assertEquals("com.example.second", summary.currentPackageName)
+        assertEquals(2_000L, summary.currentDurationMs)
+    }
+
+    @Test
+    fun commonChinesePackagesUseExplicitMappings() {
+        assertEquals("social", UsageCategoryClassifier.classify("com.xingin.xhs"))
+        assertEquals("entertainment", UsageCategoryClassifier.classify("com.ss.android.ugc.aweme"))
+        assertEquals("entertainment", UsageCategoryClassifier.classify("tv.danmaku.bili"))
+        assertEquals("shopping", UsageCategoryClassifier.classify("com.taobao.taobao"))
+        assertEquals("shopping", UsageCategoryClassifier.classify("com.xunmeng.pinduoduo"))
+        assertEquals("other", UsageCategoryClassifier.classify("com.eg.android.AlipayGphone"))
+        assertEquals("social", UsageCategoryClassifier.classify("com.tencent.mm"))
+        assertEquals("ai", UsageCategoryClassifier.classify("com.openai.chatgpt"))
     }
 }

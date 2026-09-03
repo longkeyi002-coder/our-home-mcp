@@ -26,7 +26,10 @@ export async function registerPhone(
   authorization: string | undefined,
   body: unknown,
 ) {
-  // Registration is open — no auth needed. Security comes from the device token returned after registration.
+  const presentedToken = authorization?.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length)
+    : undefined;
+  if (!constantTimeTokenEqual(presentedToken, ingestToken)) throw new Error("Unauthorized");
   const input = phoneRegisterSchema.parse(body);
   await store.registerPhoneDevice(input);
   return {

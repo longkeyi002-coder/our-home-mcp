@@ -67,6 +67,21 @@ Debug APK 输出在 `app/build/outputs/apk/debug/app-debug.apk`。可以用 Andr
 - Debug / Diagnostics 页面。
 - FCM 前台消息主动显示固定 `hermes_life` channel 的系统通知；后台 notification payload 使用 FCM/Android 标准系统行为，点击后打开现有 Companion Activity。
 
+## 真机后台 smoke test
+
+用于验证周期采集确实由 Application + WorkManager 驱动，不依赖 Activity 保持前台：
+
+1. 安装最新 APK。
+2. 打开一次 App。
+3. 授予 Usage Access。
+4. 配好服务器地址和注册令牌。
+5. 切到后台。
+6. 30–45 分钟不要重新打开 App。
+7. 检查服务器是否出现新的 `device_presence` periodic heartbeat 和 `usage_summary`。
+8. 再打开 App，检查 Diagnostics 的 `Background worker`、`Last periodic collection`、`Last successful upload`、`Pending events` 和 `Usage summary available`。
+
+WorkManager 不是精确定时器，系统或厂商电池策略可能导致实际运行时间延迟。若 Usage Access 未授权，周期 worker 仍会上报电量、充电和网络 heartbeat，只跳过 usage summary；worker 不会因缺少该权限崩溃。
+
 ## Android 后台限制和未实现
 
 V0.1 不承诺永久驻留或实时采集。WorkManager 的周期任务最短约 15 分钟，并可能因 Doze、厂商省电策略或系统调度延迟。UsageStatsManager 只能在任务运行时查询最近事件；没有授权或系统尚未产生事件时，前台包名可能为空。

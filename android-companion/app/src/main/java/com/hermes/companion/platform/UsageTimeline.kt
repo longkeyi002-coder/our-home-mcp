@@ -19,14 +19,27 @@ enum class UsageCategory(val wireName: String) {
 }
 
 object UsageCategoryClassifier {
+    private val explicitPackages = mapOf(
+        "com.xingin.xhs" to UsageCategory.SOCIAL.wireName,
+        "com.ss.android.ugc.aweme" to UsageCategory.ENTERTAINMENT.wireName,
+        "tv.danmaku.bili" to UsageCategory.ENTERTAINMENT.wireName,
+        "com.taobao.taobao" to UsageCategory.SHOPPING.wireName,
+        "com.xunmeng.pinduoduo" to UsageCategory.SHOPPING.wireName,
+        "com.eg.android.alipaygphone" to UsageCategory.OTHER.wireName,
+        "com.tencent.mm" to UsageCategory.SOCIAL.wireName,
+        "com.openai.chatgpt" to UsageCategory.AI.wireName,
+        "com.anthropic.claude" to UsageCategory.AI.wireName,
+    )
+
     fun classify(packageName: String): String {
-        val value = packageName.lowercase()
+        val normalized = packageName.trim().lowercase()
+        explicitPackages[normalized]?.let { return it }
         return when {
-            listOf("youtube", "netflix", "spotify", "tiktok", "bilibili", "douyin").any(value::contains) -> UsageCategory.ENTERTAINMENT.wireName
-            listOf("instagram", "facebook", "twitter", "x.", "wechat", "whatsapp", "telegram", "discord").any(value::contains) -> UsageCategory.SOCIAL.wireName
-            listOf("slack", "teams", "zoom", "notion", "docs", "sheets", "office", "outlook").any(value::contains) -> UsageCategory.WORK.wireName
-            listOf("taobao", "alibaba", "jd.", "pinduoduo", "shopping").any(value::contains) -> UsageCategory.SHOPPING.wireName
-            listOf("chatgpt", "claude", "gemini", "copilot", "perplexity").any(value::contains) -> UsageCategory.AI.wireName
+            listOf("youtube", "netflix", "spotify", "tiktok", "bilibili", "douyin").any(normalized::contains) -> UsageCategory.ENTERTAINMENT.wireName
+            listOf("instagram", "facebook", "twitter", "x.", "wechat", "whatsapp", "telegram", "discord").any(normalized::contains) -> UsageCategory.SOCIAL.wireName
+            listOf("slack", "teams", "zoom", "notion", "docs", "sheets", "office", "outlook").any(normalized::contains) -> UsageCategory.WORK.wireName
+            listOf("taobao", "alibaba", "jd.", "pinduoduo", "shopping").any(normalized::contains) -> UsageCategory.SHOPPING.wireName
+            listOf("chatgpt", "claude", "gemini", "copilot", "perplexity").any(normalized::contains) -> UsageCategory.AI.wireName
             else -> UsageCategory.OTHER.wireName
         }
     }
@@ -63,7 +76,9 @@ class UsageTimelineTracker {
         activeStartedAt = at
     }
 
-    fun onBackground(at: Long) = closeActive(at)
+    fun onBackground(packageName: String, at: Long) {
+        if (activePackage == packageName) closeActive(at)
+    }
 
     fun summary(now: Long, dayStart: Long): UsageTimelineSummary {
         val sessions = (completed + listOfNotNull(activeSession(now)))
@@ -108,7 +123,7 @@ object UsageTimelineReader {
             events.getNextEvent(event)
             when (event.eventType) {
                 UsageEvents.Event.ACTIVITY_RESUMED -> tracker.onForeground(event.packageName, event.timeStamp)
-                UsageEvents.Event.ACTIVITY_PAUSED, UsageEvents.Event.ACTIVITY_STOPPED -> tracker.onBackground(event.timeStamp)
+                UsageEvents.Event.ACTIVITY_PAUSED, UsageEvents.Event.ACTIVITY_STOPPED -> tracker.onBackground(event.packageName, event.timeStamp)
             }
         }
         return tracker.summary(now, dayStart)

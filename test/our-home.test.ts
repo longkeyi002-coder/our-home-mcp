@@ -9,6 +9,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createOurHomeServer } from "../src/server.js";
 import { JsonStore } from "../src/store.js";
 import { WebhookDecisionEngine, runProactiveCycle } from "../src/worker.js";
+import { registerPhone } from "../src/phone-registration.js";
 
 async function connectedClient(store: JsonStore) {
   const server = createOurHomeServer(store);
@@ -321,4 +322,77 @@ test("decision webhook receives life context and creates a deduplicated candidat
   assert.equal(store.snapshot().proactiveQueue.length, 1);
 
   httpServer.close();
+});
+
+
+test("phone registration requires bootstrap auth and updates one device", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "our-home-phone-register-"));
+  const store = await JsonStore.open(join(directory, "our-home.json"), false);
+  const body = { deviceId: "android-test", appVersion: "0.1.0" };
+
+  await assert.rejects(
+    registerPhone(store, "bootstrap-secret", "Bearer wrong-token", body),
+    /Unauthorized/,
+  );
+
+  const first = await registerPhone(store, "bootstrap-secret", "Bearer bootstrap-secret", body);
+  const second = await registerPhone(store, "bootstrap-secret", "Bearer bootstrap-secret", {
+    ...body,
+    pushFid: "fid-1",
+    pushToken: "push-1",
+  });
+
+  assert.equal(first.deviceId, "android-test");
+  assert.equal(second.token, first.token);
+  assert.equal(store.snapshot().phoneDeviceRegistrations.length, 1);
+  assert.equal(store.snapshot().phoneDeviceRegistrations[0]?.pushToken, "push-1");
+});
+
+test("usage summary retention removes old data and compacts duplicate buckets", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "our-home-usage-retention-"));
+  const store = await JsonStore.open(join(directory, "our-home.json"), false);
+  const now = Date.now();
+  const recent = new Date(now - 60 * 60 * 1000).toISOString();
+  const old = new Date(now - 15 * 24 * 60 * 60 * 1000).toISOString();
+
+  await store.recordObservation({
+    kind: "manual_status",
+    label: "长期状态",
+    value: "在家",
+    observedAt: recent,
+    source: "user",
+    confidence: "declared",
+  });
+  await store.recordObservation({
+    kind: "usage_summary",
+    label: "app usage timeline",
+    observedAt: old,
+    source: "phone",
+    confidence: "observed",
+    deviceId: "android-test",
+    metadata: { day: old.slice(0, 10), clientEventId: "usage-summary:android-test:old:1" },
+  });
+  await store.recordObservation({
+    kind: "usage_summary",
+    label: "app usage timeline",
+    observedAt: recent,
+    source: "phone",
+    confidence: "observed",
+    deviceId: "android-test",
+    metadata: { day: recent.slice(0, 10), clientEventId: "usage-summary:android-test:recent:1", currentPackage: "com.example.app" },
+  });
+  await store.recordObservation({
+    kind: "usage_summary",
+    label: "app usage timeline",
+    observedAt: new Date(now - 30 * 60 * 1000).toISOString(),
+    source: "phone",
+    confidence: "observed",
+    deviceId: "android-test",
+    metadata: { day: recent.slice(0, 10), clientEventId: "usage-summary:android-test:recent:1", currentPackage: "com.example.newer" },
+  });
+
+  const usage = store.snapshot().observations.filter((item) => item.kind === "usage_summary");
+  assert.equal(usage.length, 1);
+  assert.equal(usage[0]?.metadata?.currentPackage, "com.example.newer");
+  assert.equal(store.snapshot().observations.some((item) => item.kind === "manual_status"), true);
 });

@@ -43,6 +43,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
+import androidx.work.WorkInfo
+import androidx.work.WorkManager
 import com.hermes.companion.data.HeartbeatRequest
 import com.hermes.companion.data.ObservationRequest
 import com.hermes.companion.data.QueueRepository
@@ -55,8 +57,10 @@ import com.hermes.companion.platform.UsageTimelineSummary
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -77,8 +81,10 @@ data class CompanionUiState(
     val deviceId: String = "",
     val connected: Boolean = false,
     val pending: Int = 0,
-    val lastUpload: Long = 0,
-    val lastHeartbeat: Long = 0,
+    val lastSuccessfulUpload: Long = 0,
+    val lastManualHeartbeat: Long = 0,
+    val lastPeriodicCollection: Long = 0,
+    val backgroundWorkerStatus: String = "unknown",
     val lastError: String = "",
     val usageAccess: Boolean = false,
     val usage: UsageTimelineSummary? = null,
@@ -88,11 +94,18 @@ data class CompanionUiState(
 class CompanionViewModel(private val appContext: android.content.Context) : ViewModel() {
     private val settings = SettingsRepository(appContext)
     private val queue = QueueRepository.create(appContext)
-    private val _state = MutableStateFlow(CompanionUiState(deviceId = settings.deviceId(), serverUrl = settings.serverUrl(), lastHeartbeat = settings.lastHeartbeat()))
+    private val _state = MutableStateFlow(
+        CompanionUiState(
+            deviceId = settings.deviceId(),
+            serverUrl = settings.serverUrl(),
+            lastManualHeartbeat = settings.lastManualHeartbeat(),
+            lastPeriodicCollection = settings.lastPeriodicCollection(),
+            lastSuccessfulUpload = settings.lastSuccessfulUpload(),
+        ),
+    )
     val state: StateFlow<CompanionUiState> = _state
 
     init {
-        UploadWorker.schedulePeriodic(appContext)
         refresh()
     }
 
@@ -104,8 +117,10 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
                 serverUrl = settings.serverUrl(),
                 deviceId = settings.deviceId(),
                 pending = queue.pendingCount(),
-                lastUpload = settings.lastUpload(),
-                lastHeartbeat = settings.lastHeartbeat(),
+                lastSuccessfulUpload = settings.lastSuccessfulUpload(),
+                lastManualHeartbeat = settings.lastManualHeartbeat(),
+                lastPeriodicCollection = settings.lastPeriodicCollection(),
+                backgroundWorkerStatus = readBackgroundWorkerStatus(),
                 lastError = settings.lastError(),
                 usageAccess = DeviceStatusReader.hasUsageAccess(appContext),
                 usage = UsageTimelineReader.read(appContext),
@@ -146,9 +161,9 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
                 observedAt = now,
                 clientEventId = UUID.randomUUID().toString(),
             ))
-            settings.recordHeartbeat(System.currentTimeMillis())
+            settings.recordManualHeartbeat(System.currentTimeMillis())
             val result = queue.uploadPending()
-            _state.value = _state.value.copy(lastHeartbeat = System.currentTimeMillis(), connected = result.error == null, lastError = result.error.orEmpty())
+            _state.value = _state.value.copy(lastManualHeartbeat = System.currentTimeMillis(), connected = result.error == null, lastError = result.error.orEmpty())
             refresh()
         }
     }
@@ -165,6 +180,23 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
             val result = queue.uploadPending()
             _state.value = _state.value.copy(connected = result.error == null, lastError = result.error.orEmpty())
             refresh()
+        }
+    }
+
+    private suspend fun readBackgroundWorkerStatus(): String = withContext(Dispatchers.IO) {
+        val state = runCatching {
+            WorkManager.getInstance(appContext)
+                .getWorkInfosForUniqueWork(UploadWorker.PERIODIC_WORK_NAME)
+                .get()
+                .firstOrNull()
+                ?.state
+        }.getOrNull()
+        when (state) {
+            WorkInfo.State.ENQUEUED -> "scheduled"
+            WorkInfo.State.RUNNING -> "running"
+            WorkInfo.State.SUCCEEDED -> "succeeded"
+            WorkInfo.State.FAILED -> "failed"
+            else -> "unknown"
         }
     }
 
@@ -228,7 +260,7 @@ private fun InfoCard(state: CompanionUiState) {
                 Text("Current App: ${usage.currentPackageName ?: "none"} · ${usage.currentDurationMs / 1000}s")
             }
             Text("Today's tracked apps: ${state.usage?.appTotalsMs?.size ?: 0}")
-            Text("Last heartbeat: ${state.lastHeartbeat.asTime()}")
+            Text("Last manual heartbeat: ${state.lastManualHeartbeat.asTime()}")
             Text("Pending events: ${state.pending}")
         }
     }
@@ -252,11 +284,14 @@ private fun Diagnostics(state: CompanionUiState, model: CompanionViewModel) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Device ID: ${state.deviceId}")
-            Text("Last successful upload: ${state.lastUpload.asTime()}")
-            Text("Last heartbeat: ${state.lastHeartbeat.asTime()}")
-            Text("Last API error: ${state.lastError.ifBlank { "none" }}")
-            Text("Queue size: ${state.pending}")
+            Text("Background worker: ${state.backgroundWorkerStatus}")
+            Text("Last periodic collection: ${state.lastPeriodicCollection.asTime()}")
+            Text("Last successful upload: ${state.lastSuccessfulUpload.asTime()}")
+            Text("Last manual heartbeat: ${state.lastManualHeartbeat.asTime()}")
+            Text("Pending events: ${state.pending}")
+            Text("Usage summary available: ${if (state.usage != null) "yes" else "no"}")
             Text("Usage Access: ${if (state.usageAccess) "granted" else "required"}")
+            Text("Last API error: ${state.lastError.ifBlank { "none" }}")
             Text("Detected foreground package: ${state.device.foregroundPackage ?: "none"}")
             OutlinedButton(onClick = { confirmClear = true }, modifier = Modifier.fillMaxWidth()) { Text("Clear pending queue") }
         }

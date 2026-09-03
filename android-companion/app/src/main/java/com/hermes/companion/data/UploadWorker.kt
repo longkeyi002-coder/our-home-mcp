@@ -13,11 +13,15 @@ import androidx.work.WorkerParameters
 import com.hermes.companion.BuildConfig
 import java.time.Instant
 import java.util.concurrent.TimeUnit
+import androidx.work.workDataOf
 
 class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val queue = QueueRepository.create(applicationContext)
         val settings = SettingsRepository(applicationContext)
+        val periodicRun = inputData.getBoolean(KEY_PERIODIC_RUN, false)
+        val collectionStartedAt = System.currentTimeMillis()
+        if (periodicRun) settings.recordPeriodicCollection(collectionStartedAt)
         val status = com.hermes.companion.platform.DeviceStatusReader.read(applicationContext)
         val now = System.currentTimeMillis()
         val bucket = now / (15 * 60 * 1000L)
@@ -48,7 +52,8 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
 
     companion object {
         private const val IMMEDIATE_NAME = "hermes-upload-now"
-        private const val PERIODIC_NAME = "hermes-periodic-upload"
+        const val PERIODIC_WORK_NAME = "hermes-periodic-upload"
+        const val KEY_PERIODIC_RUN = "periodic_run"
 
         fun enqueue(context: Context) {
             val request = OneTimeWorkRequestBuilder<UploadWorker>()
@@ -60,10 +65,11 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
 
         fun schedulePeriodic(context: Context) {
             val request = PeriodicWorkRequestBuilder<UploadWorker>(15, TimeUnit.MINUTES)
+                .setInputData(workDataOf(KEY_PERIODIC_RUN to true))
                 .setConstraints(androidx.work.Constraints.Builder().build())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .build()
-            WorkManager.getInstance(context).enqueueUniquePeriodicWork(PERIODIC_NAME, ExistingPeriodicWorkPolicy.KEEP, request)
+            WorkManager.getInstance(context).enqueueUniquePeriodicWork(PERIODIC_WORK_NAME, ExistingPeriodicWorkPolicy.KEEP, request)
         }
     }
 }

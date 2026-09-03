@@ -47,6 +47,30 @@ function appendActivity(
     occurredAt: now(),
   });
 }
+ 
+const USAGE_SUMMARY_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
+
+function compactUsageSummaryObservations(data: OurHomeData, asOf = Date.now()): void {
+  const cutoff = asOf - USAGE_SUMMARY_RETENTION_MS;
+  const seenBuckets = new Set<string>();
+  data.observations = data.observations.filter((item) => {
+    if (item.kind !== "usage_summary") return true;
+    const observedAt = Date.parse(item.observedAt);
+    if (Number.isFinite(observedAt) && observedAt < cutoff) return false;
+    const day = typeof item.metadata?.day === "string" ? item.metadata.day : item.observedAt.slice(0, 10);
+    const clientEventId = typeof item.metadata?.clientEventId === "string" ? item.metadata.clientEventId : undefined;
+    const clientEventParts = clientEventId?.split(":");
+    const bucket = clientEventId?.startsWith("usage-summary:")
+      ? clientEventParts?.[clientEventParts.length - 1] ?? ""
+      : Number.isFinite(observedAt)
+        ? String(Math.floor(observedAt / (60 * 60 * 1000)))
+        : item.observedAt;
+    const key = (item.deviceId ?? "") + ":" + day + ":" + bucket;
+    if (seenBuckets.has(key)) return false;
+    seenBuckets.add(key);
+    return true;
+  });
+}
 
 function emptyData(): OurHomeData {
   const timestamp = now();
@@ -441,6 +465,7 @@ export class JsonStore {
         metadata: clientEventId ? { ...(input.metadata ?? {}), clientEventId } : input.metadata,
       };
       data.observations.unshift(observation);
+      compactUsageSummaryObservations(data);
       appendActivity(data, {
         kind: "observation_recorded",
         title: "记录一条生活观察",
