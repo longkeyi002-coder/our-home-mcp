@@ -1,9 +1,10 @@
 package com.hermes.companion.data
 
 import android.content.Context
+import com.hermes.companion.UsageAccessOnboarding
 import java.util.UUID
 
-class SettingsRepository(context: Context) {
+class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     internal val context = context.applicationContext
     private val prefs = context.getSharedPreferences("companion_settings", Context.MODE_PRIVATE)
     private val secure = SecureTokenStore(context)
@@ -51,6 +52,8 @@ class SettingsRepository(context: Context) {
     }
     fun lastError(): String = prefs.getString(KEY_LAST_ERROR, "") ?: ""
     fun recordApiError(value: String) { prefs.edit().putString(KEY_LAST_ERROR, value.take(300)).apply() }
+    override fun hasShownUsageAccessGuide(): Boolean = prefs.getBoolean(KEY_USAGE_ACCESS_GUIDE_SHOWN, false)
+    override fun markUsageAccessGuideShown() { prefs.edit().putBoolean(KEY_USAGE_ACCESS_GUIDE_SHOWN, true).apply() }
 
     companion object {
         private const val KEY_SERVER_URL = "server_url"
@@ -65,5 +68,6 @@ class SettingsRepository(context: Context) {
         private const val KEY_LAST_UPLOAD_LEGACY = "last_upload"
         private const val KEY_LAST_HEARTBEAT_LEGACY = "last_heartbeat"
         private const val KEY_LAST_ERROR = "last_error"
+        private const val KEY_USAGE_ACCESS_GUIDE_SHOWN = "usage_access_guide_shown"
     }
 }
