@@ -103,14 +103,13 @@ Instrumentation 测试需要已连接 Android 模拟器或真机。
 
 The optional **Reverse Tunnel** is an Android foreground service that opens an outbound `wss://` connection to a deployed Relay. It never opens a listening port on the phone and is not an alternative to the cloud Runtime upload worker.
 
-Enable it explicitly in the app and configure a Relay WebSocket URL and tunnel token. The token is stored separately from cloud registration tokens. The client sends a `hello` frame and accepts only bounded `tools/call` requests, then exposes four allowlisted tools: `get_local_health`, `get_device_context`, `get_current_usage`, and `send_local_notification`.
+Enable it explicitly in the app and configure a Relay WebSocket URL and tunnel token. The token is stored separately from cloud registration tokens and is appended only to the Relay WebSocket URL as its required `token` query parameter. The client accepts only bounded Relay `mcp` frames for the exact `/mcp` path, then exposes four allowlisted tools: `get_local_health`, `get_device_context`, `get_current_usage`, and `send_local_notification`.
 
-Relay protocol V0.1:
+Relay protocol V0.1 (deployed Relay envelope):
 
 ```json
-{ "type": "request", "requestId": "unique-id", "method": "tools/call", "params": { "name": "get_device_context", "arguments": {} } }
-{ "type": "response", "requestId": "unique-id", "result": {} }
-{ "type": "error", "requestId": "unique-id", "code": "tool_error", "message": "..." }
+{ "id": 42, "method": "mcp", "path": "/mcp", "body": "{\"jsonrpc\":\"2.0\",\"method\":\"tools/list\"}" }
+{ "id": 42, "status": 200, "contentType": "application/json", "body": "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}" }
 ```
 
-The Relay endpoint is not implemented in this repository yet, so real-device Relay/MCP interoperability is **not verified**. The service reconnects with bounded exponential backoff while Android keeps the process alive; it does not claim permanent background survival or boot auto-start.
+The Android client now matches the deployed Relay envelope, but real-device Relay/MCP interoperability remains **not verified** until the Relay has a reachable `wss://` endpoint and a device completes the smoke test. The service reconnects with bounded exponential backoff while Android keeps the process alive; it does not claim permanent background survival or boot auto-start.
