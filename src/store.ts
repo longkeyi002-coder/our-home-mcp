@@ -22,11 +22,14 @@ import type {
   WakeEngineState,
   WakeEvent,
   WakeEventStatus,
+  WakeDecision,
 } from "./types.js";
 import { deriveLifeState } from "./life-state.js";
 import { deriveWakeEventDrafts } from "./wake-engine.js";
 
 const now = () => new Date().toISOString();
+export interface StoreFileSystem { writeFile: typeof writeFile }
+const defaultFileSystem: StoreFileSystem = { writeFile };
 
 function appendActivity(
   data: OurHomeData,
@@ -184,21 +187,21 @@ function migrateData(value: unknown): OurHomeData {
 
 export class JsonStore {
   private data: OurHomeData;
-  private writeQueue: Promise<void> = Promise.resolve();
+  private mutationQueue: Promise<void> = Promise.resolve();
 
-  private constructor(private readonly filePath: string, data: OurHomeData) {
+  private constructor(private readonly filePath: string, data: OurHomeData, private readonly fileSystem: StoreFileSystem) {
     this.data = data;
   }
 
-  static async open(filePath: string, seed = true): Promise<JsonStore> {
+  static async open(filePath: string, seed = true, fileSystem: StoreFileSystem = defaultFileSystem): Promise<JsonStore> {
     const resolvedPath = resolve(filePath);
     try {
       const raw = await readFile(resolvedPath, "utf8");
-      return new JsonStore(resolvedPath, migrateData(JSON.parse(raw)));
+      return new JsonStore(resolvedPath, migrateData(JSON.parse(raw)), fileSystem);
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-      const store = new JsonStore(resolvedPath, seed ? seedData() : emptyData());
-      await store.persist();
+      const store = new JsonStore(resolvedPath, seed ? seedData() : emptyData(), fileSystem);
+      await store.persist(store.data);
       return store;
     }
   }
@@ -280,10 +283,47 @@ export class JsonStore {
     return result;
   }
 
+  listWakeEvents(status: WakeEventStatus = "pending", limit = 20): WakeEvent[] {
+    return this.snapshot().wakeEvents.filter((item) => item.status === status).slice(0, limit);
+  }
+
+  async applyWakeDecision(id: string, decision: WakeDecision, observedAt = now()): Promise<WakeEvent> {
+    let result: WakeEvent | undefined;
+    await this.update((data) => {
+      result = data.wakeEvents.find((item) => item.id === id);
+      if (!result) throw new Error(`Wake event not found: ${id}`);
+      if (result.status === "handled") return;
+      if (result.status !== "pending") throw new Error(`Pending wake event not found: ${id}`);
+      if (decision.action === "proactive_message") {
+        const existing = data.proactiveQueue.find((item) => item.wakeEventId === id);
+        if (!existing) {
+          const candidate: ProactiveCandidate = {
+            id: randomUUID(), ...decision.candidate,
+            dueAt: decision.candidate.dueAt ?? observedAt,
+            status: "pending", createdAt: observedAt, attempts: 0,
+            source: "AGENT_LIFE", wakeEventId: id,
+          };
+          data.proactiveQueue.unshift(candidate);
+        }
+      }
+      result.status = "handled";
+    });
+    if (!result) throw new Error(`Wake event not found: ${id}`);
+    return result;
+  }
+
   async update(mutator: (data: OurHomeData) => void): Promise<OurHomeData> {
-    mutator(this.data);
-    await this.persist();
-    return this.snapshot();
+    let result: OurHomeData | undefined;
+    const operation = this.mutationQueue.then(async () => {
+      const next = structuredClone(this.data);
+      mutator(next);
+      await this.persist(next);
+      this.data = next;
+      result = structuredClone(next);
+    });
+    this.mutationQueue = operation.catch(() => undefined);
+    await operation;
+    return result!;
   }
 
   async addDiary(input: {
@@ -403,11 +443,16 @@ export class JsonStore {
     reason: string;
     dueAt: string;
     dedupeKey?: string;
+    wakeEventId?: string;
   }): Promise<ProactiveCandidate> {
     if (input.dedupeKey) {
       const existing = this.data.proactiveQueue.find(
         (item) => item.status === "pending" && item.dedupeKey === input.dedupeKey,
       );
+      if (existing) return structuredClone(existing);
+    }
+    if (input.wakeEventId) {
+      const existing = this.data.proactiveQueue.find((item) => item.wakeEventId === input.wakeEventId);
       if (existing) return structuredClone(existing);
     }
     const candidate: ProactiveCandidate = {
@@ -569,14 +614,11 @@ export class JsonStore {
     return result;
   }
 
-  private async persist(): Promise<void> {
-    this.writeQueue = this.writeQueue.then(async () => {
+  private async persist(data: OurHomeData): Promise<void> {
       await mkdir(dirname(this.filePath), { recursive: true });
       const temporaryPath = `${this.filePath}.tmp`;
-      await writeFile(temporaryPath, `${JSON.stringify(this.data, null, 2)}\n`, "utf8");
+      await this.fileSystem.writeFile(temporaryPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
       await rename(temporaryPath, this.filePath);
-    });
-    return this.writeQueue;
   }
 }
 

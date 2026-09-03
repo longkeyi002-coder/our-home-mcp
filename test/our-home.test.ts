@@ -211,19 +211,20 @@ test("failed proactive delivery remains pending for retry", async () => {
 });
 
 test("decision webhook receives life context and creates a deduplicated candidate", async () => {
-  const received: Array<{ type: string; context: { observations: unknown[] } }> = [];
+  const received: Array<{ wakeEvent: { type: string }; context: { observations: unknown[] } }> = [];
   const httpServer = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
     received.push(JSON.parse(Buffer.concat(chunks).toString("utf8")) as typeof received[number]);
     response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
-      candidates: [{
+      action: "proactive_message",
+      candidate: {
         title: "根据观察生成的候选",
         message: "这是决策适配器生成的候选消息。",
         reason: "测试 phone observation 上下文",
         dueAt: "2026-09-01T00:00:00Z",
         dedupeKey: "decision-test",
-      }],
+      },
     }));
   });
   await new Promise<void>((resolve) => httpServer.listen(0, "127.0.0.1", resolve));
@@ -232,11 +233,12 @@ test("decision webhook receives life context and creates a deduplicated candidat
 
   const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
   const store = await JsonStore.open(join(directory, "our-home.json"), false);
+  await runProactiveCycle(store, { deliver: async () => {} }, new Date("2026-09-01T00:00:00Z"));
   await store.recordObservation({
     kind: "screen_app",
     label: "当前前台应用",
     value: "示例应用",
-    observedAt: "2026-09-01T00:00:00Z",
+    observedAt: "2026-09-01T00:00:30Z",
     source: "phone",
     confidence: "observed",
   });
@@ -248,7 +250,7 @@ test("decision webhook receives life context and creates a deduplicated candidat
     new WebhookDecisionEngine(`http://127.0.0.1:${port}/decide`),
   );
 
-  assert.equal(received[0]?.type, "our_home.life_context");
+  assert.equal(received[0]?.wakeEvent.type, "became_active");
   assert.equal(received[0]?.context.observations.length, 1);
   assert.equal(result.deliveredCount, 1);
   assert.deepEqual(receivedMessages, ["这是决策适配器生成的候选消息。"]);

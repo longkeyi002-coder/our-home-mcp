@@ -164,7 +164,12 @@ export interface ProactiveCandidate {
   lastError?: string;
   source: "AGENT_LIFE" | "HOME_STATE";
   dedupeKey?: string;
+  wakeEventId?: string;
 }
+
+export type WakeDecision =
+  | { action: "ignore" }
+  | { action: "proactive_message"; candidate: { title: string; message: string; reason: string; dueAt?: string; dedupeKey?: string } };
 
 export interface LifeContext {
   observedAt: string;

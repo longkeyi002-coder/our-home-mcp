@@ -1,30 +1,25 @@
 import { JsonStore, parseBoolean } from "./store.js";
 import { z } from "zod";
-import type { LifeContext, ProactiveCandidate } from "./types.js";
+import type { LifeContext, ProactiveCandidate, WakeDecision, WakeEvent } from "./types.js";
 
 export interface ProactiveNotifier {
   deliver(candidate: ProactiveCandidate): Promise<void>;
 }
 
 export interface LifeDecisionEngine {
-  evaluate(context: LifeContext): Promise<Array<{
-    title: string;
-    message: string;
-    reason: string;
-    dueAt?: string;
-    dedupeKey?: string;
-  }>>;
+  evaluate(input: { wakeEvent: WakeEvent; context: LifeContext }): Promise<WakeDecision>;
 }
 
-const decisionResponseSchema = z.object({
-  candidates: z.array(z.object({
+const decisionResponseSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("ignore") }),
+  z.object({ action: z.literal("proactive_message"), candidate: z.object({
     title: z.string().trim().min(1).max(200),
     message: z.string().trim().min(1).max(5_000),
     reason: z.string().trim().min(1).max(1_000),
     dueAt: z.string().datetime({ offset: true }).optional(),
     dedupeKey: z.string().trim().max(500).optional(),
-  })).max(20),
-});
+  }) }),
+]);
 
 export class WebhookDecisionEngine implements LifeDecisionEngine {
   constructor(
@@ -32,18 +27,18 @@ export class WebhookDecisionEngine implements LifeDecisionEngine {
     private readonly token?: string,
   ) {}
 
-  async evaluate(context: LifeContext) {
+  async evaluate(input: { wakeEvent: WakeEvent; context: LifeContext }) {
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (this.token) headers.authorization = `Bearer ${this.token}`;
     const response = await fetch(this.url, {
       method: "POST",
       headers,
-      body: JSON.stringify({ type: "our_home.life_context", context }),
+      body: JSON.stringify(input),
     });
     if (!response.ok) throw new Error(`Decision engine returned HTTP ${response.status}`);
     const parsed = decisionResponseSchema.safeParse(await response.json());
     if (!parsed.success) throw new Error("Decision engine returned an invalid candidate payload");
-    return parsed.data.candidates;
+    return parsed.data;
   }
 }
 
@@ -89,18 +84,17 @@ export async function runProactiveCycle(
   const heartbeat = await store.recordHeartbeat("独立 Life Loop 心跳：检查主动消息队列。");
   const wakeEvents = await store.evaluateWakeEvents(asOf.toISOString());
   if (decisionEngine) {
-    try {
-      const candidates = await decisionEngine.evaluate(store.getLifeContext(asOf.toISOString()));
-      for (const candidate of candidates) {
-        await store.scheduleProactiveMessage({
-          ...candidate,
-          dueAt: candidate.dueAt ?? asOf.toISOString(),
-          dedupeKey: candidate.dedupeKey ?? `${candidate.title}\u0000${candidate.message}`,
-        });
+    for (const wakeEvent of store.listWakeEvents("pending", 5)) {
+      try {
+        const decision = decisionResponseSchema.parse(await decisionEngine.evaluate({
+          wakeEvent,
+          context: store.getLifeContext(asOf.toISOString()),
+        }));
+        await store.applyWakeDecision(wakeEvent.id, decision, asOf.toISOString());
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown decision engine error";
+        process.stderr.write(`[our-home] wake decision failed: ${wakeEvent.id}: ${message}\n`);
       }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Unknown decision engine error";
-      process.stderr.write(`[our-home] decision engine failed: ${message}\n`);
     }
   }
   const due = store.listDueProactiveMessages(asOf.toISOString());
