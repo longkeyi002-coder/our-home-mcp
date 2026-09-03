@@ -352,7 +352,10 @@ test("usage summary retention removes old data and compacts duplicate buckets", 
   const directory = await mkdtemp(join(tmpdir(), "our-home-usage-retention-"));
   const store = await JsonStore.open(join(directory, "our-home.json"), false);
   const now = Date.now();
-  const recent = new Date(now - 60 * 60 * 1000).toISOString();
+  const recentDate = new Date(now);
+  recentDate.setUTCHours(10, 0, 0, 0);
+  const recent = recentDate.toISOString();
+  const duplicateInSameHour = new Date(recentDate.getTime() + 30 * 60 * 1000).toISOString();
   const old = new Date(now - 15 * 24 * 60 * 60 * 1000).toISOString();
 
   await store.recordObservation({
@@ -384,7 +387,7 @@ test("usage summary retention removes old data and compacts duplicate buckets", 
   await store.recordObservation({
     kind: "usage_summary",
     label: "app usage timeline",
-    observedAt: new Date(now - 30 * 60 * 1000).toISOString(),
+    observedAt: duplicateInSameHour,
     source: "phone",
     confidence: "observed",
     deviceId: "android-test",
