@@ -37,6 +37,17 @@ test("recent foreground app derives active_on_phone", () => {
   assert.ok(state.confidence > 0.8);
 });
 
+test("periodic usage summary drives life state without a screen_app observation", () => {
+  const state = deriveLifeState([
+    observation({ kind: "device_presence", observedAt: "2026-09-03T11:59:00.000Z", value: "online", metadata: { batteryPercent: 63, charging: false, connectivityState: "online" } }),
+    observation({ kind: "usage_summary", observedAt: "2026-09-03T11:59:30.000Z", metadata: { currentPackage: "com.example.video", currentDurationMs: "120000" } }),
+  ], asOf);
+  assert.equal(state.currentActivity, "active_on_phone");
+  assert.equal(state.foregroundPackage, "com.example.video");
+  assert.equal(state.batteryPercent, 63);
+  assert.equal(state.connectivityState, "online");
+});
+
 test("stale foreground app is not treated as current", () => {
   const state = deriveLifeState([
     observation({ kind: "device_presence", observedAt: "2026-09-03T11:40:00.000Z", value: "screen_off", metadata: { batteryPercent: 40, charging: true, connectivityState: "online" } }),

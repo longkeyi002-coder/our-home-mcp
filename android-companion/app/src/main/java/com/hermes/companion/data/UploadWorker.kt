@@ -10,14 +10,37 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import com.hermes.companion.BuildConfig
+import java.time.Instant
 import java.util.concurrent.TimeUnit
 
 class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val queue = QueueRepository.create(applicationContext)
+        val settings = SettingsRepository(applicationContext)
+        val status = com.hermes.companion.platform.DeviceStatusReader.read(applicationContext)
+        val now = System.currentTimeMillis()
+        val bucket = now / (15 * 60 * 1000L)
+        queue.enqueueHeartbeat(
+            HeartbeatRequest(
+                deviceId = settings.deviceId(),
+                batteryPercent = status.batteryPercent,
+                charging = status.charging,
+                appVersion = BuildConfig.VERSION_NAME,
+                connectivityState = if (status.online) "online" else "offline",
+                foregroundPackage = status.foregroundPackage,
+                observedAt = Instant.ofEpochMilli(now).toString(),
+                clientEventId = "periodic-heartbeat:${settings.deviceId()}:$bucket",
+            ),
+            scheduleUpload = false,
+        )
         val usage = com.hermes.companion.platform.UsageTimelineReader.read(applicationContext)
         if (usage != null) {
-            queue.enqueueUsageSummary(usage, SettingsRepository(applicationContext).deviceId(), scheduleUpload = false)
+            queue.enqueueUsageSummary(usage, settings.deviceId(), scheduleUpload = false)
+        }
+        if (!status.online) {
+            enqueue(applicationContext)
+            return Result.success()
         }
         val result = queue.uploadPending()
         return if (result.error == null) Result.success() else Result.retry()
@@ -37,7 +60,7 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
 
         fun schedulePeriodic(context: Context) {
             val request = PeriodicWorkRequestBuilder<UploadWorker>(15, TimeUnit.MINUTES)
-                .setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                .setConstraints(androidx.work.Constraints.Builder().build())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .build()
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(PERIODIC_NAME, ExistingPeriodicWorkPolicy.KEEP, request)

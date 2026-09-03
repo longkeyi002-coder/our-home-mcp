@@ -81,6 +81,20 @@ class QueueRepositoryTest {
         assertEquals(1, database.pendingEventDao().count())
     }
 
+    @Test
+    fun periodicHeartbeatIsDeduplicatedByStableEventId() = runBlocking {
+        val settings = SettingsRepository(ApplicationProvider.getApplicationContext())
+        settings.saveServerUrl("https://example.com")
+        settings.saveBootstrapToken("bootstrap")
+        val request = sampleHeartbeat().copy(clientEventId = "periodic-heartbeat:android-test:42")
+        val repository = QueueRepository.forTest(database.pendingEventDao(), settings) { successfulApi() }
+
+        repository.enqueueHeartbeat(request, scheduleUpload = false)
+        repository.enqueueHeartbeat(request, scheduleUpload = false)
+
+        assertEquals(1, database.pendingEventDao().count())
+    }
+
     private fun sampleHeartbeat() = HeartbeatRequest("android-test", batteryPercent = 82, charging = false, appVersion = "0.1.0", connectivityState = "online", observedAt = "2026-09-02T00:00:00Z", clientEventId = "event-${System.nanoTime()}")
 
     private fun successfulApi() = object : HermesApi {

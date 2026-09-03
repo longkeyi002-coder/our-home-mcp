@@ -230,6 +230,7 @@ async function handlePhoneHeartbeat(
         source: "phone",
         confidence: "observed",
         deviceId: parsed.data.deviceId,
+        clientEventId: parsed.data.clientEventId ? `${parsed.data.clientEventId}:foreground` : undefined,
       });
     }
     response.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({ observation, foregroundObservation, dataSource: "phone-ingest" }));

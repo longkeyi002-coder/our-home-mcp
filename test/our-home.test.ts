@@ -117,6 +117,49 @@ test("usage summary observations preserve structured timeline metadata", async (
   assert.equal(store.getLifeContext("2026-09-03T00:01:00Z").observations[0]?.metadata?.appTotalsMs, '{"com.example.app":120000}');
 });
 
+test("periodic usage summary is used by home.get_life_context", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "our-home-usage-context-"));
+  const store = await JsonStore.open(join(directory, "our-home.json"), false);
+  await store.recordObservation({
+    kind: "device_presence",
+    label: "手机在线",
+    value: "online",
+    observedAt: "2026-09-03T11:59:00.000Z",
+    source: "phone",
+    confidence: "observed",
+    metadata: { batteryPercent: 63, charging: false, connectivityState: "online" },
+  });
+  await store.recordObservation({
+    kind: "usage_summary",
+    label: "app usage timeline",
+    observedAt: "2026-09-03T11:59:30.000Z",
+    source: "phone",
+    confidence: "observed",
+    metadata: { currentPackage: "com.example.video", currentDurationMs: "120000" },
+  });
+
+  const context = store.getLifeContext("2026-09-03T12:00:00.000Z");
+  assert.equal(context.lifeState.currentActivity, "active_on_phone");
+  assert.equal(context.lifeState.foregroundPackage, "com.example.video");
+});
+
+test("concurrent phone observation retries with one client event id are deduplicated", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "our-home-observation-dedupe-"));
+  const store = await JsonStore.open(join(directory, "our-home.json"), false);
+  const input = {
+    kind: "usage_summary" as const,
+    label: "app usage timeline",
+    observedAt: "2026-09-03T11:59:30.000Z",
+    source: "phone" as const,
+    confidence: "observed" as const,
+    deviceId: "android-test",
+    clientEventId: "usage-summary:android-test:2026-09-03:1",
+    metadata: { currentPackage: "com.example.video" },
+  };
+  await Promise.all([store.recordObservation(input), store.recordObservation(input)]);
+  assert.equal(store.snapshot().observations.length, 1);
+});
+
 test("does not expose private diaries unless explicitly requested", async () => {
   const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
   const store = await JsonStore.open(join(directory, "our-home.json"), false);

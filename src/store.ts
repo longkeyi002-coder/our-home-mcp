@@ -421,9 +421,25 @@ export class JsonStore {
     expiresAt?: string;
     deviceId?: string;
     metadata?: Record<string, string | number | boolean>;
+    clientEventId?: string;
   }): Promise<LifeObservation> {
-    const observation: LifeObservation = { id: randomUUID(), ...input };
+    let result: LifeObservation | undefined;
     await this.update((data) => {
+      const clientEventId = input.clientEventId
+        ?? (typeof input.metadata?.clientEventId === "string" ? input.metadata.clientEventId : undefined);
+      const existing = clientEventId
+        ? data.observations.find((item) => item.deviceId === input.deviceId && item.metadata?.clientEventId === clientEventId)
+        : undefined;
+      if (existing) {
+        result = existing;
+        return;
+      }
+      const { clientEventId: _ignoredClientEventId, ...observationInput } = input;
+      const observation: LifeObservation = {
+        id: randomUUID(),
+        ...observationInput,
+        metadata: clientEventId ? { ...(input.metadata ?? {}), clientEventId } : input.metadata,
+      };
       data.observations.unshift(observation);
       appendActivity(data, {
         kind: "observation_recorded",
@@ -431,8 +447,10 @@ export class JsonStore {
         summary: observation.label,
         source: "HOME_STATE",
       });
+      result = observation;
     });
-    return observation;
+    if (!result) throw new Error("Observation was not recorded");
+    return structuredClone(result);
   }
 
   async addRoutine(input: {

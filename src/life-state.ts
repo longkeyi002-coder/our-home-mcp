@@ -35,6 +35,11 @@ function metadataBoolean(item: LifeObservation | undefined, key: string): boolea
   return typeof value === "boolean" ? value : null;
 }
 
+function metadataString(item: LifeObservation | undefined, key: string): string | null {
+  const value = item?.metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 function metadataNumber(item: LifeObservation | undefined, key: string): number | null {
   const value = item?.metadata?.[key];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
@@ -52,7 +57,14 @@ function asConnectivity(value: unknown): ConnectivityState {
 
 function isPhoneActivity(item: LifeObservation): boolean {
   return item.kind === "screen_app" && Boolean(item.value?.trim())
+    || item.kind === "usage_summary" && Boolean(metadataString(item, "currentPackage") || item.value?.trim())
     || item.kind === "device_presence" && (item.value === "screen_on");
+}
+
+function foregroundPackage(item: LifeObservation | undefined): string | null {
+  if (!item) return null;
+  if (item.kind === "usage_summary") return metadataString(item, "currentPackage") ?? item.value?.trim() ?? null;
+  return item.value?.trim() || null;
 }
 
 function stateValue(state: LifeState, field: TransitionField): string {
@@ -68,19 +80,23 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
   );
   const latestAny = newest(historical, () => true);
   const latestDevice = newest(usable, (item) => item.kind === "device_presence");
-  const latestForeground = newest(usable, (item) => item.kind === "screen_app" && Boolean(item.value?.trim()));
+  const latestForeground = newest(
+    usable,
+    (item) => (item.kind === "screen_app" && Boolean(item.value?.trim()))
+      || (item.kind === "usage_summary" && Boolean(foregroundPackage(item))),
+  );
   const latestConnectivity = newest(usable, (item) => item.metadata?.connectivityState !== undefined);
   const latestActivity = newest(historical, isPhoneActivity);
 
   const lastObservedAt = latestAny?.observedAt ?? null;
   const lastPhoneActivityAt = latestActivity?.observedAt ?? null;
   const devicePresence = asDevicePresence(latestDevice?.value);
-  const foregroundPackage = latestForeground?.value?.trim() || null;
+  const currentForegroundPackage = foregroundPackage(latestForeground);
   const batteryPercent = metadataNumber(latestDevice, "batteryPercent");
   const charging = metadataBoolean(latestDevice, "charging");
   const connectivityState = asConnectivity(latestConnectivity?.metadata?.connectivityState);
   const activityAgeMs = lastPhoneActivityAt ? asOfMs - timestamp(lastPhoneActivityAt) : Number.POSITIVE_INFINITY;
-  const hasRecentActivity = Boolean(latestForeground) && activityAgeMs <= LIFE_STATE_ACTIVITY_WINDOW_MS;
+  const hasRecentActivity = Boolean(currentForegroundPackage) && activityAgeMs <= LIFE_STATE_ACTIVITY_WINDOW_MS;
   const hasRecentDevice = Boolean(latestDevice);
   const reasons: string[] = [];
   let currentActivity: LifeActivity = "unknown";
@@ -122,7 +138,7 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
     lastObservedAt,
     lastPhoneActivityAt,
     devicePresence,
-    foregroundPackage,
+    foregroundPackage: currentForegroundPackage,
     batteryPercent,
     charging,
     connectivityState,
