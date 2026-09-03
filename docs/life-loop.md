@@ -1,69 +1,107 @@
-# Our Home Life Loop
+# Our Home Life Loop — Roadmap V2
 
-## 目标
+## 核心模型
 
-让 Our Home 拥有一个独立于 Hermes Cron 的长期运行层：保存连续上下文、接收明确的生活观察、维持心跳、生成主动消息候选，并把候选交给通知通道。
-
-## 为什么不是 Hermes Cron
-
-Hermes Cron 适合一次性或周期性任务，但如果每次触发都开启一个新的 session，就不适合作为关系和生活状态的唯一上下文。Life Loop 把上下文放在 Our Home 的结构化数据层中，心跳只读取和更新这份长期状态。
+Our Home Runtime 负责**持续保存、整理和验证状态**；Hermes 不是常驻采集器，而是在发生明确的 Wake Event、用户真实对话或需要决策时按需唤醒。
 
 ```text
-手机 / 用户填写 / 其他适配器
-             ↓
-      observations + routines
-             ↓
-       独立 Life Loop 心跳
-             ↓
-     读取持续上下文并评估候选
-             ↓
-    proactive message candidate
-             ↓
-     webhook / 手机通知适配器
+Phone facts / user declarations
+          ↓
+Local MCP or Cloud Runtime
+          ↓
+Persistent observations + Life State
+          ↓
+Wake Event (only when a transition is meaningful)
+          ↓
+Hermes activation on demand
+          ↓
+WakeDecision candidate
+          ↓
+Configured notification delivery
 ```
 
-Hermes 可以调用 MCP 工具参与推理和执行，但不是 Life Loop 的必需进程。
+这不是“AI 一直醒着观察用户”。Runtime 可以独立运行和重试；没有足够事实、没有 Wake Event 或没有用户对话时，Hermes 不需要被调用。
 
-## 当前实现
+## 事实、推断与表达
 
-- `home.record_observation`：保存带来源和置信级别的生活观察。
-- `home.add_routine`：保存用户声明的生活时间段；不会创建 Hermes Cron。
-- `home.get_life_context`：读取观察、时间表、心跳和待处理主动消息。
-- `home.schedule_proactive_message`：创建待投递的主动消息候选。
-- `src/worker.ts`：独立心跳、把生活上下文交给可替换的决策适配器、处理到期候选、调用通知适配器。
-- `POST /v1/phone/heartbeat` 和 `POST /v1/observations`：接收手机端明确授权上报的状态与观察。
-- `POST /v1/phone/register`：用已有的 phone ingest token 为一个 device ID 派生设备凭据；旧的共享 token 调用保持兼容。
-- JSON store：当前是原型持久化层，后续可替换数据库。
+- **事实（observation）**：由手机、日历或用户明确提供；必须保存 source、deviceId、observedAt 和 confidence。
+- **Life State**：对当前有效事实的受限聚合，例如“最近有前台 App”或“设备报告充电”。它不是情绪、睡眠、姿势或意图的断言。
+- **Wake Event**：Life State 的明确转换，例如 became_active、became_idle 或 charging_started。
+- **推断/决定（WakeDecision）**：Hermes 或另一个决策器产生的候选；不能回写成现实事实。
+- **表达（proactive delivery）**：候选经通知通道投递；失败保留 pending，不能伪称已送达。
 
-配置决策 Webhook 后，worker 会把结构化 `LifeContext` 发给外部决策服务；决策服务返回候选消息，worker 再负责去重、到期判断和投递。这样可以接入任意模型或已有 Agent，但本项目本身不假装内置了一个模型。
+无数据、过期数据或冲突数据必须呈现为 unknown/unavailable，而不是用旧状态补全。
 
-手机端只提供数据入口，不代表服务已经获得手机权限。真正的屏幕、日历、位置或通知能力，仍需要手机 companion/app 在系统授权后采集，并将摘要发送到这些接口。
+## 两种传输职责
 
-## 自我唤醒的准确含义
+### Local MCP Mode
 
-这里的“自我唤醒”不是 MCP 服务在没有任何进程时自己运行，而是一个由系统管理器保持运行的常驻 worker：
+Local MCP 是同一台 Android 手机上的即时读取通道：
 
-1. worker 按心跳间隔醒来。
-2. 读取 Our Home 的连续上下文。
-3. 检查是否有到期或需要重试的候选消息。
-4. 交给通知适配器；成功才标记为 `delivered`，失败保持 `pending`。
+```text
+Hermes/RikkaHub host on the same phone
+        ↓ MCP Streamable HTTP
+127.0.0.1:<port>/mcp/<installation-secret>
+        ↓
+Android Companion facts
+```
 
-以后可以在第 2 步接入独立的模型决策器。决策器必须把“观察到的事实”和“推测”分开，并将自己的判断写成候选，而不是直接伪装成事实。
+它只绑定 loopback、使用安装级随机 secret、拒绝浏览器 Origin，且不返回 Cloud bootstrap/device token。Local Mode 只提供确定性的本机工具和当前设备事实；不向 Cloud Runtime 双写实时 observation。没有前台服务时，Android 杀死 Companion 进程后 Local MCP 会停止。
 
-## 数据真实性
+### Cloud Runtime Mode
 
-- 手机、屏幕、日历和天气只有在对应适配器实际提供数据后，才能写入 observation。
-- `source` 和 `confidence` 必须随观察保存。
-- `AGENT_LIFE` 是 AI 的日记、留言或表达，不等于现实事件。
-- `RELATIONSHIP` 事件在双方确认前只能是提案。
-- 没有数据时返回空、未知或 placeholder，不用默认值冒充真实状态。
+Cloud Mode 是远程/备用的持久链路：
 
-## 后续阶段
+```text
+Android WorkManager
+        ↓ protected HTTPS
+Cloud Runtime → Life State → Wake Engine → Hermes → FCM
+```
 
-1. **当前阶段**：JSON store + 独立 worker + 通用 webhook。
-2. **持久化阶段**：SQLite/Postgres、迁移、并发锁、用户级鉴权。
-3. **手机阶段**：手机 companion 只上传用户授权的状态摘要，不默认上传屏幕内容。
-4. **决策阶段**：接入模型决策器、冷却时间、安静时段、每日上限和人工确认。
-5. **渠道阶段**：分别实现 Telegram、系统推送或其他用户明确选择的渠道。
+Cloud Runtime 接收授权上报、保存历史、维持 activePhoneDeviceId、生成 Wake Event，并在需要时调用 Hermes。当前 Life State 与 FCM 只使用 active device；旧 device 保留历史但不污染当前状态。
 
-在完成身份、权限和通知确认前，不应把个人生活数据服务直接暴露到公网。
+Local 与 Cloud 是明确模式，不得让同一份实时状态同时双写。
+
+## Roadmap V2
+
+### V0.1 — Phone Reality Integrity + Local MCP
+
+- Android 仅上报/读取用户授权的设备事实。
+- 前台 App 过滤 Companion、Launcher、Settings、System UI，并带 freshness。
+- Cloud Runtime 引入 activePhoneDeviceId；当前 Life State、Wake 与 FCM 不跨设备混合。
+- Local MCP Streamable HTTP：loopback、安装级 secret、health/device-context/current-usage/local-notification。
+- Cloud 与 Local 模式互斥；不做截图、Accessibility、设备控制或前台服务。
+- Diagnostics 显示 phone → Runtime → Life State → Wake → decision → delivery 的已知检查点。
+
+### V0.2 — 验证与可靠性
+
+- 真机验证 Local MCP 同机宿主兼容性、后台 WorkManager、权限拒绝和厂商省电限制。
+- 补强 observation freshness、重复事件、队列恢复与诊断可读性。
+- 不扩大采集范围；所有“not verified”保持显式。
+
+### V0.3 — 决策边界
+
+- 仅在有 Wake Event 或用户对话时按需激活 Hermes。
+- 加入冷却、安静时段、每日上限、可解释的候选和人工确认边界。
+- 决策失败时保持 pending/retry，不把失败写成已处理。
+
+### V0.4 — 可选通知通道
+
+- 在用户明确配置后完善 FCM 或其他通知适配器。
+- 保持 active device 路由、投递 ACK 与失败诊断。
+- 不新增任意系统控制。
+
+### V1.0 — 可审计个人 Runtime
+
+- 用可靠持久化层替代原型 JSON store。
+- 完成迁移、备份、访问控制、数据导出/删除与长期兼容。
+- 对每条事实、推断、Wake、决策和投递保留可审计来源链。
+
+V0.4 及之后是路线图，不是当前实现范围。
+
+## 当前限制
+
+- `127.0.0.1` 只能由同一台 Android 手机上的宿主访问；电脑、云端 Hermes 和其他设备不能直接访问。
+- CI 不能替代真机 MCP host compatibility 测试；未做真机测试时必须标记 **not verified**。
+- Runtime 维持状态不代表 Hermes 永久运行。
+- 在身份、权限和通知确认前，不应把个人生活数据裸露到公网。
