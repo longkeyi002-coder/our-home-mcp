@@ -2,6 +2,7 @@ package com.hermes.companion
 
 import com.hermes.companion.platform.UsageCategoryClassifier
 import com.hermes.companion.platform.UsageTimelineTracker
+import com.hermes.companion.platform.FOREGROUND_FRESHNESS_MS
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import org.junit.Test
@@ -61,6 +62,21 @@ class UsageTimelineTest {
         assertEquals(listOf(3_000L, 2_000L), summary.sessions.map { it.durationMs })
         assertEquals("com.example.second", summary.currentPackageName)
         assertEquals(2_000L, summary.currentDurationMs)
+    }
+
+    @Test
+    fun staleForegroundSessionStopsAtFreshnessBoundary() {
+        val tracker = UsageTimelineTracker()
+        val startedAt = 1_000L
+        tracker.onForeground("com.example.app", startedAt)
+
+        val now = startedAt + FOREGROUND_FRESHNESS_MS + 60_000L
+        val summary = tracker.summary(now, 0L)
+
+        assertNull(summary.currentPackageName)
+        assertEquals(FOREGROUND_FRESHNESS_MS, summary.sessions.single().durationMs)
+        assertEquals(FOREGROUND_FRESHNESS_MS, summary.appTotalsMs.getValue("com.example.app"))
+        assertEquals(FOREGROUND_FRESHNESS_MS, summary.categoryTotalsMs.getValue("other"))
     }
 
     @Test
