@@ -10,8 +10,14 @@ import com.hermes.companion.push.PushRegistration
 class HermesCompanionApplication : Application() {
     override fun onCreate() {
         super.onCreate()
-        if (SettingsRepository(this).isLocalMode()) LocalMcpServer.start(this) else UploadWorker.schedulePeriodic(this)
+        val settings = SettingsRepository(this)
+        if (settings.isLocalMode()) {
+            UploadWorker.cancelCloudWork(this)
+            LocalMcpServer.start(this)
+        } else {
+            UploadWorker.schedulePeriodic(this)
+            PushRegistration.refresh(this)
+        }
         HermesNotifications.createChannel(this)
-        PushRegistration.refresh(this)
     }
 }
