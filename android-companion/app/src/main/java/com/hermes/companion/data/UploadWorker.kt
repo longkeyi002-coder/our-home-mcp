@@ -14,7 +14,12 @@ import java.util.concurrent.TimeUnit
 
 class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        val result = QueueRepository.create(applicationContext).uploadPending()
+        val queue = QueueRepository.create(applicationContext)
+        val usage = com.hermes.companion.platform.UsageTimelineReader.read(applicationContext)
+        if (usage != null) {
+            queue.enqueueUsageSummary(usage, SettingsRepository(applicationContext).deviceId(), scheduleUpload = false)
+        }
+        val result = queue.uploadPending()
         return if (result.error == null) Result.success() else Result.retry()
     }
 

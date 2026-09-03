@@ -35,6 +35,7 @@ data class ObservationRequest(
     val observedAt: String,
     val deviceId: String,
     val metadata: Map<String, String>? = null,
+    val clientEventId: String? = null,
 )
 
 data class AppTimelineEntry(
@@ -42,7 +43,11 @@ data class AppTimelineEntry(
     val startedAt: String,
     val endedAt: String?,
     val durationMs: Long,
+    val category: String = "other",
 )
 
 @Serializable
 data class ApiAck(val dataSource: String? = null)
+
+@Serializable
+data class HealthResponse(val ok: Boolean, val service: String? = null, val schemaVersion: Int? = null)

@@ -15,7 +15,8 @@ export type ObservationKind =
   | "screen_app"
   | "calendar"
   | "weather"
-  | "note";
+  | "note"
+  | "usage_summary";
 export type ObservationSource = "user" | "phone" | "screen" | "calendar" | "system" | "mock";
 export type ObservationConfidence = "observed" | "declared" | "inferred";
 export type ProactiveCandidateStatus = "pending" | "delivered" | "dismissed";

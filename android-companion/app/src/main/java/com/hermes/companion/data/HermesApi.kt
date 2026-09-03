@@ -1,10 +1,14 @@
 package com.hermes.companion.data
 
 import retrofit2.http.Body
+import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
 
 interface HermesApi {
+    @GET("healthz")
+    suspend fun health(): HealthResponse
+
     @POST("v1/phone/register")
     suspend fun register(
         @Header("Authorization") authorization: String,

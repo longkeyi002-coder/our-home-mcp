@@ -96,6 +96,27 @@ test("home.get_life_context returns the derived life state", async () => {
   await server.close();
 });
 
+test("usage summary observations preserve structured timeline metadata", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "our-home-usage-"));
+  const store = await JsonStore.open(join(directory, "our-home.json"), false);
+  const observation = await store.recordObservation({
+    kind: "usage_summary",
+    label: "app usage timeline",
+    observedAt: "2026-09-03T00:00:00Z",
+    source: "phone",
+    confidence: "observed",
+    deviceId: "android-test",
+    metadata: {
+      clientEventId: "usage-summary:android-test:2026-09-03:1",
+      appTotalsMs: '{"com.example.app":120000}',
+      categoryTotalsMs: '{"other":120000}',
+    },
+  });
+  assert.equal(observation.kind, "usage_summary");
+  assert.equal(observation.metadata?.clientEventId, "usage-summary:android-test:2026-09-03:1");
+  assert.equal(store.getLifeContext("2026-09-03T00:01:00Z").observations[0]?.metadata?.appTotalsMs, '{"com.example.app":120000}');
+});
+
 test("does not expose private diaries unless explicitly requested", async () => {
   const directory = await mkdtemp(join(tmpdir(), "our-home-mcp-"));
   const store = await JsonStore.open(join(directory, "our-home.json"), false);

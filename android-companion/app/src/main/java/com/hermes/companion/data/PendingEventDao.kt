@@ -19,6 +19,12 @@ interface PendingEventDao {
     @Query("DELETE FROM pending_events WHERE id = :id")
     suspend fun delete(id: String)
 
+    @Query("DELETE FROM pending_events")
+    suspend fun deleteAll(): Int
+
+    @Query("DELETE FROM pending_events WHERE id NOT IN (SELECT id FROM pending_events ORDER BY createdAt DESC LIMIT :limit)")
+    suspend fun trimToLimit(limit: Int)
+
     @Query("UPDATE pending_events SET attempts = attempts + 1, lastError = :error, nextAttemptAt = :nextAttemptAt WHERE id = :id")
     suspend fun recordFailure(id: String, error: String, nextAttemptAt: Long)
 }

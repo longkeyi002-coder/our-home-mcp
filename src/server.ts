@@ -171,7 +171,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
       title: "Record a life observation",
       description: "Store an explicitly supplied observation from the user, phone, screen, calendar, or another adapter. This tool does not claim the observation is independently verified.",
       inputSchema: {
-        kind: z.enum(["manual_status", "device_presence", "screen_app", "calendar", "weather", "note"]),
+        kind: z.enum(["manual_status", "device_presence", "screen_app", "calendar", "weather", "note", "usage_summary"]),
         label: z.string().trim().min(1).max(200),
         value: z.string().trim().max(2_000).optional(),
         observedAt: dateSchema,
@@ -180,13 +180,14 @@ export function createOurHomeServer(store: JsonStore): McpServer {
         expiresAt: dateSchema.optional(),
         deviceId: z.string().trim().max(200).optional(),
         metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+        clientEventId: z.string().trim().max(300).optional(),
       },
       outputSchema: z.object({ observation: z.record(z.string(), z.unknown()), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ kind, label, value, observedAt, source, confidence, expiresAt, deviceId, metadata }) => {
+    async ({ kind, label, value, observedAt, source, confidence, expiresAt, deviceId, metadata, clientEventId }) => {
       try {
-        const observation = await store.recordObservation({ kind, label, value, observedAt, source, confidence, expiresAt, deviceId, metadata });
+        const observation = await store.recordObservation({ kind, label, value, observedAt, source, confidence, expiresAt, deviceId, metadata: clientEventId ? { ...(metadata ?? {}), clientEventId } : metadata });
         return structured({ observation, dataSource: "local-mock" as const });
       } catch (error) {
         return toolError(error);
@@ -200,7 +201,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
       title: "List life observations",
       description: "List explicitly recorded life observations. Expired observations are excluded by default.",
       inputSchema: {
-        kind: z.enum(["manual_status", "device_presence", "screen_app", "calendar", "weather", "note"]).optional(),
+        kind: z.enum(["manual_status", "device_presence", "screen_app", "calendar", "weather", "note", "usage_summary"]).optional(),
         source: z.enum(["user", "phone", "screen", "calendar", "system", "mock"]).optional(),
         includeExpired: z.boolean().default(false),
         limit: z.number().int().min(1).max(200).default(50),

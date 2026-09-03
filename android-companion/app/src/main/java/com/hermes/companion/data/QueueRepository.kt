@@ -3,6 +3,7 @@ package com.hermes.companion.data
 import android.content.Context
 import androidx.room.Room
 import com.hermes.companion.BuildConfig
+import com.hermes.companion.platform.UsageTimelineSummary
 import java.time.LocalDate
 import java.util.UUID
 import kotlin.math.min
@@ -32,6 +33,7 @@ class QueueRepository private constructor(
 
     suspend fun enqueueTimeline(entries: List<AppTimelineEntry>, deviceId: String) {
         entries.forEach { entry ->
+            val sessionId = "timeline:$deviceId:${entry.startedAt}:${entry.packageName}"
             enqueueObservation(
                 ObservationRequest(
                     kind = "app_timeline",
@@ -43,13 +45,43 @@ class QueueRepository private constructor(
                         "startedAt" to entry.startedAt,
                         "endedAt" to (entry.endedAt ?: ""),
                         "durationMs" to entry.durationMs.toString(),
+                        "category" to entry.category,
                     ),
+                    clientEventId = sessionId,
                 ),
-                dedupeKey = "timeline:$deviceId:${entry.startedAt}:${entry.packageName}",
+                dedupeKey = sessionId,
                 scheduleUpload = false,
             )
         }
         if (entries.isNotEmpty()) UploadWorker.enqueue(settings.context)
+    }
+
+    suspend fun enqueueUsageSummary(summary: UsageTimelineSummary, deviceId: String, scheduleUpload: Boolean = true) {
+        val day = LocalDate.now().toString()
+        val bucket = summary.observedAt / (60 * 60 * 1000L)
+        val clientEventId = "usage-summary:$deviceId:$day:$bucket"
+        val metadata = mapOf(
+            "day" to day,
+            "currentPackage" to (summary.currentPackageName ?: ""),
+            "currentDurationMs" to summary.currentDurationMs.toString(),
+            "appTotalsMs" to json.encodeToString(summary.appTotalsMs),
+            "categoryTotalsMs" to json.encodeToString(summary.categoryTotalsMs),
+            "sessions" to json.encodeToString(summary.sessions),
+        )
+        enqueue(
+            type = TYPE_OBSERVATION,
+            payload = json.encodeToString(ObservationRequest(
+                kind = "usage_summary",
+                label = "app usage timeline",
+                value = summary.currentPackageName,
+                observedAt = java.time.Instant.ofEpochMilli(summary.observedAt).toString(),
+                deviceId = deviceId,
+                metadata = metadata,
+                clientEventId = clientEventId,
+            )),
+            dedupeKey = clientEventId,
+            scheduleUpload = scheduleUpload,
+        )
     }
 
     suspend fun enqueueSteps(steps: Long, deviceId: String, observedAt: String) {
@@ -74,6 +106,8 @@ class QueueRepository private constructor(
     )
 
     suspend fun pendingCount(): Int = dao.count()
+
+    suspend fun clearPendingQueue(): Int = dao.deleteAll()
 
     suspend fun uploadPending(now: Long = System.currentTimeMillis()): UploadResult {
         val serverUrl = settings.serverUrl()
@@ -163,6 +197,7 @@ class QueueRepository private constructor(
 
     private suspend fun enqueue(type: String, payload: String, dedupeKey: String, scheduleUpload: Boolean = true) {
         dao.insert(PendingEvent(UUID.randomUUID().toString(), type, payload, dedupeKey, System.currentTimeMillis()))
+        dao.trimToLimit(MAX_PENDING_EVENTS)
         if (scheduleUpload) UploadWorker.enqueue(settings.context)
     }
 
@@ -173,6 +208,7 @@ class QueueRepository private constructor(
         const val TYPE_OBSERVATION = "observation"
         const val BASE_BACKOFF_MS = 30_000L
         const val MAX_BACKOFF_MS = 6 * 60 * 60 * 1000L
+        const val MAX_PENDING_EVENTS = 500
 
         fun create(context: Context): QueueRepository {
             val database = Room.databaseBuilder(context, AppDatabase::class.java, "hermes-companion.db").build()

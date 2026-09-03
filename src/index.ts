@@ -13,13 +13,14 @@ const seed = parseBoolean(process.env.OUR_HOME_SEED, true);
 const store = await JsonStore.open(dataFile, seed);
 
 const phoneObservationSchema = z.object({
-  kind: z.enum(["manual_status", "device_presence", "screen_app", "calendar", "weather", "note"]),
+  kind: z.enum(["manual_status", "device_presence", "screen_app", "calendar", "weather", "note", "usage_summary"]),
   label: z.string().trim().min(1).max(200),
   value: z.string().trim().max(2_000).optional(),
   observedAt: z.string().datetime({ offset: true }).optional(),
   expiresAt: z.string().datetime({ offset: true }).optional(),
   deviceId: z.string().trim().min(1).max(200).optional(),
   metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
+  clientEventId: z.string().trim().max(300).optional(),
 });
 
 const phoneObservationEnvelopeSchema = z.union([
@@ -150,11 +151,19 @@ async function handlePhoneObservations(
     }
     const observations = [];
     for (const item of items) {
+      const existing = item.clientEventId
+        ? store.snapshot().observations.find((observation) => observation.deviceId === item.deviceId && observation.metadata?.clientEventId === item.clientEventId)
+        : undefined;
+      if (existing) {
+        observations.push(existing);
+        continue;
+      }
       observations.push(await store.recordObservation({
         ...item,
         observedAt: item.observedAt ?? new Date().toISOString(),
         source: "phone",
         confidence: "observed",
+        metadata: item.clientEventId ? { ...(item.metadata ?? {}), clientEventId: item.clientEventId } : item.metadata,
       }));
     }
     response.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({ observations, dataSource: "phone-ingest" }));

@@ -1,8 +1,6 @@
 package com.hermes.companion.platform
 
 import android.app.AppOpsManager
-import android.app.usage.UsageEvents
-import android.app.usage.UsageStatsManager
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
@@ -34,21 +32,7 @@ object DeviceStatusReader {
     }
 
     fun currentForegroundPackage(context: Context): String? {
-        if (!hasUsageAccess(context)) return null
-        val manager = context.getSystemService(UsageStatsManager::class.java) ?: return null
-        val end = System.currentTimeMillis()
-        val events = manager.queryEvents(end - 24 * 60 * 60 * 1000L, end)
-        val event = UsageEvents.Event()
-        var latest: String? = null
-        var latestTime = 0L
-        while (events.hasNextEvent()) {
-            events.getNextEvent(event)
-            if (event.eventType == UsageEvents.Event.ACTIVITY_RESUMED && event.timeStamp >= latestTime) {
-                latestTime = event.timeStamp
-                latest = event.packageName
-            }
-        }
-        return latest
+        return UsageTimelineReader.read(context)?.currentPackageName
     }
 }
 

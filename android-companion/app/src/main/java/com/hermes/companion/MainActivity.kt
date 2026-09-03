@@ -50,6 +50,8 @@ import com.hermes.companion.data.SettingsRepository
 import com.hermes.companion.data.UploadWorker
 import com.hermes.companion.platform.DeviceStatus
 import com.hermes.companion.platform.DeviceStatusReader
+import com.hermes.companion.platform.UsageTimelineReader
+import com.hermes.companion.platform.UsageTimelineSummary
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -79,6 +81,7 @@ data class CompanionUiState(
     val lastHeartbeat: Long = 0,
     val lastError: String = "",
     val usageAccess: Boolean = false,
+    val usage: UsageTimelineSummary? = null,
     val diagnostics: Boolean = false,
 )
 
@@ -105,6 +108,7 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
                 lastHeartbeat = settings.lastHeartbeat(),
                 lastError = settings.lastError(),
                 usageAccess = DeviceStatusReader.hasUsageAccess(appContext),
+                usage = UsageTimelineReader.read(appContext),
             )
         }
     }
@@ -113,6 +117,19 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
         settings.saveServerUrl(value)
         settings.saveBootstrapToken(bootstrapToken)
         refresh()
+    }
+
+    fun saveAndTestConnection(value: String, bootstrapToken: String) {
+        settings.saveServerUrl(value)
+        settings.saveBootstrapToken(bootstrapToken)
+        viewModelScope.launch {
+            val result = runCatching { com.hermes.companion.data.ApiClient.create(value).health() }
+            _state.value = _state.value.copy(
+                connected = result.getOrNull()?.ok == true,
+                lastError = result.exceptionOrNull()?.message.orEmpty(),
+            )
+            refresh()
+        }
     }
 
     fun sendHeartbeat() {
@@ -153,6 +170,13 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
 
     fun toggleDiagnostics() { _state.value = _state.value.copy(diagnostics = !_state.value.diagnostics) }
 
+    fun clearPendingQueue() {
+        viewModelScope.launch {
+            queue.clearPendingQueue()
+            refresh()
+        }
+    }
+
     companion object {
         fun factory(context: android.content.Context) = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
@@ -186,7 +210,7 @@ fun HermesCompanionApp(model: CompanionViewModel) {
                 Text(if (state.usageAccess) "使用权限: 已授予" else "使用权限: 打开设置")
             }
             TextButton(onClick = model::toggleDiagnostics) { Text(if (state.diagnostics) "隐藏诊断信息" else "调试 / 诊断") }
-            if (state.diagnostics) Diagnostics(state)
+            if (state.diagnostics) Diagnostics(state, model)
             SettingsPanel(state, model)
             LaunchedEffect(Unit) { model.refresh() }
         }
@@ -200,6 +224,10 @@ private fun InfoCard(state: CompanionUiState) {
             Text("Server: ${state.serverUrl.ifBlank { "Not configured" }}")
             Text("Battery: ${state.device.batteryPercent}%${if (state.device.charging) " · charging" else ""}")
             Text("Foreground App: ${state.device.foregroundPackage ?: if (state.usageAccess) "not detected" else "需要权限"}")
+            state.usage?.let { usage ->
+                Text("Current App: ${usage.currentPackageName ?: "none"} · ${usage.currentDurationMs / 1000}s")
+            }
+            Text("Today's tracked apps: ${state.usage?.appTotalsMs?.size ?: 0}")
             Text("Last heartbeat: ${state.lastHeartbeat.asTime()}")
             Text("Pending events: ${state.pending}")
         }
@@ -215,11 +243,12 @@ private fun SettingsPanel(state: CompanionUiState, model: CompanionViewModel) {
     OutlinedTextField(server, { server = it }, label = { Text("服务器地址 (HTTP)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     OutlinedTextField(token, { token = it }, label = { Text("注册令牌") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
     Text("Device: ${state.deviceId}")
-    Button(onClick = { model.saveServer(server, token); model.sendHeartbeat() }, modifier = Modifier.fillMaxWidth()) { Text("保存并测试连接") }
+    Button(onClick = { model.saveAndTestConnection(server, token) }, modifier = Modifier.fillMaxWidth()) { Text("保存并测试连接") }
 }
 
 @Composable
-private fun Diagnostics(state: CompanionUiState) {
+private fun Diagnostics(state: CompanionUiState, model: CompanionViewModel) {
+    var confirmClear by remember { mutableStateOf(false) }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Device ID: ${state.deviceId}")
@@ -229,7 +258,19 @@ private fun Diagnostics(state: CompanionUiState) {
             Text("Queue size: ${state.pending}")
             Text("Usage Access: ${if (state.usageAccess) "granted" else "required"}")
             Text("Detected foreground package: ${state.device.foregroundPackage ?: "none"}")
+            OutlinedButton(onClick = { confirmClear = true }, modifier = Modifier.fillMaxWidth()) { Text("Clear pending queue") }
         }
+    }
+    if (confirmClear) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { confirmClear = false },
+            title = { Text("Clear pending queue?") },
+            text = { Text("Only unsent events will be removed. Device registration and settings stay unchanged.") },
+            confirmButton = {
+                TextButton(onClick = { confirmClear = false; model.clearPendingQueue() }) { Text("Clear") }
+            },
+            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
+        )
     }
 }
 
