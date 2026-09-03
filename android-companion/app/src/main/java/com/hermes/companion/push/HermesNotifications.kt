@@ -27,6 +27,7 @@ object HermesNotifications {
     }
 
     fun show(context: Context, value: HermesNotification) {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pending = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
