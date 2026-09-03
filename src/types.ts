@@ -192,6 +192,21 @@ export interface LifeContext {
   activePhoneDeviceId?: string;
 }
 
+export interface RuntimeDiagnosticCheckpoint {
+  occurredAt: string;
+  status: "started" | "succeeded" | "failed";
+  wakeEventId?: string;
+  candidateId?: string;
+  action?: WakeDecision["action"];
+  detail?: string;
+}
+
+export interface RuntimeDiagnostics {
+  lastHermesActivation?: RuntimeDiagnosticCheckpoint;
+  lastWakeDecision?: RuntimeDiagnosticCheckpoint;
+  lastProactiveDelivery?: RuntimeDiagnosticCheckpoint;
+}
+
 export interface OurHomeData {
   schemaVersion: 2;
   diaries: DiaryEntry[];
@@ -208,6 +223,7 @@ export interface OurHomeData {
   wakeEngineState: WakeEngineState;
   phoneDeviceRegistrations: PhoneDeviceRegistration[];
   activePhoneDeviceId?: string;
+  runtimeDiagnostics: RuntimeDiagnostics;
 }
 
 export interface DataStatus {
