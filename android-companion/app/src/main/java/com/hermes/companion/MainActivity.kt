@@ -63,13 +63,23 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
+    private lateinit var model: CompanionViewModel
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), NOTIFICATION_PERMISSION_REQUEST)
         }
-        val model = ViewModelProvider(this, CompanionViewModel.factory(applicationContext))[CompanionViewModel::class.java]
+        model = ViewModelProvider(this, CompanionViewModel.factory(applicationContext))[CompanionViewModel::class.java]
         setContent { HermesCompanionApp(model) }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        model.refresh()
+        if (model.consumeUsageAccessInitialGuide()) {
+            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
+        }
     }
 
     companion object { private const val NOTIFICATION_PERMISSION_REQUEST = 1001 }
@@ -93,6 +103,7 @@ data class CompanionUiState(
 
 class CompanionViewModel(private val appContext: android.content.Context) : ViewModel() {
     private val settings = SettingsRepository(appContext)
+    private val usageAccessOnboarding = UsageAccessOnboarding(settings)
     private val queue = QueueRepository.create(appContext)
     private val _state = MutableStateFlow(
         CompanionUiState(
@@ -127,6 +138,10 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
             )
         }
     }
+
+    /** Called from Activity.onResume, including when Usage Access Settings closes. */
+    fun consumeUsageAccessInitialGuide(): Boolean =
+        usageAccessOnboarding.consumeInitialGuide(DeviceStatusReader.hasUsageAccess(appContext))
 
     fun saveServer(value: String, bootstrapToken: String) {
         settings.saveServerUrl(value)
