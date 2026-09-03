@@ -3,46 +3,34 @@ package com.hermes.companion.tunnel
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
-internal data class RelayRequest(
-    val requestId: String,
-    val method: String,
-    val params: JsonObject,
+/** Wire format implemented by the deployed 8788/8790 Relay. */
+internal data class RelayMcpRequest(
+    val id: JsonElement,
+    val body: String,
 )
 
 internal object RelayProtocol {
     private val json = Json { ignoreUnknownKeys = true }
 
-    fun parseRequest(frame: String): RelayRequest? = runCatching {
+    fun parseRequest(frame: String): RelayMcpRequest? = runCatching {
         val root = json.parseToJsonElement(frame).jsonObject
-        if (root["type"]?.jsonPrimitive?.content != "request") return null
-        val requestId = root["requestId"]?.jsonPrimitive?.content?.takeIf { it.isNotBlank() && it.length <= 128 } ?: return null
-        val method = root["method"]?.jsonPrimitive?.content?.takeIf { it == "tools/call" } ?: return null
-        RelayRequest(requestId, method, root["params"]?.jsonObject ?: JsonObject(emptyMap()))
+        if (root["method"]?.jsonPrimitive?.content != "mcp") return null
+        if (root["path"]?.jsonPrimitive?.content != "/mcp") return null
+        val id = root["id"] ?: return null
+        val body = root["body"]?.jsonPrimitive?.content ?: return null
+        RelayMcpRequest(id, body)
     }.getOrNull()
 
-    fun hello(deviceId: String): String = encode(buildJsonObject {
-        put("type", "hello")
-        put("deviceId", deviceId)
-        put("protocolVersion", "our-home-tunnel-v0.1")
-    })
-
-    fun response(requestId: String, result: JsonElement): String = encode(buildJsonObject {
-        put("type", "response")
-        put("requestId", requestId)
-        put("result", result)
-    })
-
-    fun error(requestId: String, code: String, message: String): String = encode(buildJsonObject {
-        put("type", "error")
-        put("requestId", requestId)
-        put("code", code)
-        put("message", message.take(300))
+    fun response(id: JsonElement, status: Int, body: String): String = encode(buildJsonObject {
+        put("id", id)
+        put("status", status)
+        put("contentType", "application/json")
+        put("body", body)
     })
 
     private fun encode(value: JsonObject): String = json.encodeToString(JsonObject.serializer(), value)
