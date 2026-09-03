@@ -94,6 +94,7 @@ data class CompanionUiState(
     val serverUrl: String = "",
     val deviceId: String = "",
     val connected: Boolean = false,
+    val deviceRegistered: Boolean = false,
     val localMode: Boolean = false,
     val localMcpUrl: String = "",
     val pending: Int = 0,
@@ -135,6 +136,7 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
                 localMode = settings.isLocalMode(),
                 localMcpUrl = LocalMcpServer.endpoint(appContext),
                 deviceId = settings.deviceId(),
+                deviceRegistered = !settings.deviceToken().isNullOrBlank(),
                 pending = queue.pendingCount(),
                 lastSuccessfulUpload = settings.lastSuccessfulUpload(),
                 lastManualHeartbeat = settings.lastManualHeartbeat(),
@@ -257,7 +259,8 @@ fun HermesCompanionApp(model: CompanionViewModel) {
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("赫尔墨斯伴侣", style = MaterialTheme.typography.headlineMedium)
-            Text(if (state.connected) "连接状态: 已连接" else "连接状态: 离线", color = if (state.connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+            Text("Server reachable: ${if (state.connected) "yes" else "not checked"}")
+            Text("Device registered: ${if (state.deviceRegistered) "yes" else "no"}")
             InfoCard(state)
             Text("手动状态", style = MaterialTheme.typography.titleMedium)
             val statuses = listOf("在家", "上班", "通勤", "忙", "休息", "睡觉", "累")
@@ -321,6 +324,8 @@ private fun Diagnostics(state: CompanionUiState, model: CompanionViewModel) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Device ID: ${state.deviceId}")
+            Text("Server reachable: ${if (state.connected) "yes" else "not checked"}")
+            Text("Device registered: ${if (state.deviceRegistered) "yes" else "no"}")
             Text("Background worker: ${state.backgroundWorkerStatus}")
             Text("Last periodic collection: ${state.lastPeriodicCollection.asTime()}")
             Text("Last successful upload: ${state.lastSuccessfulUpload.asTime()}")
