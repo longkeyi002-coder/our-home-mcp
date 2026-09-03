@@ -58,6 +58,7 @@ import com.hermes.companion.platform.DeviceStatus
 import com.hermes.companion.platform.DeviceStatusReader
 import com.hermes.companion.platform.UsageTimelineReader
 import com.hermes.companion.platform.UsageTimelineSummary
+import com.hermes.companion.push.PushRegistration
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -155,8 +156,14 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
 
     fun setMode(mode: CompanionMode) {
         settings.setMode(mode)
-        LocalMcpServer.ensureForCurrentMode(appContext)
-        if (mode == CompanionMode.CLOUD) UploadWorker.schedulePeriodic(appContext)
+        if (mode == CompanionMode.LOCAL) {
+            UploadWorker.cancelCloudWork(appContext)
+            LocalMcpServer.ensureForCurrentMode(appContext)
+        } else {
+            LocalMcpServer.ensureForCurrentMode(appContext)
+            UploadWorker.schedulePeriodic(appContext)
+            PushRegistration.refresh(appContext)
+        }
         refresh()
     }
 
@@ -181,6 +188,10 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
 
     fun sendHeartbeat() {
         viewModelScope.launch {
+            if (settings.isLocalMode()) {
+                _state.value = _state.value.copy(lastError = "Local Mode does not upload Cloud heartbeats")
+                return@launch
+            }
             val now = Instant.now().toString()
             val status = DeviceStatusReader.read(appContext)
             queue.enqueueHeartbeat(HeartbeatRequest(
@@ -202,6 +213,10 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
 
     fun sendManualStatus(label: String) {
         viewModelScope.launch {
+            if (settings.isLocalMode()) {
+                _state.value = _state.value.copy(lastError = "Local Mode does not upload Cloud manual status")
+                return@launch
+            }
             queue.enqueueObservation(ObservationRequest(
                 kind = "manual_status",
                 label = label,
