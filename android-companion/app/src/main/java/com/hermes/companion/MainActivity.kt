@@ -137,6 +137,7 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
                 localMcpUrl = LocalMcpServer.endpoint(appContext),
                 deviceId = settings.deviceId(),
                 deviceRegistered = !settings.deviceToken().isNullOrBlank(),
+                deviceRegistered = !settings.deviceToken().isNullOrBlank(),
                 pending = queue.pendingCount(),
                 lastSuccessfulUpload = settings.lastSuccessfulUpload(),
                 lastManualHeartbeat = settings.lastManualHeartbeat(),
