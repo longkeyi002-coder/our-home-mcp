@@ -98,3 +98,24 @@ V0.1 不承诺永久驻留或实时采集。WorkManager 的周期任务最短约
 ```
 
 Instrumentation 测试需要已连接 Android 模拟器或真机。
+
+
+## Local MCP Mode V0.1
+
+Local Mode runs a minimal MCP Streamable HTTP server only while the Companion process is alive:
+
+`http://127.0.0.1:5000/mcp/<installation-secret>`
+
+The secret is generated once per installation and is distinct from both device ID and Cloud credentials. The server binds only to loopback, rejects browser `Origin` requests, and never returns Cloud bootstrap/device tokens. Local and Cloud modes are mutually exclusive: Local Mode does not run Cloud periodic observation uploads.
+
+### True-device Local MCP smoke test
+
+1. Install the APK and select **Local MCP Mode**.
+2. Grant Usage Access and notification permission.
+3. Copy the complete Local MCP URL shown by the app.
+4. On the **same Android phone**, add that full URL to a Hermes/RikkaHub-like MCP host.
+5. Call `initialize`, `tools/list`, `get_local_health`, `get_device_context`, `get_current_usage`, and `send_local_notification`.
+6. Switch to another app, call `get_current_usage` again, and check that foreground/freshness changes.
+7. Confirm that no new Cloud observations are uploaded while Local Mode is selected.
+
+CI validates Android compilation and the server code path, but cannot verify a real Android MCP host connecting to `127.0.0.1`; this compatibility test is **not verified** until it is run on one phone. The endpoint is unavailable to computers, cloud Hermes, or other devices, and stops if Android kills the Companion process. No foreground service is included.
