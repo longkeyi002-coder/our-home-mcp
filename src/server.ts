@@ -125,6 +125,36 @@ export function createOurHomeServer(store: JsonStore): McpServer {
   );
 
   server.registerTool(
+    "home.get_runtime_diagnostics",
+    {
+      title: "Get end-to-end runtime diagnostics",
+      description: "Read persisted phone-to-delivery checkpoints. Missing values are reported as null, never inferred.",
+      inputSchema: {},
+      outputSchema: z.object({ diagnostics: z.record(z.string(), z.unknown()), dataSource: z.literal("local-mock") }),
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async () => {
+      const timestamp = new Date().toISOString();
+      const data = store.snapshot();
+      const context = store.getLifeContext(timestamp);
+      const activeId = store.getActivePhoneDeviceId();
+      const activeObservations = data.observations.filter((item) => item.deviceId === activeId);
+      return structured({
+        dataSource: "local-mock" as const,
+        diagnostics: {
+          activePhoneDeviceId: activeId ?? null,
+          lastObservationReceived: activeObservations[0] ?? null,
+          currentLifeState: context.lifeState,
+          pendingWakeEvents: context.pendingWakeEvents,
+          lastHermesActivation: null,
+          lastWakeDecision: data.wakeEvents.find((item) => item.status === "handled") ?? null,
+          lastProactiveDelivery: data.proactiveQueue.find((item) => item.status === "delivered") ?? null,
+        },
+      });
+    },
+  );
+
+  server.registerTool(
     "home.list_wake_events",
     {
       title: "List wake events",
