@@ -6,6 +6,9 @@ import com.hermes.companion.platform.DeviceStatusReader
 import com.hermes.companion.platform.UsageTimelineReader
 import com.hermes.companion.push.HermesNotification
 import com.hermes.companion.push.HermesNotifications
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -15,15 +18,65 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 
 internal class TunnelMcpHandler(private val context: Context) {
-    fun handle(params: JsonObject) = runCatching {
+    private val json = Json { ignoreUnknownKeys = true }
+
+    /** Handles the HTTP MCP JSON body forwarded by the deployed Relay. */
+    fun handleMcp(body: String): String {
+        val request = runCatching { json.parseToJsonElement(body).jsonObject }.getOrElse {
+            return error(JsonNull, -32700, "Invalid JSON")
+        }
+        val id = request["id"] ?: JsonNull
+        val result = runCatching {
+            when (request["method"]?.jsonPrimitive?.content) {
+                "initialize" -> initialize()
+                "notifications/initialized" -> JsonObject(emptyMap())
+                "tools/list" -> buildJsonObject { put("tools", tools()) }
+                "tools/call" -> callTool(request["params"]?.jsonObject ?: JsonObject(emptyMap()))
+                else -> throw IllegalArgumentException("Method not allowed")
+            }
+        }
+        return result.fold(
+            onSuccess = { value -> response(id, value) },
+            onFailure = { error -> error(id, -32602, error.message ?: "Request failed") },
+        )
+    }
+
+    private fun initialize() = buildJsonObject {
+        put("protocolVersion", "2025-03-26")
+        put("serverInfo", buildJsonObject { put("name", "our-home-companion-tunnel"); put("version", "0.1.0") })
+        put("capabilities", buildJsonObject { put("tools", JsonObject(emptyMap())) })
+    }
+
+    private fun tools() = buildJsonArray {
+        add(tool("get_local_health", "Read local health.", JsonObject(emptyMap())))
+        add(tool("get_device_context", "Read current device facts.", JsonObject(emptyMap())))
+        add(tool("get_current_usage", "Read current usage summary.", JsonObject(emptyMap())))
+        add(tool("send_local_notification", "Show a local notification.", buildJsonObject {
+            put("type", "object")
+            put("required", buildJsonArray { add(JsonPrimitive("title")); add(JsonPrimitive("message")) })
+            put("properties", buildJsonObject {
+                put("title", buildJsonObject { put("type", "string") })
+                put("message", buildJsonObject { put("type", "string") })
+            })
+        }))
+    }
+
+    private fun tool(name: String, description: String, schema: JsonObject) = buildJsonObject {
+        put("name", name); put("description", description); put("inputSchema", schema)
+    }
+
+    private fun callTool(params: JsonObject): JsonObject {
         val name = params["name"]?.jsonPrimitive?.content ?: throw IllegalArgumentException("Missing tool name")
         val arguments = params["arguments"]?.jsonObject ?: JsonObject(emptyMap())
-        when (name) {
+        val value = when (name) {
             "get_local_health" -> health()
             "get_device_context" -> deviceContext()
             "get_current_usage" -> usage()
             "send_local_notification" -> notification(arguments)
             else -> throw IllegalArgumentException("Tool is not allowed")
+        }
+        return buildJsonObject {
+            put("content", buildJsonArray { add(buildJsonObject { put("type", "text"); put("text", value.toString()) }) })
         }
     }
 
@@ -54,11 +107,9 @@ internal class TunnelMcpHandler(private val context: Context) {
             put("recentSessions", buildJsonArray {
                 summary.sessions.takeLast(50).forEach { session ->
                     add(buildJsonObject {
-                        put("packageName", session.packageName)
-                        put("startedAt", session.startedAt)
+                        put("packageName", session.packageName); put("startedAt", session.startedAt)
                         session.endedAt?.let { put("endedAt", it) }
-                        put("duration", session.durationMs)
-                        put("category", session.category)
+                        put("duration", session.durationMs); put("category", session.category)
                     })
                 }
             })
@@ -74,4 +125,12 @@ internal class TunnelMcpHandler(private val context: Context) {
         HermesNotifications.show(context, HermesNotification("reverse-tunnel:$title:$message", title, message))
         return buildJsonObject { put("accepted", true) }
     }
+
+    private fun response(id: JsonElement, result: JsonElement) = json.encodeToString(JsonObject.serializer(), buildJsonObject {
+        put("jsonrpc", "2.0"); put("id", id); put("result", result)
+    })
+
+    private fun error(id: JsonElement, code: Int, message: String) = json.encodeToString(JsonObject.serializer(), buildJsonObject {
+        put("jsonrpc", "2.0"); put("id", id); put("error", buildJsonObject { put("code", code); put("message", message.take(300)) })
+    })
 }
