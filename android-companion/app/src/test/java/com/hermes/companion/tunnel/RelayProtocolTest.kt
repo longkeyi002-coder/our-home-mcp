@@ -6,25 +6,30 @@ import org.junit.Test
 
 class RelayProtocolTest {
     @Test
-    fun parsesOnlyBoundedToolsCallRequests() {
+    fun parsesDeployedRelayMcpEnvelope() {
         val request = RelayProtocol.parseRequest(
-            """{"type":"request","requestId":"abc-123","method":"tools/call","params":{"name":"get_device_context"}}""",
+            """{"id":42,"method":"mcp","path":"/mcp","body":"{\"jsonrpc\":\"2.0\",\"method\":\"tools/list\"}"}""",
         )
 
-        assertEquals("abc-123", request?.requestId)
-        assertEquals("tools/call", request?.method)
-        assertEquals("get_device_context", request?.params?.get("name")?.toString()?.trim('"'))
+        assertEquals("42", request?.id?.toString())
+        assertEquals("""{"jsonrpc":"2.0","method":"tools/list"}""", request?.body)
     }
 
     @Test
-    fun rejectsUnsupportedInboundFrames() {
-        assertNull(RelayProtocol.parseRequest("""{"type":"request","requestId":"x","method":"shell","params":{}}"""))
-        assertNull(RelayProtocol.parseRequest("""{"type":"response","requestId":"x"}"""))
+    fun rejectsNonMcpOrOtherPaths() {
+        assertNull(RelayProtocol.parseRequest("""{"id":"x","method":"shell","path":"/mcp","body":"{}"}"""))
+        assertNull(RelayProtocol.parseRequest("""{"id":"x","method":"mcp","path":"/other","body":"{}"}"""))
     }
 
     @Test
-    fun responsesPreserveRequestId() {
-        val frame = RelayProtocol.error("same-id", "tool_error", "failed")
-        assert(frame.contains("\"requestId\":\"same-id\""))
+    fun responsePreservesRelayIdAndJsonBody() {
+        val response = RelayProtocol.response(
+            RelayProtocol.parseRequest("""{"id":"same-id","method":"mcp","path":"/mcp","body":"{}"}""")!!.id,
+            200,
+            """{"jsonrpc":"2.0","id":1,"result":{}}""",
+        )
+        assert(response.contains("\"id\":\"same-id\""))
+        assert(response.contains("\"status\":200"))
+        assert(response.contains("\"contentType\":\"application/json\""))
     }
 }
