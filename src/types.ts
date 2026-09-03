@@ -174,6 +174,7 @@ export interface PhoneDeviceRegistration {
   pushFid?: string;
   pushToken?: string;
   updatedAt: string;
+  active?: boolean;
 }
 
 export type WakeDecision =
@@ -188,6 +189,7 @@ export interface LifeContext {
   recentHeartbeats: HeartbeatRecord[];
   pendingProactiveMessages: ProactiveCandidate[];
   pendingWakeEvents: WakeEvent[];
+  activePhoneDeviceId?: string;
 }
 
 export interface OurHomeData {
@@ -205,6 +207,7 @@ export interface OurHomeData {
   wakeEvents: WakeEvent[];
   wakeEngineState: WakeEngineState;
   phoneDeviceRegistrations: PhoneDeviceRegistration[];
+  activePhoneDeviceId?: string;
 }
 
 export interface DataStatus {
