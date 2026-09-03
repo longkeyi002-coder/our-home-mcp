@@ -47,7 +47,6 @@ class UsageTimelineTest {
         tracker.onBackground("com.example.app", 2_000)
         assertNull(tracker.summary(2_000, 0).currentPackageName)
     }
-}
 
     @Test
     fun delayedStopForOldPackageDoesNotCloseCurrentSession() {
