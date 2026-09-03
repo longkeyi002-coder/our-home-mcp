@@ -56,6 +56,26 @@ test("persist failure is atomic and the same store recovers", async () => {
   assert.equal(store.snapshot().proactiveMessages.length, 1);
 });
 
+test("failed proactive Wake Decision is atomic and retryable on the same store", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "our-home-decision-"));
+  let fail = false;
+  const fs: StoreFileSystem = { writeFile: async (...args) => { if (fail) { fail = false; throw new Error("disk full"); } return (await import("node:fs/promises")).writeFile(...args); } };
+  const store = await JsonStore.open(join(dir, "our-home.json"), false, fs);
+  await runProactiveCycle(store, { deliver: async () => {} }, new Date(at(0)));
+  await store.recordObservation({ kind: "screen_app", label: "foreground", value: "com.example.app", observedAt: at(1), source: "phone", confidence: "observed" });
+  await store.evaluateWakeEvents(at(2));
+  const event = store.listWakeEvents()[0]!;
+  fail = true;
+  const decision: WakeDecision = { action: "proactive_message", candidate: { title: "一次", message: "一次", reason: "wake" } };
+  await assert.rejects(store.applyWakeDecision(event.id, decision), /disk full/);
+  assert.equal(store.snapshot().wakeEvents[0]?.status, "pending");
+  assert.equal(store.snapshot().proactiveQueue.length, 0);
+  await store.applyWakeDecision(event.id, decision);
+  const candidates = store.snapshot().proactiveQueue.filter((item) => item.wakeEventId === event.id);
+  assert.equal(store.snapshot().wakeEvents[0]?.status, "handled");
+  assert.equal(candidates.length, 1);
+});
+
 test("concurrent mutations are serialized without lost updates", async () => {
   const dir = await mkdtemp(join(tmpdir(), "our-home-decision-"));
   const store = await JsonStore.open(join(dir, "our-home.json"), false);
@@ -78,4 +98,59 @@ test("retrying a handled event is idempotent and handled events are not re-decid
   const engine: LifeDecisionEngine = { evaluate: async (input: { wakeEvent: WakeEvent }) => { calls++; return { action: "ignore" }; } };
   await runProactiveCycle(store, { deliver: async () => {} }, new Date(at(5)), engine);
   assert.equal(calls, 0);
+});
+
+test("worker processes multiple pending Wake Events sequentially within a bounded batch", async () => {
+  const store = await pendingStore();
+  for (const minute of [7, 11, 17, 21, 27, 31, 37]) {
+    const active = [11, 21, 31].includes(minute);
+    await store.recordObservation({
+      kind: active ? "screen_app" : "device_presence",
+      label: active ? "foreground" : "screen off",
+      value: active ? "com.example.app" : "screen_off",
+      observedAt: at(minute), source: "phone", confidence: "observed",
+      metadata: active ? undefined : { connectivityState: "online" },
+    });
+    await store.evaluateWakeEvents(at(minute));
+  }
+  let calls = 0;
+  const engine: LifeDecisionEngine = { evaluate: async () => { calls++; return { action: "ignore" }; } };
+  await runProactiveCycle(store, { deliver: async () => {} }, new Date(at(38)), engine);
+  assert.equal(calls, 5);
+  assert.equal(store.listWakeEvents("pending").length, 3);
+});
+
+test("restart preserves handled and pending Wake Events, linkage, and schema v2", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "our-home-decision-"));
+  const filePath = join(dir, "our-home.json");
+  const store = await JsonStore.open(filePath, false);
+  await runProactiveCycle(store, { deliver: async () => {} }, new Date(at(0)));
+  await store.recordObservation({ kind: "screen_app", label: "foreground", value: "com.example.app", observedAt: at(1), source: "phone", confidence: "observed" });
+  await store.evaluateWakeEvents(at(2));
+  const first = store.listWakeEvents()[0]!;
+  await store.applyWakeDecision(first.id, { action: "proactive_message", candidate: { title: "保留", message: "保留", reason: "test" } });
+  await store.recordObservation({ kind: "device_presence", label: "screen off", value: "screen_off", observedAt: at(7), source: "phone", confidence: "observed", metadata: { connectivityState: "online" } });
+  await store.evaluateWakeEvents(at(7));
+  const reopened = await JsonStore.open(filePath, false);
+  const data = reopened.snapshot();
+  assert.equal(data.schemaVersion, 2);
+  assert.equal(data.wakeEvents.find((item) => item.id === first.id)?.status, "handled");
+  assert.ok(data.wakeEvents.some((item) => item.status === "pending"));
+  assert.equal(data.proactiveQueue.find((item) => item.wakeEventId === first.id)?.wakeEventId, first.id);
+});
+
+test("existing schema v2 records survive reading with new wake defaults", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "our-home-decision-"));
+  const filePath = join(dir, "our-home.json");
+  const legacy = {
+    schemaVersion: 2, diaries: [{ id: "legacy-diary" }], relationshipEvents: [], actions: [{ id: "legacy-action" }],
+    activities: [], proactiveMessages: [], homeState: { presence: "unknown", updatedAt: at(0), source: "HOME_STATE" },
+    observations: [], routines: [], heartbeats: [], proactiveQueue: [],
+  };
+  await (await import("node:fs/promises")).writeFile(filePath, JSON.stringify(legacy), "utf8");
+  const store = await JsonStore.open(filePath, false);
+  assert.equal(store.snapshot().schemaVersion, 2);
+  assert.equal(store.snapshot().diaries[0]?.id, "legacy-diary");
+  assert.equal(store.snapshot().actions[0]?.id, "legacy-action");
+  assert.deepEqual(store.snapshot().wakeEvents, []);
 });

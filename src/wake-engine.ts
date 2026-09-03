@@ -18,8 +18,8 @@ function cooldownPassed(lastEventAt: string | undefined, observedAt: string): bo
   return !Number.isFinite(previous) || !Number.isFinite(current) || current - previous >= WAKE_EVENT_COOLDOWN_MS;
 }
 
-function dedupeKey(type: WakeEventType, current: LifeState): string {
-  return [type, current.currentActivity, current.connectivityState, current.charging ?? "unknown"].join(":");
+function dedupeKey(type: WakeEventType, previous: LifeState, current: LifeState): string {
+  return [type, previous.lastObservedAt ?? "none", current.lastObservedAt ?? "none"].join(":");
 }
 
 export function deriveWakeEventDrafts(
@@ -34,7 +34,7 @@ export function deriveWakeEventDrafts(
   const drafts: WakeEventDraft[] = [];
   const add = (type: WakeEventType, priority: WakeEventPriority, reason: string): void => {
     if (!cooldownPassed(lastEventAt[type], observedAt)) return;
-    drafts.push({ type, priority, reason, dedupeKey: dedupeKey(type, current) });
+    drafts.push({ type, priority, reason, dedupeKey: dedupeKey(type, previous, current) });
   };
 
   if (previous.currentActivity !== "active_on_phone" && current.currentActivity === "active_on_phone") {

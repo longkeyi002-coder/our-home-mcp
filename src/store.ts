@@ -445,25 +445,28 @@ export class JsonStore {
     dedupeKey?: string;
     wakeEventId?: string;
   }): Promise<ProactiveCandidate> {
-    if (input.dedupeKey) {
-      const existing = this.data.proactiveQueue.find(
-        (item) => item.status === "pending" && item.dedupeKey === input.dedupeKey,
-      );
-      if (existing) return structuredClone(existing);
-    }
-    if (input.wakeEventId) {
-      const existing = this.data.proactiveQueue.find((item) => item.wakeEventId === input.wakeEventId);
-      if (existing) return structuredClone(existing);
-    }
-    const candidate: ProactiveCandidate = {
-      id: randomUUID(),
-      ...input,
-      status: "pending",
-      createdAt: now(),
-      attempts: 0,
-      source: "AGENT_LIFE",
-    };
+    let candidate: ProactiveCandidate | undefined;
     await this.update((data) => {
+      if (input.dedupeKey) {
+        const existing = data.proactiveQueue.find(
+          (item) => item.status === "pending" && item.dedupeKey === input.dedupeKey,
+        );
+        if (existing) {
+          candidate = existing;
+          return;
+        }
+      }
+      if (input.wakeEventId) {
+        const existing = data.proactiveQueue.find((item) => item.wakeEventId === input.wakeEventId);
+        if (existing) {
+          candidate = existing;
+          return;
+        }
+      }
+      candidate = {
+        id: randomUUID(), ...input,
+        status: "pending", createdAt: now(), attempts: 0, source: "AGENT_LIFE",
+      };
       data.proactiveQueue.unshift(candidate);
       appendActivity(data, {
         kind: "proactive_candidate_scheduled",
@@ -472,7 +475,8 @@ export class JsonStore {
         source: "AGENT_LIFE",
       });
     });
-    return candidate;
+    if (!candidate) throw new Error("Proactive candidate was not created");
+    return structuredClone(candidate);
   }
 
   listDueProactiveMessages(asOf = new Date().toISOString()): ProactiveCandidate[] {
