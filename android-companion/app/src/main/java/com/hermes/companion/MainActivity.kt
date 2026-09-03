@@ -54,6 +54,7 @@ import com.hermes.companion.platform.DeviceStatus
 import com.hermes.companion.platform.DeviceStatusReader
 import com.hermes.companion.platform.UsageTimelineReader
 import com.hermes.companion.platform.UsageTimelineSummary
+import com.hermes.companion.tunnel.ReverseTunnelService
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -88,6 +89,8 @@ class MainActivity : ComponentActivity() {
 data class CompanionUiState(
     val device: DeviceStatus = DeviceStatus(0, false, false, null),
     val serverUrl: String = "",
+    val tunnelRelayUrl: String = "",
+    val tunnelEnabled: Boolean = false,
     val deviceId: String = "",
     val connected: Boolean = false,
     val pending: Int = 0,
@@ -109,6 +112,8 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
         CompanionUiState(
             deviceId = settings.deviceId(),
             serverUrl = settings.serverUrl(),
+            tunnelRelayUrl = settings.tunnelRelayUrl(),
+            tunnelEnabled = settings.tunnelEnabled(),
             lastManualHeartbeat = settings.lastManualHeartbeat(),
             lastPeriodicCollection = settings.lastPeriodicCollection(),
             lastSuccessfulUpload = settings.lastSuccessfulUpload(),
@@ -126,6 +131,8 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
             _state.value = _state.value.copy(
                 device = status,
                 serverUrl = settings.serverUrl(),
+                tunnelRelayUrl = settings.tunnelRelayUrl(),
+                tunnelEnabled = settings.tunnelEnabled(),
                 deviceId = settings.deviceId(),
                 pending = queue.pendingCount(),
                 lastSuccessfulUpload = settings.lastSuccessfulUpload(),
@@ -146,6 +153,24 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
     fun saveServer(value: String, bootstrapToken: String) {
         settings.saveServerUrl(value)
         settings.saveBootstrapToken(bootstrapToken)
+        refresh()
+    }
+
+    fun startTunnel(relayUrl: String, token: String) {
+        if (!relayUrl.trim().startsWith("wss://") || token.isBlank()) {
+            _state.value = _state.value.copy(lastError = "Tunnel relay must use wss:// and a token")
+            return
+        }
+        settings.saveTunnelRelayUrl(relayUrl)
+        settings.saveTunnelToken(token)
+        settings.setTunnelEnabled(true)
+        ReverseTunnelService.start(appContext)
+        refresh()
+    }
+
+    fun stopTunnel() {
+        settings.setTunnelEnabled(false)
+        ReverseTunnelService.stop(appContext)
         refresh()
     }
 
@@ -291,6 +316,18 @@ private fun SettingsPanel(state: CompanionUiState, model: CompanionViewModel) {
     OutlinedTextField(token, { token = it }, label = { Text("注册令牌") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
     Text("Device: ${state.deviceId}")
     Button(onClick = { model.saveAndTestConnection(server, token) }, modifier = Modifier.fillMaxWidth()) { Text("保存并测试连接") }
+    HorizontalDivider()
+    Text("Reverse Tunnel (requires a deployed Relay)")
+    var relayUrl by rememberSaveable(state.tunnelRelayUrl) { mutableStateOf(state.tunnelRelayUrl) }
+    var relayToken by rememberSaveable { mutableStateOf("") }
+    OutlinedTextField(relayUrl, { relayUrl = it }, label = { Text("Relay WebSocket URL (wss://)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(relayToken, { relayToken = it }, label = { Text("Tunnel token") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+    Text(if (state.tunnelEnabled) "Reverse tunnel: enabled" else "Reverse tunnel: disabled")
+    if (state.tunnelEnabled) {
+        OutlinedButton(onClick = model::stopTunnel, modifier = Modifier.fillMaxWidth()) { Text("Stop reverse tunnel") }
+    } else {
+        Button(onClick = { model.startTunnel(relayUrl, relayToken) }, modifier = Modifier.fillMaxWidth()) { Text("Start reverse tunnel") }
+    }
 }
 
 @Composable
