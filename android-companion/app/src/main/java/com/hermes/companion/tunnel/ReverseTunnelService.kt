@@ -9,7 +9,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import androidx.core.app.ContextCompat
+import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationCompat
 import com.hermes.companion.data.SettingsRepository
 import com.hermes.companion.push.HermesNotifications
