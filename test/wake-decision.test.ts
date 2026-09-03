@@ -154,3 +154,22 @@ test("existing schema v2 records survive reading with new wake defaults", async 
   assert.equal(store.snapshot().actions[0]?.id, "legacy-action");
   assert.deepEqual(store.snapshot().wakeEvents, []);
 });
+
+
+test("worker persists decision and delivery checkpoints for runtime diagnostics", async () => {
+  const store = await pendingStore();
+  const wakeEvent = store.listWakeEvents()[0]!;
+  const engine: LifeDecisionEngine = { evaluate: async () => ({ action: "ignore" }) };
+  await runProactiveCycle(store, { deliver: async () => {} }, new Date(at(3)), engine);
+  assert.deepEqual(store.snapshot().runtimeDiagnostics.lastWakeDecision, {
+    occurredAt: at(3), status: "succeeded", wakeEventId: wakeEvent.id, action: "ignore",
+  });
+
+  const candidate = await store.scheduleProactiveMessage({
+    title: "delivery", message: "test", reason: "diagnostics", dueAt: at(4),
+  });
+  await runProactiveCycle(store, { deliver: async () => {} }, new Date(at(4)));
+  assert.deepEqual(store.snapshot().runtimeDiagnostics.lastProactiveDelivery, {
+    occurredAt: at(4), status: "succeeded", candidateId: candidate.id,
+  });
+});
