@@ -245,7 +245,7 @@ export class JsonStore {
   getLifeContext(observedAt = now()): LifeContext {
     const data = this.snapshot();
     const activePhoneDeviceId = data.activePhoneDeviceId;
-    const activeObservations = activePhoneDeviceId ? data.observations.filter((item) => item.deviceId === activePhoneDeviceId) : [];
+    const activeObservations = activePhoneDeviceId ? data.observations.filter((item) => item.deviceId === activePhoneDeviceId) : data.observations.filter((item) => !item.deviceId);
     const lifeState = deriveLifeState(activeObservations, observedAt);
     return {
       observedAt,
@@ -266,7 +266,7 @@ export class JsonStore {
   }
 
   async evaluateWakeEvents(observedAt = now()): Promise<WakeEvent[]> {
-    const current = deriveLifeState(this.data.activePhoneDeviceId ? this.data.observations.filter((item) => item.deviceId === this.data.activePhoneDeviceId) : [], observedAt);
+    const current = deriveLifeState(this.data.activePhoneDeviceId ? this.data.observations.filter((item) => item.deviceId === this.data.activePhoneDeviceId) : this.data.observations.filter((item) => !item.deviceId), observedAt);
     const previous = this.data.wakeEngineState.lastLifeState;
     if (!previous) {
       await this.update((data) => {
