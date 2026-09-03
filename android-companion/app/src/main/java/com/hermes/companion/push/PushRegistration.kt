@@ -5,6 +5,7 @@ import com.google.firebase.FirebaseApp
 import com.google.firebase.installations.FirebaseInstallations
 import com.google.firebase.messaging.FirebaseMessaging
 import com.hermes.companion.data.QueueRepository
+import com.hermes.companion.data.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -18,7 +19,7 @@ object PushRegistration {
     }
 
     fun refresh(context: Context) {
-        if (FirebaseApp.getApps(context).isEmpty()) return
+        if (SettingsRepository(context).isLocalMode() || FirebaseApp.getApps(context).isEmpty()) return
         CoroutineScope(Dispatchers.IO).launch {
             runCatching {
                 val token = FirebaseMessaging.getInstance().token.await()
@@ -28,10 +29,12 @@ object PushRegistration {
     }
 
     fun onTokenRefresh(context: Context, token: String) {
+        if (SettingsRepository(context).isLocalMode()) return
         CoroutineScope(Dispatchers.IO).launch { runCatching { register(context, token) } }
     }
 
     private suspend fun register(context: Context, token: String) {
+        if (SettingsRepository(context).isLocalMode()) return
         val fid = FirebaseInstallations.getInstance().id.await()
         handleRefresh(fid, token) { pushFid, pushToken ->
             QueueRepository.create(context).registerPushAddress(pushFid, pushToken)
