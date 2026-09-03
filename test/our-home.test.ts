@@ -388,7 +388,7 @@ test("usage summary retention removes old data and compacts duplicate buckets", 
     source: "phone",
     confidence: "observed",
     deviceId: "android-test",
-    metadata: { day: recent.slice(0, 10), clientEventId: "usage-summary:android-test:recent:1", currentPackage: "com.example.newer" },
+    metadata: { day: recent.slice(0, 10), clientEventId: "usage-summary:android-test:recent:2", currentPackage: "com.example.newer" },
   });
 
   const usage = store.snapshot().observations.filter((item) => item.kind === "usage_summary");

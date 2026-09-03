@@ -60,10 +60,10 @@ function compactUsageSummaryObservations(data: OurHomeData, asOf = Date.now()): 
     const day = typeof item.metadata?.day === "string" ? item.metadata.day : item.observedAt.slice(0, 10);
     const clientEventId = typeof item.metadata?.clientEventId === "string" ? item.metadata.clientEventId : undefined;
     const clientEventParts = clientEventId?.split(":");
-    const bucket = clientEventId?.startsWith("usage-summary:")
-      ? clientEventParts?.[clientEventParts.length - 1] ?? ""
-      : Number.isFinite(observedAt)
-        ? String(Math.floor(observedAt / (60 * 60 * 1000)))
+    const bucket = Number.isFinite(observedAt)
+      ? String(Math.floor(observedAt / (60 * 60 * 1000)))
+      : clientEventId?.startsWith("usage-summary:")
+        ? clientEventParts?.[clientEventParts.length - 1] ?? ""
         : item.observedAt;
     const key = (item.deviceId ?? "") + ":" + day + ":" + bucket;
     if (seenBuckets.has(key)) return false;

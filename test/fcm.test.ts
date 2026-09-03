@@ -32,11 +32,13 @@ test("authorized registration persists push address and updates the same device"
   ]);
 });
 
-test("registration returns a device token without bootstrap authorization", async () => {
+test("registration without bootstrap authorization is rejected", async () => {
   const store = await freshStore();
-  const result = await registerPhone(store, "secret", "Bearer wrong", { deviceId: "android-main", pushToken: "sensitive" });
-  assert.equal(result.deviceId, "android-main");
-  assert.equal(store.snapshot().phoneDeviceRegistrations[0]?.pushToken, "sensitive");
+  await assert.rejects(
+    registerPhone(store, "secret", "Bearer wrong", { deviceId: "android-main", pushToken: "sensitive" }),
+    /Unauthorized/,
+  );
+  assert.deepEqual(store.snapshot().phoneDeviceRegistrations, []);
 });
 
 test("old schema v2 files gain empty device registrations without losing data", async () => {
