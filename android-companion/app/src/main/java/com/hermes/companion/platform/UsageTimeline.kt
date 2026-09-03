@@ -63,22 +63,28 @@ data class UsageTimelineSummary(
     val categoryTotalsMs: Map<String, Long>,
 )
 
+const val FOREGROUND_FRESHNESS_MS = 5 * 60 * 1000L
+
 class UsageTimelineTracker {
     private val completed = mutableListOf<UsageSession>()
     private var activePackage: String? = null
     private var activeStartedAt: Long = 0L
+    private var lastForegroundEventAt: Long = 0L
 
     fun onForeground(packageName: String, at: Long) {
         require(packageName.isNotBlank())
-        if (activePackage == packageName) return
+        if (activePackage == packageName) { lastForegroundEventAt = at; return }
         closeActive(at)
         activePackage = packageName
         activeStartedAt = at
+        lastForegroundEventAt = at
     }
 
     fun onBackground(packageName: String, at: Long) {
         if (activePackage == packageName) closeActive(at)
     }
+
+    fun onExcludedForeground(at: Long) { closeActive(at) }
 
     fun summary(now: Long, dayStart: Long): UsageTimelineSummary {
         val sessions = (completed + listOfNotNull(activeSession(now)))
@@ -92,7 +98,7 @@ class UsageTimelineTracker {
         val appTotals = sessions.groupingBy { it.packageName }.fold(0L) { total, session -> total + session.durationMs }
         val categoryTotals = sessions.groupingBy { it.category }.fold(0L) { total, session -> total + session.durationMs }
         val current = activePackage?.let { packageName ->
-            if (activeStartedAt < now) UsageSession(packageName, activeStartedAt, null, now - activeStartedAt, UsageCategoryClassifier.classify(packageName)) else null
+            if (activeStartedAt < now && now - lastForegroundEventAt <= FOREGROUND_FRESHNESS_MS) UsageSession(packageName, activeStartedAt, null, now - activeStartedAt, UsageCategoryClassifier.classify(packageName)) else null
         }
         return UsageTimelineSummary(now, current?.packageName, current?.durationMs ?: 0L, sessions, appTotals, categoryTotals)
     }
@@ -103,6 +109,7 @@ class UsageTimelineTracker {
         completed += UsageSession(packageName, activeStartedAt, at, at - activeStartedAt, UsageCategoryClassifier.classify(packageName))
         activePackage = null
         activeStartedAt = 0L
+        lastForegroundEventAt = 0L
     }
 
     private fun activeSession(now: Long): UsageSession? = activePackage?.let { packageName ->
@@ -122,11 +129,17 @@ object UsageTimelineReader {
         while (events.hasNextEvent()) {
             events.getNextEvent(event)
             when (event.eventType) {
-                UsageEvents.Event.ACTIVITY_RESUMED -> tracker.onForeground(event.packageName, event.timeStamp)
+                UsageEvents.Event.ACTIVITY_RESUMED -> if (isMeaningfulForeground(context, event.packageName)) tracker.onForeground(event.packageName, event.timeStamp) else tracker.onExcludedForeground(event.timeStamp)
                 UsageEvents.Event.ACTIVITY_PAUSED, UsageEvents.Event.ACTIVITY_STOPPED -> tracker.onBackground(event.packageName, event.timeStamp)
             }
         }
         return tracker.summary(now, dayStart)
+    }
+
+    private fun isMeaningfulForeground(context: Context, packageName: String?): Boolean {
+        val value = packageName?.lowercase() ?: return false
+        if (value == context.packageName.lowercase()) return false
+        return !value.contains("launcher") && !value.contains("settings") && value != "com.android.systemui"
     }
 
     private fun hasUsageAccess(context: Context): Boolean {
