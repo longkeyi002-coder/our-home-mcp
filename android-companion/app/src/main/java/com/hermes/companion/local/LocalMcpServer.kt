@@ -7,10 +7,10 @@ import com.hermes.companion.platform.DeviceStatusReader
 import com.hermes.companion.platform.UsageTimelineReader
 import com.hermes.companion.push.HermesNotification
 import com.hermes.companion.push.HermesNotifications
-import java.io.BufferedReader
 import java.io.BufferedWriter
-import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
@@ -54,13 +54,13 @@ object LocalMcpServer {
 
     private fun handle(context: Context, client: Socket) {
         if (!client.inetAddress.isLoopbackAddress) return
-        val reader = BufferedReader(InputStreamReader(client.getInputStream(), Charsets.UTF_8))
+        val input = client.getInputStream()
         val writer = BufferedWriter(OutputStreamWriter(client.getOutputStream(), Charsets.UTF_8))
-        val parts = (reader.readLine() ?: return).split(" ")
+        val parts = (readAsciiLine(input) ?: return).split(" ")
         if (parts.size < 2 || parts[0] != "POST") return write(writer, 405, error(null, -32600, "POST required"))
         val headers = mutableMapOf<String, String>()
         while (true) {
-            val line = reader.readLine() ?: return
+            val line = readAsciiLine(input) ?: return
             if (line.isEmpty()) break
             line.indexOf(':').takeIf { it > 0 }?.let { headers[line.substring(0, it).lowercase()] = line.substring(it + 1).trim() }
         }
@@ -68,10 +68,8 @@ object LocalMcpServer {
         if (parts[1] != "/mcp/${SettingsRepository(context).localMcpSecret()}") return write(writer, 404, error(null, -32601, "Not found"))
         val length = headers["content-length"]?.toIntOrNull() ?: 0
         if (length !in 1..MAX_BODY_BYTES) return write(writer, 400, error(null, -32600, "Invalid body"))
-        val chars = CharArray(length)
-        var offset = 0
-        while (offset < length) { val count = reader.read(chars, offset, length - offset); if (count < 0) return; offset += count }
-        val request = runCatching { JSONObject(String(chars)) }.getOrElse { return write(writer, 400, error(null, -32700, "Invalid JSON")) }
+        val body = readUtf8Body(input, length) ?: return write(writer, 400, error(null, -32600, "Truncated body"))
+        val request = runCatching { JSONObject(body) }.getOrElse { return write(writer, 400, error(null, -32700, "Invalid JSON")) }
         val id = request.opt("id")
         val result = when (request.optString("method")) {
             "initialize" -> JSONObject().put("protocolVersion", "2025-03-26").put("serverInfo", JSONObject().put("name", "our-home-companion-local").put("version", "0.1.0")).put("capabilities", JSONObject().put("tools", JSONObject()))
@@ -81,6 +79,33 @@ object LocalMcpServer {
             else -> return write(writer, 200, error(id, -32601, "Method not found"))
         }
         write(writer, 200, JSONObject().put("jsonrpc", "2.0").put("id", id).put("result", result).toString())
+    }
+
+    /** Reads exactly the byte count declared by HTTP Content-Length, then decodes UTF-8 once. */
+    internal fun readUtf8Body(input: InputStream, length: Int): String? {
+        val bytes = ByteArray(length)
+        var offset = 0
+        while (offset < length) {
+            val count = input.read(bytes, offset, length - offset)
+            if (count < 0) return null
+            offset += count
+        }
+        return String(bytes, Charsets.UTF_8)
+    }
+
+    private fun readAsciiLine(input: InputStream): String? {
+        val bytes = ByteArrayOutputStream()
+        while (bytes.size() <= 8 * 1024) {
+            val value = input.read()
+            if (value < 0) return if (bytes.size() == 0) null else String(bytes.toByteArray(), Charsets.ISO_8859_1)
+            if (value == '\n'.code) {
+                val line = bytes.toByteArray()
+                val end = if (line.lastOrNull() == '\r'.code.toByte()) line.size - 1 else line.size
+                return String(line, 0, end, Charsets.ISO_8859_1)
+            }
+            bytes.write(value)
+        }
+        return null
     }
 
     private fun tools() = JSONArray()
