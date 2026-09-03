@@ -19,6 +19,7 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     override suspend fun doWork(): Result {
         val queue = QueueRepository.create(applicationContext)
         val settings = SettingsRepository(applicationContext)
+        if (settings.isLocalMode()) return Result.success()
         val periodicRun = inputData.getBoolean(KEY_PERIODIC_RUN, false)
         val collectionStartedAt = System.currentTimeMillis()
         if (periodicRun) settings.recordPeriodicCollection(collectionStartedAt)
