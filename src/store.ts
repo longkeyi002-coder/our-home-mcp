@@ -151,6 +151,7 @@ function seedData(): OurHomeData {
     wakeEvents: [],
     wakeEngineState: emptyWakeEngineState(),
     phoneDeviceRegistrations: [],
+    runtimeDiagnostics: {},
   };
 }
 
