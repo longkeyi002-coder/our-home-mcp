@@ -20,6 +20,8 @@ import type {
   PhoneDeviceRegistration,
   RelationshipEvent,
   RoutineWindow,
+  RuntimeDiagnosticCheckpoint,
+  RuntimeDiagnostics,
   WakeEngineState,
   WakeEvent,
   WakeEventStatus,
@@ -89,6 +91,7 @@ function emptyData(): OurHomeData {
     wakeEvents: [],
     wakeEngineState: emptyWakeEngineState(),
     phoneDeviceRegistrations: [],
+    runtimeDiagnostics: {},
   };
 }
 
@@ -171,6 +174,7 @@ function migrateData(value: unknown): OurHomeData {
     wakeEngineState?: OurHomeData["wakeEngineState"];
     phoneDeviceRegistrations?: OurHomeData["phoneDeviceRegistrations"];
     activePhoneDeviceId?: OurHomeData["activePhoneDeviceId"];
+    runtimeDiagnostics?: OurHomeData["runtimeDiagnostics"];
   };
   const hasBaseShape =
     Array.isArray(candidate.diaries) &&
@@ -193,6 +197,7 @@ function migrateData(value: unknown): OurHomeData {
       wakeEvents: [],
       wakeEngineState: emptyWakeEngineState(),
       phoneDeviceRegistrations: [],
+      runtimeDiagnostics: {},
     };
   }
   if (
@@ -210,6 +215,7 @@ function migrateData(value: unknown): OurHomeData {
     wakeEngineState: candidate.wakeEngineState ?? emptyWakeEngineState(),
     phoneDeviceRegistrations: candidate.phoneDeviceRegistrations ?? [],
     activePhoneDeviceId: candidate.activePhoneDeviceId ?? candidate.phoneDeviceRegistrations?.find((item) => item.active)?.deviceId,
+    runtimeDiagnostics: candidate.runtimeDiagnostics ?? {},
   };
 }
 
@@ -394,6 +400,21 @@ export class JsonStore {
   }
 
   getActivePhoneDeviceId(): string | undefined { return this.snapshot().activePhoneDeviceId; }
+
+  async recordRuntimeDiagnostic(
+    key: keyof RuntimeDiagnostics,
+    checkpoint: RuntimeDiagnosticCheckpoint,
+  ): Promise<RuntimeDiagnosticCheckpoint> {
+    const safeCheckpoint = {
+      ...checkpoint,
+      ...(checkpoint.detail ? { detail: checkpoint.detail.slice(0, 500) } : {}),
+    };
+    await this.update((data) => {
+      data.runtimeDiagnostics[key] = safeCheckpoint;
+    });
+    return structuredClone(safeCheckpoint);
+  }
+
 
   async addDiary(input: {
     title: string;
