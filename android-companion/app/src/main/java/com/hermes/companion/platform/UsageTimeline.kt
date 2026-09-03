@@ -66,7 +66,7 @@ class UsageTimelineTracker {
     fun onBackground(at: Long) = closeActive(at)
 
     fun summary(now: Long, dayStart: Long): UsageTimelineSummary {
-        val sessions = (completed + activeSession(now))
+        val sessions = (completed + listOfNotNull(activeSession(now)))
             .filter { it.startedAt < now && it.endedAt?.let { end -> end > dayStart } != false }
             .map { session ->
                 val start = maxOf(session.startedAt, dayStart)
