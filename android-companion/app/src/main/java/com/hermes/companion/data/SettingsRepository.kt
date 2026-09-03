@@ -4,10 +4,17 @@ import android.content.Context
 import com.hermes.companion.UsageAccessOnboarding
 import java.util.UUID
 
+enum class CompanionMode { LOCAL, CLOUD }
+
 class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     internal val context = context.applicationContext
     private val prefs = context.getSharedPreferences("companion_settings", Context.MODE_PRIVATE)
     private val secure = SecureTokenStore(context)
+
+    fun mode(): CompanionMode = runCatching { CompanionMode.valueOf(prefs.getString(KEY_MODE, CompanionMode.CLOUD.name) ?: CompanionMode.CLOUD.name) }.getOrDefault(CompanionMode.CLOUD)
+    fun isLocalMode(): Boolean = mode() == CompanionMode.LOCAL
+    fun setMode(value: CompanionMode) { prefs.edit().putString(KEY_MODE, value.name).apply() }
+    fun localMcpSecret(): String = secure.get(KEY_LOCAL_MCP_SECRET) ?: UUID.randomUUID().toString().replace("-", "").also { secure.put(KEY_LOCAL_MCP_SECRET, it) }
 
     fun serverUrl(): String = prefs.getString(KEY_SERVER_URL, "") ?: ""
     fun saveServerUrl(value: String) { prefs.edit().putString(KEY_SERVER_URL, value.trim()).apply() }
@@ -56,9 +63,11 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     override fun markUsageAccessGuideShown() { prefs.edit().putBoolean(KEY_USAGE_ACCESS_GUIDE_SHOWN, true).apply() }
 
     companion object {
+        private const val KEY_MODE = "mode"
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_BOOTSTRAP_TOKEN = "bootstrap_token"
+        private const val KEY_LOCAL_MCP_SECRET = "local_mcp_secret"
         private const val KEY_DEVICE_TOKEN = "device_token"
         private const val KEY_PUSH_FID = "push_fid"
         private const val KEY_PUSH_TOKEN = "push_token"
