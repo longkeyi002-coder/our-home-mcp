@@ -10,6 +10,15 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     private val secure = SecureTokenStore(context)
 
     fun serverUrl(): String = prefs.getString(KEY_SERVER_URL, "") ?: ""
+    fun tunnelRelayUrl(): String = prefs.getString(KEY_TUNNEL_RELAY_URL, "") ?: ""
+    fun saveTunnelRelayUrl(value: String) { prefs.edit().putString(KEY_TUNNEL_RELAY_URL, value.trim()).apply() }
+    fun tunnelToken(): String? = secure.get(KEY_TUNNEL_TOKEN)
+    fun saveTunnelToken(value: String) {
+        val normalized = value.trim()
+        if (normalized.isBlank()) secure.put(KEY_TUNNEL_TOKEN, null) else secure.put(KEY_TUNNEL_TOKEN, normalized)
+    }
+    fun tunnelEnabled(): Boolean = prefs.getBoolean(KEY_TUNNEL_ENABLED, false)
+    fun setTunnelEnabled(value: Boolean) { prefs.edit().putBoolean(KEY_TUNNEL_ENABLED, value).apply() }
     fun saveServerUrl(value: String) { prefs.edit().putString(KEY_SERVER_URL, value.trim()).apply() }
     fun deviceId(): String = prefs.getString(KEY_DEVICE_ID, null) ?: "android-${UUID.randomUUID()}".also { prefs.edit().putString(KEY_DEVICE_ID, it).apply() }
     fun bootstrapToken(): String? = secure.get(KEY_BOOTSTRAP_TOKEN)
@@ -57,6 +66,9 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
 
     companion object {
         private const val KEY_SERVER_URL = "server_url"
+        private const val KEY_TUNNEL_RELAY_URL = "tunnel_relay_url"
+        private const val KEY_TUNNEL_TOKEN = "tunnel_token"
+        private const val KEY_TUNNEL_ENABLED = "tunnel_enabled"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_BOOTSTRAP_TOKEN = "bootstrap_token"
         private const val KEY_DEVICE_TOKEN = "device_token"
