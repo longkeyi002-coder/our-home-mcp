@@ -17,6 +17,7 @@ import type {
   ProactiveCandidate,
   ProactiveCandidateStatus,
   ProactiveMessage,
+  PhoneDeviceRegistration,
   RelationshipEvent,
   RoutineWindow,
   WakeEngineState,
@@ -67,6 +68,7 @@ function emptyData(): OurHomeData {
     proactiveQueue: [],
     wakeEvents: [],
     wakeEngineState: emptyWakeEngineState(),
+    phoneDeviceRegistrations: [],
   };
 }
 
@@ -125,6 +127,7 @@ function seedData(): OurHomeData {
     proactiveQueue: [],
     wakeEvents: [],
     wakeEngineState: emptyWakeEngineState(),
+    phoneDeviceRegistrations: [],
   };
 }
 
@@ -146,6 +149,7 @@ function migrateData(value: unknown): OurHomeData {
     proactiveQueue?: OurHomeData["proactiveQueue"];
     wakeEvents?: OurHomeData["wakeEvents"];
     wakeEngineState?: OurHomeData["wakeEngineState"];
+    phoneDeviceRegistrations?: OurHomeData["phoneDeviceRegistrations"];
   };
   const hasBaseShape =
     Array.isArray(candidate.diaries) &&
@@ -167,6 +171,7 @@ function migrateData(value: unknown): OurHomeData {
       proactiveQueue: [],
       wakeEvents: [],
       wakeEngineState: emptyWakeEngineState(),
+      phoneDeviceRegistrations: [],
     };
   }
   if (
@@ -182,6 +187,7 @@ function migrateData(value: unknown): OurHomeData {
     ...(candidate as OurHomeData),
     wakeEvents: candidate.wakeEvents ?? [],
     wakeEngineState: candidate.wakeEngineState ?? emptyWakeEngineState(),
+    phoneDeviceRegistrations: candidate.phoneDeviceRegistrations ?? [],
   };
 }
 
@@ -324,6 +330,40 @@ export class JsonStore {
     this.mutationQueue = operation.catch(() => undefined);
     await operation;
     return result!;
+  }
+
+  async registerPhoneDevice(input: {
+    deviceId: string;
+    appVersion?: string;
+    pushFid?: string;
+    pushToken?: string;
+  }): Promise<PhoneDeviceRegistration> {
+    let registration: PhoneDeviceRegistration | undefined;
+    await this.update((data) => {
+      const existing = data.phoneDeviceRegistrations.find((item) => item.deviceId === input.deviceId);
+      const next: PhoneDeviceRegistration = {
+        deviceId: input.deviceId,
+        ...(input.appVersion === undefined ? {} : { appVersion: input.appVersion }),
+        ...(input.pushFid === undefined ? {} : { pushFid: input.pushFid }),
+        ...(input.pushToken === undefined ? {} : { pushToken: input.pushToken }),
+        updatedAt: now(),
+      };
+      if (existing) {
+        Object.assign(existing, next);
+        registration = existing;
+      } else {
+        data.phoneDeviceRegistrations.push(next);
+        registration = next;
+      }
+    });
+    return structuredClone(registration!);
+  }
+
+  /** V0.1 targets one primary Companion: the most recently registered token. */
+  getPrimaryPushDevice(): PhoneDeviceRegistration | undefined {
+    return this.snapshot().phoneDeviceRegistrations
+      .filter((item) => Boolean(item.pushToken))
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt) || left.deviceId.localeCompare(right.deviceId))[0];
   }
 
   async addDiary(input: {

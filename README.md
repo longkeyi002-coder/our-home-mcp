@@ -90,7 +90,9 @@ Hermes 配置完整时优先于旧 decision webhook；否则若配置 `OUR_HOME_
 
 旧 webhook 仍可用：配置 `OUR_HOME_DECISION_WEBHOOK_URL` 后，worker 会 POST `{ wakeEvent, context }`，服务返回现有 `WakeDecision` V0.1。返回内容经过 schema 校验，并通过原子的 `applyWakeDecision()` 进入主动消息队列或忽略该 event。
 
-没有配置通知地址时，候选消息会保持 `pending` 并重试，不会被假装成“已发送”。配置一个接收 JSON POST 的通知适配器：
+通知选择顺序是：`OUR_HOME_FIREBASE_PROJECT_ID` 与 `GOOGLE_APPLICATION_CREDENTIALS` 都存在时使用 FCM HTTP v1；否则回退到 webhook；两者都未配置时使用 noop，候选消息保持 `pending` 并在下一 cycle 重试。`GOOGLE_APPLICATION_CREDENTIALS` 只能指向运行环境中的 service-account 文件，不要把 JSON、private key 或 access token 放进仓库、数据文件或日志。
+
+V0.1 只投递给一个主要 Android Companion：选择 `updatedAt` 最新且含 `pushToken` 的设备，时间相同时按 `deviceId` 排序。配置 webhook 的示例：
 
 ```bash
 OUR_HOME_NOTIFY_WEBHOOK_URL='https://your-notifier.example/webhook' \
@@ -110,10 +112,10 @@ POST /v1/phone/register
 Authorization: Bearer <OUR_HOME_INGEST_TOKEN>
 Content-Type: application/json
 
-{"deviceId":"android-main","appVersion":"0.1.0"}
+{"deviceId":"android-main","appVersion":"0.1.0","pushFid":"firebase-installation-id","pushToken":"fcm-registration-token"}
 ```
 
-服务端返回设备 token；Android Companion 将其保存到 Android Keystore，之后用设备 token 调用下面两个 endpoint。
+服务端返回设备 token；Android Companion 将其保存到 Android Keystore，之后用设备 token 调用下面两个 endpoint。同一 `deviceId` 再注册会更新现有 push address，不会增加重复设备。
 
 ```http
 POST /v1/phone/heartbeat

@@ -1,10 +1,11 @@
 import { createServer } from "node:http";
-import { createHmac, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 import { createOurHomeServer } from "./server.js";
 import { JsonStore, parseBoolean } from "./store.js";
+import { createDeviceToken, registerPhone } from "./phone-registration.js";
 
 const transportMode = process.env.OUR_HOME_MCP_TRANSPORT ?? "stdio";
 const dataFile = process.env.OUR_HOME_DATA_FILE ?? "./data/our-home.json";
@@ -36,11 +37,6 @@ const phoneHeartbeatSchema = z.object({
   foregroundPackage: z.string().trim().max(300).optional(),
   clientEventId: z.string().trim().max(200).optional(),
   observedAt: z.string().datetime({ offset: true }).optional(),
-});
-
-const phoneRegisterSchema = z.object({
-  deviceId: z.string().trim().min(1).max(200),
-  appVersion: z.string().trim().max(100).optional(),
 });
 
 if (transportMode === "stdio") {
@@ -243,29 +239,15 @@ async function handlePhoneRegister(
     response.writeHead(503, { "content-type": "application/json" }).end(JSON.stringify({ error: "Phone registration is not configured" }));
     return;
   }
-  if (request.headers.authorization !== `Bearer ${ingestToken}`) {
-    response.writeHead(401, { "content-type": "application/json", "www-authenticate": "Bearer" }).end(JSON.stringify({ error: "Unauthorized" }));
-    return;
-  }
   try {
-    const parsed = phoneRegisterSchema.safeParse(await readJsonBody(request, 16_000));
-    if (!parsed.success) {
-      response.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: parsed.error.issues }));
-      return;
-    }
-    response.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({
-      deviceId: parsed.data.deviceId,
-      token: createDeviceToken(ingestToken, parsed.data.deviceId),
-      appVersion: parsed.data.appVersion,
-    }));
+    const body = await readJsonBody(request, 16_000);
+    const result = await registerPhone(store, ingestToken, request.headers.authorization, body);
+    response.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify(result));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Phone registration failed";
-    response.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: message }));
+    const status = message === "Unauthorized" ? 401 : 400;
+    response.writeHead(status, { "content-type": "application/json", ...(status === 401 ? { "www-authenticate": "Bearer" } : {}) }).end(JSON.stringify({ error: message }));
   }
-}
-
-function createDeviceToken(ingestToken: string, deviceId: string): string {
-  return createHmac("sha256", ingestToken).update(`hermes-phone-v1:${deviceId}`).digest("hex");
 }
 
 function authorizePhoneRequest(

@@ -42,12 +42,15 @@ Debug APK 输出在 `app/build/outputs/apk/debug/app-debug.apk`。可以用 Andr
 3. 填写服务端的 ingest token（仅用于首次注册；App 会用 Android Keystore 加密保存 bootstrap 和 device token）。
 4. 点击 `Save and connection test`。App 调用 `/v1/phone/register`，随后上传排队的心跳。
 
+要启用 FCM，把项目自己的 `google-services.json` 放到 `android-companion/app/`（该文件已被 gitignore），再构建安装。没有此文件时 Firebase Google Services 插件不会启用，CI 仍可编译和运行 JVM 测试。App 会获取 Firebase Installation ID 与 registration token，并通过同一个受保护的 `/v1/phone/register` 更新；token refresh 也会重新注册。
+
 服务端仍接受旧格式的 `Authorization: Bearer <OUR_HOME_INGEST_TOKEN>`，因此已有客户端保持兼容。注册返回的设备 token 是由服务端 ingest token 和 device ID 派生的设备凭据，服务端不保存明文 token。
 
 ## 权限
 
 - `INTERNET`：访问配置的 Hermes API。
 - `ACCESS_NETWORK_STATE`：报告 online/offline connectivity state。
+- `POST_NOTIFICATIONS`：Android 13+ 首次启动请求，用于显示 Hermes Life 系统通知。
 - Usage Access（用户在系统设置中主动授予）：读取最近的 foreground package 名称。未授权时显示 `Permission required`，不会上传屏幕内容。
 
 不申请定位、通知全文、通讯录、短信、麦克风、相机、Accessibility 或截屏权限。
@@ -62,6 +65,7 @@ Debug APK 输出在 `app/build/outputs/apk/debug/app-debug.apk`。可以用 Andr
 - Room 本地事件队列；上传成功收到 HTTP 2xx 后删除，失败保留并按指数退避重试。
 - WorkManager 一次性上传和 15 分钟周期上传。
 - Debug / Diagnostics 页面。
+- FCM 前台消息主动显示固定 `hermes_life` channel 的系统通知；后台 notification payload 使用 FCM/Android 标准系统行为，点击后打开现有 Companion Activity。
 
 ## Android 后台限制和未实现
 

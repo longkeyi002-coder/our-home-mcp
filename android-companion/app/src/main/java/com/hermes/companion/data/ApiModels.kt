@@ -7,6 +7,8 @@ import kotlinx.serialization.Serializable
 data class RegisterRequest(
     @SerialName("deviceId") val deviceId: String,
     @SerialName("appVersion") val appVersion: String,
+    @SerialName("pushFid") val pushFid: String? = null,
+    @SerialName("pushToken") val pushToken: String? = null,
 )
 
 @Serializable

@@ -4,6 +4,9 @@ import com.hermes.companion.data.ApiClient
 import com.hermes.companion.data.HeartbeatRequest
 import com.hermes.companion.data.RegisterRequest
 import com.hermes.companion.data.WireJson
+import com.hermes.companion.push.HermesNotifications
+import com.hermes.companion.push.PushRegistration
+import kotlinx.coroutines.test.runTest
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.boolean
@@ -41,11 +44,31 @@ class ApiClientTest {
     @Test
     fun registerSerializationUsesServerContract() {
         val payload = WireJson.parseToJsonElement(
-            WireJson.encodeToString(RegisterRequest("android-test", "0.2.0")),
+            WireJson.encodeToString(RegisterRequest("android-test", "0.2.0", "fid-1", "push-1")),
         ).jsonObject
 
-        assertEquals(setOf("deviceId", "appVersion"), payload.keys)
+        assertEquals(setOf("deviceId", "appVersion", "pushFid", "pushToken"), payload.keys)
         assertEquals("android-test", payload.getValue("deviceId").jsonPrimitive.content)
         assertEquals("0.2.0", payload.getValue("appVersion").jsonPrimitive.content)
+        assertEquals("fid-1", payload.getValue("pushFid").jsonPrimitive.content)
+        assertEquals("push-1", payload.getValue("pushToken").jsonPrimitive.content)
+    }
+
+    @Test
+    fun tokenRefreshTriggersRegistration() = runTest {
+        val calls = mutableListOf<Pair<String?, String>>()
+        PushRegistration.handleRefresh("fid-refresh", "token-refresh") { fid, token -> calls += fid to token }
+        assertEquals(listOf("fid-refresh" to "token-refresh"), calls)
+    }
+
+    @Test
+    fun notificationPayloadPreservesCandidateTitleAndBody() {
+        val notification = HermesNotifications.fromPayload(
+            mapOf("candidateId" to "candidate-1"), "Title", "Body",
+        )
+        assertEquals("candidate-1", notification.candidateId)
+        assertEquals("Title", notification.title)
+        assertEquals("Body", notification.body)
+        assertEquals("hermes_life", HermesNotifications.CHANNEL_ID)
     }
 }

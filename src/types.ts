@@ -167,6 +167,14 @@ export interface ProactiveCandidate {
   wakeEventId?: string;
 }
 
+export interface PhoneDeviceRegistration {
+  deviceId: string;
+  appVersion?: string;
+  pushFid?: string;
+  pushToken?: string;
+  updatedAt: string;
+}
+
 export type WakeDecision =
   | { action: "ignore" }
   | { action: "proactive_message"; candidate: { title: string; message: string; reason: string; dueAt?: string; dedupeKey?: string } };
@@ -195,6 +203,7 @@ export interface OurHomeData {
   proactiveQueue: ProactiveCandidate[];
   wakeEvents: WakeEvent[];
   wakeEngineState: WakeEngineState;
+  phoneDeviceRegistrations: PhoneDeviceRegistration[];
 }
 
 export interface DataStatus {

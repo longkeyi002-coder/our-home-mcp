@@ -2,6 +2,7 @@ import { JsonStore, parseBoolean } from "./store.js";
 import { z } from "zod";
 import type { LifeContext, ProactiveCandidate, WakeDecision, WakeEvent } from "./types.js";
 import { HermesDecisionEngine } from "./hermes-decision.js";
+import { FcmHttpV1Sender, FcmNotifier } from "./fcm.js";
 
 export interface ProactiveNotifier {
   deliver(candidate: ProactiveCandidate): Promise<void>;
@@ -130,6 +131,25 @@ const hermesApiUrl = process.env.OUR_HOME_HERMES_API_URL;
 const hermesApiKey = process.env.OUR_HOME_HERMES_API_KEY;
 const hermesConversation = process.env.OUR_HOME_HERMES_CONVERSATION;
 const hermesModel = process.env.OUR_HOME_HERMES_MODEL;
+const firebaseProjectId = process.env.OUR_HOME_FIREBASE_PROJECT_ID;
+const googleCredentials = process.env.GOOGLE_APPLICATION_CREDENTIALS;
+
+export function selectNotifier(
+  store: JsonStore,
+  config: {
+    firebaseProjectId?: string;
+    googleCredentials?: string;
+    webhookUrl?: string;
+    webhookToken?: string;
+  },
+): ProactiveNotifier {
+  if (config.firebaseProjectId && config.googleCredentials) {
+    return new FcmNotifier(store, new FcmHttpV1Sender(config.firebaseProjectId, config.googleCredentials));
+  }
+  return config.webhookUrl
+    ? new WebhookNotifier(config.webhookUrl, config.webhookToken)
+    : new NoopNotifier();
+}
 
 if (process.env.OUR_HOME_RUN_WORKER === "true") {
   if (!Number.isInteger(intervalMs) || intervalMs < 5_000) {
@@ -137,9 +157,12 @@ if (process.env.OUR_HOME_RUN_WORKER === "true") {
   }
 
   const store = await JsonStore.open(dataFile, seed);
-  const notifier: ProactiveNotifier = webhookUrl
-    ? new WebhookNotifier(webhookUrl, webhookToken)
-    : new NoopNotifier();
+  const notifier = selectNotifier(store, {
+    firebaseProjectId,
+    googleCredentials,
+    webhookUrl,
+    webhookToken,
+  });
   const decisionEngine = hermesApiUrl && hermesApiKey
     ? new HermesDecisionEngine({
       apiUrl: hermesApiUrl,

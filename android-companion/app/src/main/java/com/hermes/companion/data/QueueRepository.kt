@@ -85,7 +85,7 @@ class QueueRepository private constructor(
         val authorization = try {
             val deviceToken = settings.deviceToken()
             if (deviceToken.isNullOrBlank()) {
-                val response = api.register("Bearer ${bootstrap!!}", RegisterRequest(settings.deviceId(), BuildConfig.VERSION_NAME))
+                val response = api.register("Bearer ${bootstrap!!}", registrationRequest())
                 settings.saveDeviceToken(response.token)
                 "Bearer ${response.token}"
             } else "Bearer $deviceToken"
@@ -127,10 +127,26 @@ class QueueRepository private constructor(
 
     private suspend fun registerDevice(api: HermesApi): String {
         val bootstrap = settings.bootstrapToken() ?: throw IllegalStateException("Registration token is missing")
-        val response = api.register("Bearer $bootstrap", RegisterRequest(settings.deviceId(), BuildConfig.VERSION_NAME))
+        val response = api.register("Bearer $bootstrap", registrationRequest())
         settings.saveDeviceToken(response.token)
         return "Bearer ${response.token}"
     }
+
+    suspend fun registerPushAddress(pushFid: String?, pushToken: String) {
+        settings.savePushAddress(pushFid, pushToken)
+        val serverUrl = settings.serverUrl()
+        val bootstrap = settings.bootstrapToken() ?: throw IllegalStateException("Registration token is missing")
+        require(serverUrl.isNotBlank()) { "Server URL is missing" }
+        val response = apiFactory(serverUrl).register("Bearer $bootstrap", registrationRequest())
+        settings.saveDeviceToken(response.token)
+    }
+
+    private fun registrationRequest() = RegisterRequest(
+        deviceId = settings.deviceId(),
+        appVersion = BuildConfig.VERSION_NAME,
+        pushFid = settings.pushFid(),
+        pushToken = settings.pushToken(),
+    )
 
     private suspend fun send(api: HermesApi, authorization: String, event: PendingEvent) {
         when (event.type) {

@@ -21,6 +21,12 @@ class SettingsRepository(context: Context) {
     fun deviceToken(): String? = secure.get(KEY_DEVICE_TOKEN)
     fun saveDeviceToken(value: String) = secure.put(KEY_DEVICE_TOKEN, value)
     fun clearDeviceToken() = secure.put(KEY_DEVICE_TOKEN, null)
+    fun pushFid(): String? = secure.get(KEY_PUSH_FID)
+    fun pushToken(): String? = secure.get(KEY_PUSH_TOKEN)
+    fun savePushAddress(fid: String?, token: String) {
+        secure.put(KEY_PUSH_FID, fid)
+        secure.put(KEY_PUSH_TOKEN, token)
+    }
     fun lastUpload(): Long = prefs.getLong(KEY_LAST_UPLOAD, 0L)
     fun lastHeartbeat(): Long = prefs.getLong(KEY_LAST_HEARTBEAT, 0L)
     fun recordHeartbeat(at: Long) { prefs.edit().putLong(KEY_LAST_HEARTBEAT, at).apply() }
@@ -33,6 +39,8 @@ class SettingsRepository(context: Context) {
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_BOOTSTRAP_TOKEN = "bootstrap_token"
         private const val KEY_DEVICE_TOKEN = "device_token"
+        private const val KEY_PUSH_FID = "push_fid"
+        private const val KEY_PUSH_TOKEN = "push_token"
         private const val KEY_LAST_UPLOAD = "last_upload"
         private const val KEY_LAST_HEARTBEAT = "last_heartbeat"
         private const val KEY_LAST_ERROR = "last_error"

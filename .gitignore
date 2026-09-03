@@ -6,3 +6,4 @@ dist/
 **/.gradle/
 **/build/
 **/local.properties
+**/google-services.json
