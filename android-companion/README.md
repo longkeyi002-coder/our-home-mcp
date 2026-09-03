@@ -31,6 +31,10 @@ Life State → Life Loop → AI
 
 Debug APK 输出在 `app/build/outputs/apk/debug/app-debug.apk`。可以用 Android Studio 安装，或使用 `adb install -r`。
 
+### GitHub Actions 自动构建
+
+仓库中的 `.github/workflows/android-companion.yml` 会在 Android Companion 代码变更或手动触发时，使用 JDK 17、Android SDK 35 和 Gradle Wrapper 运行测试并构建 Debug APK。构建完成后，可在对应的 GitHub Actions run 的 Artifacts 中下载 `hermes-companion-debug-apk`。
+
 ## 配置和首次连接
 
 1. 在服务端设置 `OUR_HOME_INGEST_TOKEN`，启动 HTTP 服务并通过 HTTPS 暴露。
