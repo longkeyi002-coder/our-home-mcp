@@ -1,6 +1,7 @@
 import { JsonStore, parseBoolean } from "./store.js";
 import { z } from "zod";
 import type { LifeContext, ProactiveCandidate, WakeDecision, WakeEvent } from "./types.js";
+import { HermesDecisionEngine } from "./hermes-decision.js";
 
 export interface ProactiveNotifier {
   deliver(candidate: ProactiveCandidate): Promise<void>;
@@ -125,6 +126,10 @@ const webhookUrl = process.env.OUR_HOME_NOTIFY_WEBHOOK_URL;
 const webhookToken = process.env.OUR_HOME_NOTIFY_WEBHOOK_TOKEN;
 const decisionUrl = process.env.OUR_HOME_DECISION_WEBHOOK_URL;
 const decisionToken = process.env.OUR_HOME_DECISION_WEBHOOK_TOKEN;
+const hermesApiUrl = process.env.OUR_HOME_HERMES_API_URL;
+const hermesApiKey = process.env.OUR_HOME_HERMES_API_KEY;
+const hermesConversation = process.env.OUR_HOME_HERMES_CONVERSATION;
+const hermesModel = process.env.OUR_HOME_HERMES_MODEL;
 
 if (process.env.OUR_HOME_RUN_WORKER === "true") {
   if (!Number.isInteger(intervalMs) || intervalMs < 5_000) {
@@ -135,9 +140,16 @@ if (process.env.OUR_HOME_RUN_WORKER === "true") {
   const notifier: ProactiveNotifier = webhookUrl
     ? new WebhookNotifier(webhookUrl, webhookToken)
     : new NoopNotifier();
-  const decisionEngine = decisionUrl
-    ? new WebhookDecisionEngine(decisionUrl, decisionToken)
-    : undefined;
+  const decisionEngine = hermesApiUrl && hermesApiKey
+    ? new HermesDecisionEngine({
+      apiUrl: hermesApiUrl,
+      apiKey: hermesApiKey,
+      conversation: hermesConversation,
+      model: hermesModel,
+    })
+    : decisionUrl
+      ? new WebhookDecisionEngine(decisionUrl, decisionToken)
+      : undefined;
 
   const cycle = async () => {
     const result = await runProactiveCycle(store, notifier, new Date(), decisionEngine);

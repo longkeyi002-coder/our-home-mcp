@@ -68,9 +68,27 @@ OUR_HOME_WORKER_INTERVAL_MS=60000 \
 npm run worker
 ```
 
-这个 worker 只做几件事：记录心跳、读取生活上下文、可选地调用独立决策适配器生成候选、查找已到期的候选并交给通知适配器。它不调用 Hermes，也不创建 Hermes session。
+这个 worker 只做几件事：记录心跳、读取生活上下文、可选地调用决策适配器生成候选、查找已到期的候选并交给通知适配器。配置 Hermes 后，是 Runtime 主动调用 Hermes；MCP 本身不会“唤醒”模型。
 
-如果配置 `OUR_HOME_DECISION_WEBHOOK_URL`，worker 会把 `home.get_life_context` 同样的结构化上下文 POST 给决策服务。决策服务必须返回 `{"candidates": [...]}`；返回内容会经过 schema 校验并进入主动消息队列。这样模型可以根据真实 observation 做判断，但模型本身仍然是可替换的，不绑定 Hermes。
+### Hermes Life Runtime
+
+先在 Hermes 的 `~/.hermes/.env` 启用公开 API Server 并设置 `API_SERVER_KEY`，启动 `hermes gateway`。如需让 agent turn 使用 Our Home tools，另在 Hermes 侧连接本仓库 MCP。然后启动 Runtime：
+
+```bash
+OUR_HOME_HERMES_API_URL='http://127.0.0.1:8642' \
+OUR_HOME_HERMES_API_KEY='same-as-API_SERVER_KEY' \
+OUR_HOME_HERMES_CONVERSATION='our-home-life-runtime' \
+OUR_HOME_RUN_WORKER=true \
+npm run dev:worker
+```
+
+Runtime 使用 Hermes 的公开 `POST /v1/responses`，默认模型为 `hermes-agent`，默认 named conversation 为 `our-home-life-runtime`；可分别用 `OUR_HOME_HERMES_MODEL` 和 `OUR_HOME_HERMES_CONVERSATION` 覆盖。固定 conversation 由 Hermes 在 worker cycle 和 Runtime 重启之间自动续接。API key 只从环境变量读取，不写入数据文件或日志。
+
+Hermes 配置完整时优先于旧 decision webhook；否则若配置 `OUR_HOME_DECISION_WEBHOOK_URL`，worker 使用原有 webhook；两者都没有时不消费 pending Wake Event。同一个 event 绝不会同时调用两个 Decision Engine。Hermes 调用、认证、超时、响应解析或 contract 校验失败时，event 保持 pending，供下一个 cycle 重试。
+
+最小 smoke test：启动 Hermes gateway，以上述环境变量运行 worker；写入一个会产生 Wake Event 的 observation，确认 Hermes 日志出现 `/v1/responses` turn，并检查数据文件中该 event 变为 `handled`（或失败时仍为 `pending`）。Hermes 必须返回纯 `WakeDecision` V0.1 JSON。
+
+旧 webhook 仍可用：配置 `OUR_HOME_DECISION_WEBHOOK_URL` 后，worker 会 POST `{ wakeEvent, context }`，服务返回现有 `WakeDecision` V0.1。返回内容经过 schema 校验，并通过原子的 `applyWakeDecision()` 进入主动消息队列或忽略该 event。
 
 没有配置通知地址时，候选消息会保持 `pending` 并重试，不会被假装成“已发送”。配置一个接收 JSON POST 的通知适配器：
 
