@@ -58,14 +58,8 @@ function compactUsageSummaryObservations(data: OurHomeData, asOf = Date.now()): 
     const observedAt = Date.parse(item.observedAt);
     if (Number.isFinite(observedAt) && observedAt < cutoff) return false;
     const day = typeof item.metadata?.day === "string" ? item.metadata.day : item.observedAt.slice(0, 10);
-    const clientEventId = typeof item.metadata?.clientEventId === "string" ? item.metadata.clientEventId : undefined;
-    const clientEventParts = clientEventId?.split(":");
-    const bucket = Number.isFinite(observedAt)
-      ? String(Math.floor(observedAt / (60 * 60 * 1000)))
-      : clientEventId?.startsWith("usage-summary:")
-        ? clientEventParts?.[clientEventParts.length - 1] ?? ""
-        : item.observedAt;
-    const key = (item.deviceId ?? "") + ":" + day + ":" + bucket;
+    // One compact current summary per device/day; observations are newest-first.
+    const key = (item.deviceId ?? "") + ":" + day;
     if (seenBuckets.has(key)) return false;
     seenBuckets.add(key);
     return true;
