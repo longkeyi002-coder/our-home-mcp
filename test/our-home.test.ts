@@ -390,9 +390,19 @@ test("usage summary retention removes old data and compacts duplicate buckets", 
     deviceId: "android-test",
     metadata: { day: recent.slice(0, 10), clientEventId: "usage-summary:android-test:recent:2", currentPackage: "com.example.newer" },
   });
+  await store.recordObservation({
+    kind: "usage_summary",
+    label: "manual/imported usage",
+    observedAt: recent,
+    source: "user",
+    confidence: "declared",
+    deviceId: "android-test",
+    metadata: { day: recent.slice(0, 10) },
+  });
 
   const usage = store.snapshot().observations.filter((item) => item.kind === "usage_summary");
-  assert.equal(usage.length, 1);
-  assert.equal(usage[0]?.metadata?.currentPackage, "com.example.newer");
+  assert.equal(usage.length, 3, "different hourly buckets and user/imported summaries are retained");
+  assert.ok(usage.some((item) => item.metadata?.currentPackage === "com.example.app"));
+  assert.ok(usage.some((item) => item.metadata?.currentPackage === "com.example.newer"));
   assert.equal(store.snapshot().observations.some((item) => item.kind === "manual_status"), true);
 });
