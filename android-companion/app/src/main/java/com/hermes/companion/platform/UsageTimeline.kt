@@ -113,7 +113,17 @@ class UsageTimelineTracker {
     }
 
     private fun activeSession(now: Long): UsageSession? = activePackage?.let { packageName ->
-        if (activeStartedAt < now) UsageSession(packageName, activeStartedAt, null, now - activeStartedAt, UsageCategoryClassifier.classify(packageName)) else null
+        // A missing STOP/PAUSE must not extend a foreground session indefinitely.
+        val effectiveEnd = minOf(now, lastForegroundEventAt + FOREGROUND_FRESHNESS_MS)
+        if (activeStartedAt < effectiveEnd) {
+            UsageSession(
+                packageName,
+                activeStartedAt,
+                effectiveEnd,
+                effectiveEnd - activeStartedAt,
+                UsageCategoryClassifier.classify(packageName),
+            )
+        } else null
     }
 }
 
