@@ -47,7 +47,20 @@ data class AppTimelineEntry(
 )
 
 @Serializable
-data class ApiAck(val dataSource: String? = null)
+data class VisualRequestAck(
+    val requestId: String,
+    val packageName: String,
+    val sessionId: String,
+    val reason: String,
+    val issuedAt: String,
+    val expiresAt: String,
+)
+
+@Serializable
+data class ApiAck(
+    val dataSource: String? = null,
+    val visualRequest: VisualRequestAck? = null,
+)
 
 @Serializable
 data class HealthResponse(val ok: Boolean, val service: String? = null, val schemaVersion: Int? = null)
