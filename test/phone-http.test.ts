@@ -82,7 +82,7 @@ test("OH-P1 real HTTP register heartbeat retry and observation persist one factu
     },
     body: JSON.stringify({ deviceId: "android-http", appVersion: "0.1.0" }),
   });
-  assert.equal(register.status, 201, await register.text());
+  assert.equal(register.status, 201);
   const registration = await register.json() as { token: string };
   assert.ok(registration.token.length > 20);
 
@@ -106,9 +106,9 @@ test("OH-P1 real HTTP register heartbeat retry and observation persist one factu
   });
 
   const firstHeartbeat = await sendHeartbeat();
-  assert.equal(firstHeartbeat.status, 201, await firstHeartbeat.text());
+  assert.equal(firstHeartbeat.status, 201);
   const retryHeartbeat = await sendHeartbeat();
-  assert.equal(retryHeartbeat.status, 200, await retryHeartbeat.text());
+  assert.equal(retryHeartbeat.status, 200);
 
   const usage = await fetch(`${baseUrl}/v1/observations`, {
     method: "POST",
@@ -126,7 +126,7 @@ test("OH-P1 real HTTP register heartbeat retry and observation persist one factu
       metadata: { currentPackage: "com.example.reader", currentDurationMs: "60000" },
     }),
   });
-  assert.equal(usage.status, 201, await usage.text());
+  assert.equal(usage.status, 201);
 
   await stopChild(child);
   const persisted = JSON.parse(await readFile(dataFile, "utf8")) as {
