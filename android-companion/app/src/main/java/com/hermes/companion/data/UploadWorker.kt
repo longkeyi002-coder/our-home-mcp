@@ -18,14 +18,15 @@ import java.util.concurrent.TimeUnit
 class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val settings = SettingsRepository(applicationContext)
+        val workerStartedAt = System.currentTimeMillis()
+        settings.recordWorkerRun(workerStartedAt)
         if (!TelemetryPolicy.isConfigured(settings.serverUrl(), settings.bootstrapToken(), settings.deviceToken())) {
             return Result.success()
         }
 
         val queue = QueueRepository.create(applicationContext)
         val periodicRun = inputData.getBoolean(KEY_PERIODIC_RUN, false)
-        val collectionStartedAt = System.currentTimeMillis()
-        if (periodicRun) settings.recordPeriodicCollection(collectionStartedAt)
+        if (periodicRun) settings.recordPeriodicCollection(workerStartedAt)
 
         val status = com.hermes.companion.platform.DeviceStatusReader.read(applicationContext)
         val now = System.currentTimeMillis()
@@ -58,7 +59,7 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
     }
 
     companion object {
-        private const val IMMEDIATE_NAME = "hermes-upload-now"
+        const val IMMEDIATE_WORK_NAME = "hermes-upload-now"
         const val PERIODIC_WORK_NAME = "hermes-periodic-upload"
         const val KEY_PERIODIC_RUN = "periodic_run"
 
@@ -67,7 +68,7 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 .setConstraints(androidx.work.Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(IMMEDIATE_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
+            WorkManager.getInstance(context).enqueueUniqueWork(IMMEDIATE_WORK_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
         }
 
         fun enqueueIfConfigured(context: Context) {
