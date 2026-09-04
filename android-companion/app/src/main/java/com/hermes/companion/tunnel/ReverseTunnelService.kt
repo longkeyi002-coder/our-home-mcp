@@ -10,6 +10,7 @@ import android.os.IBinder
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import com.hermes.companion.CompanionProductState
 import com.hermes.companion.data.CompanionMode
 import com.hermes.companion.data.SettingsRepository
 import com.hermes.companion.data.UploadWorker
@@ -38,6 +39,7 @@ class ReverseTunnelService : Service() {
         .pingInterval(30, TimeUnit.SECONDS)
         .build()
     private lateinit var settings: SettingsRepository
+    private lateinit var productState: CompanionProductState
     @Volatile private var socket: WebSocket? = null
     private var reconnectAttempt = 0
     @Volatile private var stopping = false
@@ -45,6 +47,7 @@ class ReverseTunnelService : Service() {
     override fun onCreate() {
         super.onCreate()
         settings = SettingsRepository(this)
+        productState = CompanionProductState(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -80,8 +83,8 @@ class ReverseTunnelService : Service() {
     private fun startAsForeground() {
         val notification = NotificationCompat.Builder(this, HermesNotifications.CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle("Hermes reverse tunnel")
-            .setContentText("Maintaining a secure outbound relay connection")
+            .setContentTitle("Hermes 手机伴侣")
+            .setContentText("Hermes 正在保持与这台手机的连接")
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
@@ -112,6 +115,7 @@ class ReverseTunnelService : Service() {
                     reconnectAttempt = 0
                     liveConnected.set(true)
                     settings.recordTunnelState("connected")
+                    productState.recordRelayConnected()
                 }
 
                 override fun onMessage(webSocket: WebSocket, text: String) = handleFrame(webSocket, text)
