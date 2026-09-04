@@ -43,6 +43,11 @@ class PresenceAccessibilityService : AccessibilityService() {
             // OH-45: a sensitive visual grant is scoped to the current App session.
             // Switching away invalidates it before any future visual request can use it.
             privacy.invalidateGrantForPackageChange(transition.toPackage)
+            privacy.armedGrant()?.let { armed ->
+                if (transition.toPackage != armed.packageName && transition.toPackage != applicationContext.packageName) {
+                    privacy.clearArmedGrant()
+                }
+            }
             reporter.reportTransition(transition)
         }
     }
