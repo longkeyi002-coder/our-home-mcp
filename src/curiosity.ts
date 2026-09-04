@@ -40,6 +40,14 @@ const THRESHOLD_MS: Record<ContextUnderstandingState, number> = {
   STALE: 10 * MINUTE,
 };
 
+const CURIOSITY_REASON: Record<ContextUnderstandingState, CuriosityReason> = {
+  UNKNOWN: "unknown_dwell",
+  PARTIAL: "partial_dwell",
+  KNOWN: "known_dwell_recheck",
+  CONFLICT: "context_conflict",
+  STALE: "stale_context",
+};
+
 /**
  * OH-44/OH-64/OH-65: cheap deterministic policy. This function may create a visual
  * request candidate only. It does not capture a screen, call Vision/Brain, or send a
@@ -72,13 +80,5 @@ export function decideCuriosity(input: CuriosityInput): CuriosityDecision {
     }
   }
 
-  const reason: CuriosityReason = {
-    UNKNOWN: "unknown_dwell",
-    PARTIAL: "partial_dwell",
-    KNOWN: "known_dwell_recheck",
-    CONFLICT: "context_conflict",
-    STALE: "stale_context",
-  }[input.understanding];
-
-  return { requestVisual: true, reason, thresholdMs };
+  return { requestVisual: true, reason: CURIOSITY_REASON[input.understanding], thresholdMs };
 }
