@@ -5,7 +5,8 @@ package com.hermes.companion.privacy
  * but PROTECTED apps still require an explicit temporary grant.
  *
  * Scene-level password/OTP/payment detection is intentionally NOT claimed here.
- * Until a pre-upload local detector exists, package-level financial/auth apps stay protected.
+ * Until a reliable pre-upload local scene detector exists, financial/auth apps stay
+ * PROTECTED and browsers stay PRIVATE because they may contain login/payment pages.
  */
 object AppSensitivityClassifier {
     private val protectedExact = setOf(
@@ -29,6 +30,16 @@ object AppSensitivityClassifier {
         "password.",
     )
 
+    private val privateExact = setOf(
+        "com.android.chrome",
+        "com.sec.android.app.sbrowser",
+        "org.mozilla.firefox",
+        "com.microsoft.emmx",
+        "com.opera.browser",
+        "com.brave.browser",
+        "com.kiwibrowser.browser",
+    )
+
     private val privateTokens = listOf(
         ".camera",
         "camera.",
@@ -44,6 +55,8 @@ object AppSensitivityClassifier {
         "chat.",
         ".messaging",
         "messaging.",
+        ".browser",
+        "browser.",
     )
 
     fun classify(packageName: String): SensitivityClass {
@@ -52,7 +65,9 @@ object AppSensitivityClassifier {
         if (protectedExact.any { it.lowercase() == normalized } || protectedTokens.any(normalized::contains)) {
             return SensitivityClass.PROTECTED
         }
-        if (privateTokens.any(normalized::contains)) return SensitivityClass.PRIVATE
+        if (privateExact.any { it.lowercase() == normalized } || privateTokens.any(normalized::contains)) {
+            return SensitivityClass.PRIVATE
+        }
         return SensitivityClass.NORMAL
     }
 }
