@@ -24,8 +24,9 @@ class AppSensitivityClassifierTest {
     }
 
     @Test
-    fun ordinaryAppsRemainNormal() {
-        assertEquals(SensitivityClass.NORMAL, AppSensitivityClassifier.classify("com.example.game"))
-        assertEquals(SensitivityClass.NORMAL, AppSensitivityClassifier.classify("tv.danmaku.bili"))
+    fun unrecognizedAppsArePrivateUntilUserExplicitlyAllowsThem() {
+        assertEquals(SensitivityClass.PRIVATE, AppSensitivityClassifier.classify("com.example.game"))
+        assertEquals(SensitivityClass.PRIVATE, AppSensitivityClassifier.classify("tv.danmaku.bili"))
+        assertEquals(SensitivityClass.PRIVATE, AppSensitivityClassifier.classify("com.brand.newfinanceapp"))
     }
 }
