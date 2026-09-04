@@ -16,7 +16,12 @@ export type ObservationKind =
   | "calendar"
   | "weather"
   | "note"
-  | "usage_summary";
+  | "usage_summary"
+  | "presence_app_transition"
+  | "presence_app_session_end"
+  | "presence_app_dwell"
+  | "presence_screen"
+  | "visual_policy_audit";
 export type ObservationSource = "user" | "phone" | "screen" | "calendar" | "system" | "mock";
 export type ObservationConfidence = "observed" | "declared" | "inferred";
 export type ProactiveCandidateStatus = "pending" | "delivered" | "dismissed";
