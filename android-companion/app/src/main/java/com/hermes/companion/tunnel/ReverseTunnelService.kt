@@ -16,6 +16,7 @@ import com.hermes.companion.data.UploadWorker
 import com.hermes.companion.local.LocalMcpServer
 import com.hermes.companion.push.HermesNotifications
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -48,6 +49,7 @@ class ReverseTunnelService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (!settings.tunnelEnabled()) {
+            liveConnected.set(false)
             stopSelf()
             return START_NOT_STICKY
         }
@@ -55,6 +57,7 @@ class ReverseTunnelService : Service() {
         try {
             startAsForeground()
         } catch (error: Throwable) {
+            liveConnected.set(false)
             settings.recordTunnelState("start_failed", error.message ?: error::class.simpleName.orEmpty())
             stopSelf()
             return START_NOT_STICKY
@@ -64,6 +67,7 @@ class ReverseTunnelService : Service() {
         UploadWorker.cancelCloudWork(this)
         LocalMcpServer.start(applicationContext)
         if (!LocalMcpServer.isRunning()) {
+            liveConnected.set(false)
             settings.recordTunnelState("local_mcp_error", settings.localMcpLastError().ifBlank { "Local MCP failed to start" })
             stopSelf()
             return START_NOT_STICKY
@@ -89,6 +93,7 @@ class ReverseTunnelService : Service() {
 
     private fun connect() {
         if (stopping || !settings.tunnelEnabled() || socket != null) return
+        liveConnected.set(false)
         val relayWithToken = buildRelayWebSocketUrl(settings.tunnelRelayUrl(), settings.tunnelToken())
         if (relayWithToken == null) {
             settings.recordTunnelState("configuration_error", "Hardcoded tunnel configuration is invalid")
@@ -105,6 +110,7 @@ class ReverseTunnelService : Service() {
                         return
                     }
                     reconnectAttempt = 0
+                    liveConnected.set(true)
                     settings.recordTunnelState("connected")
                 }
 
@@ -113,17 +119,20 @@ class ReverseTunnelService : Service() {
 
                 override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                     if (socket !== webSocket) return
+                    liveConnected.set(false)
                     socket = null
                     scheduleReconnect(t.message ?: "WebSocket failure")
                 }
 
                 override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                     if (socket !== webSocket) return
+                    liveConnected.set(false)
                     socket = null
                     scheduleReconnect("WebSocket closed: $code ${reason.take(120)}")
                 }
             })
         }.getOrElse { error ->
+            liveConnected.set(false)
             settings.recordTunnelState("reconnecting", error.message ?: error::class.simpleName.orEmpty())
             scheduleReconnect(error.message ?: "WebSocket start failed")
             null
@@ -168,6 +177,7 @@ class ReverseTunnelService : Service() {
 
     private fun scheduleReconnect(message: String) {
         if (stopping || !settings.tunnelEnabled()) return
+        liveConnected.set(false)
         val delay = (1_000L shl reconnectAttempt.coerceAtMost(5)).coerceAtMost(MAX_RECONNECT_MS)
         reconnectAttempt += 1
         settings.recordTunnelState("reconnecting", message)
@@ -177,6 +187,7 @@ class ReverseTunnelService : Service() {
 
     override fun onDestroy() {
         stopping = true
+        liveConnected.set(false)
         mainHandler.removeCallbacksAndMessages(null)
         socket?.close(1000, "stopped")
         socket = null
@@ -198,6 +209,9 @@ class ReverseTunnelService : Service() {
         private const val MAX_FRAME_BYTES = 64 * 1024
         private const val MAX_RECONNECT_MS = 30_000L
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        private val liveConnected = AtomicBoolean(false)
+
+        fun isConnected(): Boolean = liveConnected.get()
 
         internal fun buildRelayWebSocketUrl(rawUrl: String, token: String): String? {
             val raw = rawUrl.trim()
@@ -231,12 +245,14 @@ class ReverseTunnelService : Service() {
                 ContextCompat.startForegroundService(app, Intent(app, ReverseTunnelService::class.java))
                 true
             }.getOrElse { error ->
+                liveConnected.set(false)
                 SettingsRepository(app).recordTunnelState("start_failed", error.message ?: error::class.simpleName.orEmpty())
                 false
             }
         }
 
         fun stop(context: Context) {
+            liveConnected.set(false)
             val app = context.applicationContext
             val settings = SettingsRepository(app)
             settings.setTunnelEnabled(false)

@@ -16,6 +16,10 @@ class HermesCompanionApplication : Application() {
         val settings = SettingsRepository(this)
         settings.setMode(CompanionMode.LOCAL)
         UploadWorker.cancelCloudWork(this)
-        if (settings.tunnelEnabled()) LocalMcpServer.start(this)
+        if (settings.tunnelEnabled()) {
+            // A persisted "connected" value can only describe the previous process. Treat it as stale.
+            settings.recordTunnelState("stopped")
+            LocalMcpServer.start(this)
+        }
     }
 }

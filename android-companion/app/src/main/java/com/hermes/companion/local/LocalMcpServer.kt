@@ -2,6 +2,7 @@ package com.hermes.companion.local
 
 import android.content.Context
 import androidx.core.app.NotificationManagerCompat
+import com.hermes.companion.AppDefaults
 import com.hermes.companion.data.SettingsRepository
 import com.hermes.companion.platform.DeviceStatusReader
 import com.hermes.companion.platform.UsageTimelineReader
@@ -27,7 +28,7 @@ import org.json.JSONObject
 /** Loopback-only MCP server. It intentionally ends when the Android process ends. */
 object LocalMcpServer {
     private const val HOST = "127.0.0.1"
-    private const val PORT = 5000
+    private const val PORT = AppDefaults.LOCAL_MCP_PORT
     private const val MAX_BODY_BYTES = 64 * 1024
     private const val READ_TIMEOUT_MS = 10_000
     private const val MAX_CLIENTS = 4
@@ -187,10 +188,7 @@ object LocalMcpServer {
                 .put("notificationPermission", NotificationManagerCompat.from(context).areNotificationsEnabled())
                 .put("startedAt", startedAt)
                 .put("lastError", SettingsRepository(context).localMcpLastError())
-            "get_device_context" -> {
-                val status = DeviceStatusReader.read(context)
-                JSONObject().put("battery", status.batteryPercent).put("charging", status.charging).put("connectivity", if (status.online) "online" else "offline").put("foregroundPackage", status.foregroundPackage).put("observedAt", System.currentTimeMillis()).put("freshness", if (status.foregroundPackage == null) "unavailable" else "current")
-            }
+            "get_device_context" -> deviceContext(context)
             "get_current_usage" -> usage(context)
             "send_local_notification" -> {
                 val title = args.optString("title").trim(); val message = args.optString("message").trim()
@@ -202,8 +200,34 @@ object LocalMcpServer {
         return JSONObject().put("content", JSONArray().put(JSONObject().put("type", "text").put("text", payload.toString())))
     }
 
+    private fun deviceContext(context: Context): JSONObject {
+        val usageAccess = DeviceStatusReader.hasUsageAccess(context)
+        val status = DeviceStatusReader.read(context)
+        val payload = JSONObject()
+            .put("battery", status.batteryPercent)
+            .put("charging", status.charging)
+            .put("connectivity", if (status.online) "online" else "offline")
+            .put("observedAt", System.currentTimeMillis())
+            .put("usageAccess", usageAccess)
+        if (usageAccess) {
+            payload.put("foregroundPackage", status.foregroundPackage ?: JSONObject.NULL)
+            payload.put("freshness", if (status.foregroundPackage == null) "unavailable" else "current")
+        } else {
+            payload.put("foregroundPackage", JSONObject.NULL)
+            payload.put("freshness", "permission-required")
+            payload.put("permissionRequired", "PACKAGE_USAGE_STATS")
+        }
+        return payload
+    }
+
     private fun usage(context: Context): JSONObject {
-        val summary = UsageTimelineReader.read(context) ?: return JSONObject().put("available", false)
+        if (!DeviceStatusReader.hasUsageAccess(context)) {
+            return JSONObject()
+                .put("available", false)
+                .put("reason", "permission-required")
+                .put("permissionRequired", "PACKAGE_USAGE_STATS")
+        }
+        val summary = UsageTimelineReader.read(context) ?: return JSONObject().put("available", false).put("reason", "no-data")
         return JSONObject().put("available", true).put("currentPackage", summary.currentPackageName).put("currentDuration", summary.currentDurationMs)
             .put("recentSessions", JSONArray(summary.sessions.takeLast(50).map { s -> JSONObject().put("packageName", s.packageName).put("startedAt", s.startedAt).put("endedAt", s.endedAt).put("duration", s.durationMs).put("category", s.category) }))
             .put("todayAppTotals", JSONObject(summary.appTotalsMs)).put("categoryTotals", JSONObject(summary.categoryTotalsMs)).put("observedAt", summary.observedAt)

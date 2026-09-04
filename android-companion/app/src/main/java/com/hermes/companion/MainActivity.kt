@@ -1,9 +1,11 @@
 package com.hermes.companion
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -28,6 +31,7 @@ import com.hermes.companion.data.CompanionMode
 import com.hermes.companion.data.SettingsRepository
 import com.hermes.companion.data.UploadWorker
 import com.hermes.companion.local.LocalMcpServer
+import com.hermes.companion.platform.DeviceStatusReader
 import com.hermes.companion.tunnel.ReverseTunnelService
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -60,6 +64,7 @@ data class CompanionUiState(
     val connected: Boolean = false,
     val tunnelState: String = "disabled",
     val error: String = "",
+    val usageAccessGranted: Boolean = false,
 )
 
 class CompanionViewModel(private val appContext: android.content.Context) : ViewModel() {
@@ -104,20 +109,25 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
         settings.setMode(CompanionMode.LOCAL)
         UploadWorker.cancelCloudWork(appContext)
         LocalMcpServer.start(appContext)
-        if (settings.tunnelState() != "connected" && settings.tunnelState() != "connecting") {
-            ReverseTunnelService.start(appContext)
-        }
+        // Always ensure the foreground service is running. Persisted tunnel state is diagnostics only.
+        ReverseTunnelService.start(appContext)
     }
 
     private fun readState(): CompanionUiState {
         val enabled = settings.tunnelEnabled()
-        val connected = enabled && settings.tunnelState() == "connected" && LocalMcpServer.isRunning()
+        val connected = enabled && ReverseTunnelService.isConnected() && LocalMcpServer.isRunning()
         val error = when {
             settings.tunnelLastError().isNotBlank() -> settings.tunnelLastError()
             settings.localMcpLastError().isNotBlank() -> settings.localMcpLastError()
             else -> ""
         }
-        return CompanionUiState(enabled, connected, settings.tunnelState(), error)
+        return CompanionUiState(
+            enabled = enabled,
+            connected = connected,
+            tunnelState = settings.tunnelState(),
+            error = error,
+            usageAccessGranted = DeviceStatusReader.hasUsageAccess(appContext),
+        )
     }
 
     companion object {
@@ -131,6 +141,7 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
 @Composable
 fun HermesCompanionApp(model: CompanionViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     Scaffold { padding ->
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
@@ -147,6 +158,14 @@ fun HermesCompanionApp(model: CompanionViewModel) {
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(if (state.enabled) "停止" else "启动")
+            }
+            if (!state.usageAccessGranted) {
+                Button(
+                    onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("授予使用情况权限")
+                }
             }
             if (!state.connected && state.enabled && state.error.isNotBlank()) {
                 Text(state.error, style = MaterialTheme.typography.bodySmall)
