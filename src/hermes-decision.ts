@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { LifeDecisionEngine } from "./worker.js";
+import type { BrainAdapter } from "./brain.js";
 import type { LifeContext, WakeDecision, WakeEvent } from "./types.js";
 
 const wakeDecisionSchema = z.discriminatedUnion("action", [
@@ -41,10 +41,10 @@ function responsesUrl(apiUrl: string): string {
 
 function activationInput(wakeEvent: WakeEvent, context: LifeContext): string {
   return [
-    "This is a Hermes Life Runtime wake activation.",
+    "This is an AI Life Runtime wake activation delivered through the Hermes brain adapter.",
     "Evaluate the wake event using your existing tools, memory, and MCP access as needed.",
     "Return only one WakeDecision V0.1 JSON object, with no Markdown or commentary.",
-    'Allowed forms: {"action":"ignore"} or {"action":"proactive_message","candidate":{"title":"...","message":"...","reason":"...","dueAt":"optional ISO datetime","dedupeKey":"optional"}}.',
+    '{"action":"ignore"} or {"action":"proactive_message","candidate":{"title":"...","message":"...","reason":"...","dueAt":"optional ISO datetime","dedupeKey":"optional"}}.',
     JSON.stringify({
       wakeEvent: {
         id: wakeEvent.id,
@@ -59,7 +59,8 @@ function activationInput(wakeEvent: WakeEvent, context: LifeContext): string {
   ].join("\n\n");
 }
 
-export class HermesDecisionEngine implements LifeDecisionEngine {
+/** Hermes is one optional BrainAdapter, not a Runtime dependency. */
+export class HermesDecisionEngine implements BrainAdapter {
   readonly conversation: string;
   private readonly endpoint: string;
   private readonly model: string;
