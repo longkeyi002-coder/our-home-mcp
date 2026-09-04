@@ -53,8 +53,9 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
           ENROLLMENT_TOKEN: ${{ secrets.OUR_HOME_ENROLLMENT_TOKEN }}
+          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
         run: |
-          for name in KEYSTORE_B64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD ENROLLMENT_TOKEN; do
+          for name in KEYSTORE_B64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD ENROLLMENT_TOKEN GOOGLE_SERVICES_JSON_B64; do
             if [ -z "${!name}" ]; then
               echo "::error::Missing required stable APK configuration: $name"
               exit 1
@@ -68,12 +69,15 @@ jobs:
           printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/our-home-signing.jks"
           test -s "$RUNNER_TEMP/our-home-signing.jks"
 
-      - name: Restore Firebase config when available
+      - name: Restore and validate Firebase Android config
         env:
           GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
         run: |
-          if [ -n "$GOOGLE_SERVICES_JSON_B64" ]; then
-            printf '%s' "$GOOGLE_SERVICES_JSON_B64" | base64 --decode > app/google-services.json
+          printf '%s' "$GOOGLE_SERVICES_JSON_B64" | base64 --decode > app/google-services.json
+          test -s app/google-services.json
+          if ! grep -q '"package_name": "com.hermes.companion"' app/google-services.json; then
+            echo "::error::google-services.json does not target com.hermes.companion"
+            exit 1
           fi
 
       - name: Test, lint and build stable signed APK
