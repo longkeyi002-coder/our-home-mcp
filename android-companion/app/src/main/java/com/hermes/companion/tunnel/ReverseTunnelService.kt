@@ -14,8 +14,6 @@ import com.hermes.companion.data.SettingsRepository
 import com.hermes.companion.push.HermesNotifications
 import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
-import okhttp3.Callback
-import okhttp3.Call
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -59,7 +57,7 @@ class ReverseTunnelService : Service() {
             .setOngoing(true)
             .build()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            startForeground(FOREGROUND_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_REMOTE_MESSAGING)
+            startForeground(FOREGROUND_ID, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE)
         } else {
             startForeground(FOREGROUND_ID, notification)
         }
