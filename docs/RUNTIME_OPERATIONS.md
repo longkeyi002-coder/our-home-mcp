@@ -24,13 +24,25 @@ npm ci
 npm run start:http
 ```
 
-`start:http` rebuilds the current TypeScript source before launching the compiled Runtime.
+`start:http` rebuilds the current TypeScript source before launching the compiled Runtime. The Life Loop is embedded in this same Runtime process when enabled; do **not** start a second standalone worker process against the same data file.
 
-The same rule applies to the worker:
+`npm run worker` is retained only as a compatibility alias to the same full HTTP Runtime entrypoint. It is not a separate background-worker deployment mode.
 
-```bash
-npm run worker
-```
+## Single-owner JSON store invariant
+
+While V0.1 still uses `JsonStore`, one physical `OUR_HOME_DATA_FILE` may have **exactly one Runtime owner process**.
+
+The in-process mutation queue protects concurrent mutations inside one `JsonStore` instance, and atomic writes use unique temporary filenames. Neither mechanism makes two independent Runtime processes with stale in-memory snapshots safe. Two processes pointing at the same JSON file can still overwrite each other's newer state.
+
+Operational rules until SQLite WAL replaces JsonStore:
+
+- never run two Runtime instances against the same `OUR_HOME_DATA_FILE`;
+- never run `start:http` and another worker/HTTP process against the same file;
+- a service manager must use a single active owner for each data file;
+- blue/green or rolling deployment must not overlap owners of the same JSON file;
+- if horizontal scaling is needed, migrate storage first instead of sharing the JSON file.
+
+This is a deployment constraint, not a claim that JsonStore is multi-process safe. Long-term persistence target remains SQLite with WAL and schema migration support under `OH-66`.
 
 ## Updating an existing deployment
 
@@ -38,7 +50,8 @@ npm run worker
 git fetch / checkout intended commit
 → npm ci
 → build current source
-→ restart Runtime service
+→ stop previous Runtime owner
+→ start exactly one Runtime owner
 → verify endpoints
 ```
 
