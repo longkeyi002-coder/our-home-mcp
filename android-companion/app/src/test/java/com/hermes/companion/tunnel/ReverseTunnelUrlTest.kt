@@ -1,30 +1,33 @@
 package com.hermes.companion.tunnel
 
+import androidx.core.net.toUri
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import org.junit.Test
 
 class ReverseTunnelUrlTest {
     @Test
     fun buildsWssUrlAndEncodesToken() {
-        assertEquals(
-            "wss://east-closure-maria-exploration.trycloudflare.com/?token=abc%2B123",
-            ReverseTunnelService.buildRelayWebSocketUrl(
-                "wss://east-closure-maria-exploration.trycloudflare.com/",
-                "abc+123",
-            ),
-        )
+        val url = ReverseTunnelService.buildRelayWebSocketUrl(
+            "wss://east-closure-maria-exploration.trycloudflare.com/",
+            "abc+123",
+        )!!
+        assertEquals("wss", url.toUri().scheme)
+        assertEquals("abc+123", url.toUri().getQueryParameter("token"))
+        assertTrue(url.contains("token=abc%2B123"))
     }
 
     @Test
     fun replacesExistingTokenInsteadOfSendingTwoTokens() {
-        assertEquals(
-            "wss://relay.example/mcp?mode=phone&token=new-secret",
-            ReverseTunnelService.buildRelayWebSocketUrl(
-                "wss://relay.example/mcp?token=old-secret&mode=phone",
-                "new-secret",
-            ),
-        )
+        val url = ReverseTunnelService.buildRelayWebSocketUrl(
+            "wss://relay.example/mcp?token=old-secret&mode=phone",
+            "new-secret",
+        )!!
+        assertEquals("new-secret", url.toUri().getQueryParameter("token"))
+        assertEquals("phone", url.toUri().getQueryParameter("mode"))
+        assertEquals(1, url.toUri().getQueryParameters("token").size)
+        assertTrue(!url.contains("old-secret"))
     }
 
     @Test
