@@ -6,13 +6,17 @@ import type { ProactiveNotifier } from "./worker.js";
 
 export interface FcmSendInput {
   token: string;
-  notification: { title: string; body: string };
   data: {
     candidateId: string;
     wakeEventId: string;
     reason: string;
     source: "AGENT_LIFE";
     destination: "/chat";
+    title: string;
+    body: string;
+  };
+  android: {
+    priority: "HIGH";
   };
 }
 
@@ -74,7 +78,7 @@ export class FcmHttpV1Sender implements FcmSender {
     const response = await this.fetcher(tokenUri, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }),
+      body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth-grant-type:jwt-bearer", assertion }),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) throw new Error(`FCM authentication failed with HTTP ${response.status}`);
@@ -92,16 +96,23 @@ export class FcmNotifier implements ProactiveNotifier {
   async deliver(candidate: ProactiveCandidate): Promise<void> {
     const target = this.store.getPrimaryPushDevice();
     if (!target?.pushToken) throw new Error("No Android push target is registered");
+    // OH-P2: use data-only FCM. Mixed notification+data messages are rendered by
+    // Google Play services while the app is backgrounded and can bypass our custom
+    // PendingIntent. Data-only delivery ensures FirebaseMessagingService builds the
+    // notification itself, preserving the /chat message destination. High priority is
+    // appropriate because every successful message becomes a visible user notification.
     await this.sender.send({
       token: target.pushToken,
-      notification: { title: candidate.title, body: candidate.message },
       data: {
         candidateId: candidate.id,
         wakeEventId: candidate.wakeEventId ?? "",
         reason: candidate.reason,
         source: "AGENT_LIFE",
         destination: "/chat",
+        title: candidate.title,
+        body: candidate.message,
       },
+      android: { priority: "HIGH" },
     });
   }
 }
