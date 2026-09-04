@@ -9,15 +9,16 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js",
-    "start:http": "OUR_HOME_MCP_TRANSPORT=http node dist/index.js",
+    "start": "npm run build && node dist/index.js",
+    "start:http": "npm run build && OUR_HOME_MCP_TRANSPORT=http node dist/index.js",
     "dev": "tsx src/index.ts",
     "dev:http": "OUR_HOME_MCP_TRANSPORT=http tsx src/index.ts",
-    "worker": "OUR_HOME_RUN_WORKER=true node dist/worker.js",
+    "worker": "npm run build && OUR_HOME_RUN_WORKER=true node dist/worker.js",
     "dev:worker": "OUR_HOME_RUN_WORKER=true tsx src/worker.ts",
+    "pretest": "npm run build",
     "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "check": "npm run typecheck && npm test && npm run build"
+    "check": "npm run typecheck && npm test"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.30.0",
