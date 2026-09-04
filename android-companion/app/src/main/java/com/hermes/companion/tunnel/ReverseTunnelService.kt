@@ -29,9 +29,9 @@ class ReverseTunnelService : Service() {
         .build()
     private lateinit var settings: SettingsRepository
     private lateinit var handler: TunnelMcpHandler
-    private var socket: WebSocket? = null
+    @Volatile private var socket: WebSocket? = null
     private var reconnectAttempt = 0
-    private var stopping = false
+    @Volatile private var stopping = false
 
     override fun onCreate() {
         super.onCreate()
@@ -78,23 +78,29 @@ class ReverseTunnelService : Service() {
         val request = Request.Builder().url(relayWithToken).build()
         socket = http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
+                if (socket !== webSocket) {
+                    webSocket.close(1000, "superseded")
+                    return
+                }
                 reconnectAttempt = 0
                 settings.recordTunnelState("connected")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                if (text.toByteArray(Charsets.UTF_8).size > MAX_FRAME_BYTES) return
+                if (socket !== webSocket || text.toByteArray(Charsets.UTF_8).size > MAX_FRAME_BYTES) return
                 val request = RelayProtocol.parseRequest(text) ?: return
                 val result = handler.handleMcp(request.body)
                 webSocket.send(RelayProtocol.response(request.id, result.status, result.body))
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+                if (socket !== webSocket) return
                 socket = null
                 scheduleReconnect(t.message ?: "WebSocket failure")
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+                if (socket !== webSocket) return
                 socket = null
                 scheduleReconnect("WebSocket closed: $code ${reason.take(120)}")
             }
