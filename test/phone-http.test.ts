@@ -25,7 +25,7 @@ async function waitForHealth(baseUrl: string, child: ChildProcess, stderr: () =>
       const response = await fetch(`${baseUrl}/healthz`);
       if (response.ok) return;
     } catch {
-      // The child may still be binding the socket.
+      // The compiled child may still be binding the socket.
     }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
@@ -42,13 +42,15 @@ async function stopChild(child: ChildProcess): Promise<void> {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-test("OH-P1 real HTTP register heartbeat retry observation and diagnostics preserve one factual stream", { timeout: 20_000 }, async (t) => {
+test("OH-P1 compiled HTTP runtime supports bootstrap ingest, device auth, status and persistence", { timeout: 20_000 }, async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "our-home-phone-http-"));
   const dataFile = join(dir, "data.json");
   const port = await reserveFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   let stderr = "";
-  const child = spawn(process.execPath, ["--import", "tsx", "src/index.ts"], {
+
+  // OH-P1.9: exercise the same compiled entry point used in production.
+  const child = spawn(process.execPath, ["dist/index.js"], {
     cwd: process.cwd(),
     env: {
       ...process.env,
@@ -73,6 +75,42 @@ test("OH-P1 real HTTP register heartbeat retry observation and diagnostics prese
     body: JSON.stringify({ deviceId: "android-http", observedAt: "2026-09-04T07:00:00.000Z" }),
   });
   assert.equal(unauthorized.status, 401);
+
+  // OH-P1.9 regression: the bootstrap/ingest token is valid for protected ingest
+  // even before a device has registered for its scoped device credential.
+  const bootstrapHeartbeat = await fetch(`${baseUrl}/v1/phone/heartbeat`, {
+    method: "POST",
+    headers: {
+      authorization: "Bearer bootstrap-secret",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      deviceId: "bootstrap-direct",
+      batteryPercent: 64,
+      charging: false,
+      connectivityState: "online",
+      observedAt: "2026-09-04T06:58:00.000Z",
+      clientEventId: "bootstrap-heartbeat-1",
+    }),
+  });
+  assert.equal(bootstrapHeartbeat.status, 201);
+
+  const bootstrapObservation = await fetch(`${baseUrl}/v1/observations`, {
+    method: "POST",
+    headers: {
+      authorization: "Bearer bootstrap-secret",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      deviceId: "bootstrap-direct",
+      kind: "note",
+      label: "bootstrap ingest probe",
+      value: "ok",
+      observedAt: "2026-09-04T06:59:00.000Z",
+      clientEventId: "bootstrap-observation-1",
+    }),
+  });
+  assert.equal(bootstrapObservation.status, 201);
 
   const register = await fetch(`${baseUrl}/v1/phone/register`, {
     method: "POST",
@@ -128,6 +166,7 @@ test("OH-P1 real HTTP register heartbeat retry observation and diagnostics prese
   });
   assert.equal(usage.status, 201);
 
+  // OH-P1.9 regression: this must be present on the compiled runtime, not only src/.
   const unauthorizedStatus = await fetch(`${baseUrl}/v1/phone/status`);
   assert.equal(unauthorizedStatus.status, 401);
   const statusResponse = await fetch(`${baseUrl}/v1/phone/status`, {
@@ -148,15 +187,20 @@ test("OH-P1 real HTTP register heartbeat retry observation and diagnostics prese
       lastObservationAt: string | null;
     }>;
   };
-  assert.deepEqual(status.devices, [{
-    deviceId: "android-http",
-    registeredAt: status.devices[0]?.registeredAt ?? null,
-    appVersion: "0.1.0",
-    hasPushAddress: false,
-    lastSeenAt: "2026-09-04T07:02:00.000Z",
-    lastHeartbeatAt: "2026-09-04T07:01:00.000Z",
-    lastObservationAt: "2026-09-04T07:02:00.000Z",
-  }]);
+
+  const registeredStatus = status.devices.find((item) => item.deviceId === "android-http");
+  assert.ok(registeredStatus);
+  assert.equal(registeredStatus.appVersion, "0.1.0");
+  assert.equal(registeredStatus.hasPushAddress, false);
+  assert.equal(registeredStatus.lastSeenAt, "2026-09-04T07:02:00.000Z");
+  assert.equal(registeredStatus.lastHeartbeatAt, "2026-09-04T07:01:00.000Z");
+  assert.equal(registeredStatus.lastObservationAt, "2026-09-04T07:02:00.000Z");
+
+  const bootstrapStatus = status.devices.find((item) => item.deviceId === "bootstrap-direct");
+  assert.ok(bootstrapStatus);
+  assert.equal(bootstrapStatus.registeredAt, null);
+  assert.equal(bootstrapStatus.lastSeenAt, "2026-09-04T06:59:00.000Z");
+  assert.equal(bootstrapStatus.lastHeartbeatAt, "2026-09-04T06:58:00.000Z");
 
   await stopChild(child);
   const persisted = JSON.parse(await readFile(dataFile, "utf8")) as {
@@ -179,4 +223,9 @@ test("OH-P1 real HTTP register heartbeat retry observation and diagnostics prese
   assert.ok(phone.every((item) => item.source === "phone" && item.confidence === "observed"));
   assert.equal(phone.find((item) => item.kind === "device_presence")?.metadata?.clientEventId, "heartbeat-http-1");
   assert.equal(phone.find((item) => item.kind === "usage_summary")?.metadata?.clientEventId, "usage-http-1");
+
+  const bootstrapPhone = persisted.observations.filter((item) => item.deviceId === "bootstrap-direct");
+  assert.equal(bootstrapPhone.filter((item) => item.kind === "device_presence").length, 1);
+  assert.equal(bootstrapPhone.filter((item) => item.kind === "note").length, 1);
+  assert.ok(bootstrapPhone.every((item) => item.source === "phone" && item.confidence === "observed"));
 });
