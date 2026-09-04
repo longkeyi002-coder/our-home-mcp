@@ -1,0 +1,93 @@
+package com.hermes.companion.presence
+
+import android.content.Context
+import kotlin.math.max
+
+data class PresenceSnapshot(
+    val currentPackage: String?,
+    val currentStartedAtMs: Long,
+    val lastTransitionAtMs: Long,
+    val lastFromPackage: String?,
+    val lastToPackage: String?,
+    val screenInteractive: Boolean,
+    val unlocked: Boolean,
+    val accessibilityConnected: Boolean,
+    val lastAccessibilityEventAtMs: Long,
+)
+
+class PresenceStateStore(context: Context) {
+    private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    @Synchronized
+    fun commitPackage(candidatePackage: String, nowMs: Long): AppTransition? {
+        val previousPackage = prefs.getString(KEY_CURRENT_PACKAGE, null)
+        val previousStartedAt = prefs.getLong(KEY_CURRENT_STARTED_AT, 0L)
+        val transition = PresenceReducer.transition(previousPackage, previousStartedAt, candidatePackage, nowMs) ?: return null
+        prefs.edit()
+            .putString(KEY_CURRENT_PACKAGE, transition.toPackage)
+            .putLong(KEY_CURRENT_STARTED_AT, nowMs)
+            .putLong(KEY_LAST_TRANSITION_AT, nowMs)
+            .putString(KEY_LAST_FROM_PACKAGE, transition.fromPackage)
+            .putString(KEY_LAST_TO_PACKAGE, transition.toPackage)
+            .apply()
+        return transition
+    }
+
+    @Synchronized
+    fun endCurrentSession(nowMs: Long, reason: String): AppSessionEnd? {
+        val current = prefs.getString(KEY_CURRENT_PACKAGE, null) ?: return null
+        val startedAt = prefs.getLong(KEY_CURRENT_STARTED_AT, 0L)
+        val end = AppSessionEnd(
+            packageName = current,
+            startedAtMs = startedAt,
+            endedAtMs = nowMs,
+            durationMs = if (startedAt > 0L) max(0L, nowMs - startedAt) else 0L,
+            reason = reason,
+        )
+        prefs.edit()
+            .remove(KEY_CURRENT_PACKAGE)
+            .remove(KEY_CURRENT_STARTED_AT)
+            .apply()
+        return end
+    }
+
+    fun recordAccessibilityEvent(atMs: Long) {
+        prefs.edit().putLong(KEY_LAST_ACCESSIBILITY_EVENT_AT, atMs).apply()
+    }
+
+    fun setAccessibilityConnected(connected: Boolean) {
+        prefs.edit().putBoolean(KEY_ACCESSIBILITY_CONNECTED, connected).apply()
+    }
+
+    fun setScreenState(interactive: Boolean, unlocked: Boolean) {
+        prefs.edit()
+            .putBoolean(KEY_SCREEN_INTERACTIVE, interactive)
+            .putBoolean(KEY_UNLOCKED, unlocked)
+            .apply()
+    }
+
+    fun snapshot(): PresenceSnapshot = PresenceSnapshot(
+        currentPackage = prefs.getString(KEY_CURRENT_PACKAGE, null),
+        currentStartedAtMs = prefs.getLong(KEY_CURRENT_STARTED_AT, 0L),
+        lastTransitionAtMs = prefs.getLong(KEY_LAST_TRANSITION_AT, 0L),
+        lastFromPackage = prefs.getString(KEY_LAST_FROM_PACKAGE, null),
+        lastToPackage = prefs.getString(KEY_LAST_TO_PACKAGE, null),
+        screenInteractive = prefs.getBoolean(KEY_SCREEN_INTERACTIVE, false),
+        unlocked = prefs.getBoolean(KEY_UNLOCKED, false),
+        accessibilityConnected = prefs.getBoolean(KEY_ACCESSIBILITY_CONNECTED, false),
+        lastAccessibilityEventAtMs = prefs.getLong(KEY_LAST_ACCESSIBILITY_EVENT_AT, 0L),
+    )
+
+    companion object {
+        private const val PREFS = "presence_state"
+        private const val KEY_CURRENT_PACKAGE = "current_package"
+        private const val KEY_CURRENT_STARTED_AT = "current_started_at"
+        private const val KEY_LAST_TRANSITION_AT = "last_transition_at"
+        private const val KEY_LAST_FROM_PACKAGE = "last_from_package"
+        private const val KEY_LAST_TO_PACKAGE = "last_to_package"
+        private const val KEY_SCREEN_INTERACTIVE = "screen_interactive"
+        private const val KEY_UNLOCKED = "unlocked"
+        private const val KEY_ACCESSIBILITY_CONNECTED = "accessibility_connected"
+        private const val KEY_LAST_ACCESSIBILITY_EVENT_AT = "last_accessibility_event_at"
+    }
+}
