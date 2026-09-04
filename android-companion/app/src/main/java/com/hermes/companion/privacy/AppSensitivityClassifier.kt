@@ -18,6 +18,7 @@ object AppSensitivityClassifier {
     private val protectedTokens = listOf(
         ".bank",
         "bank.",
+        "mobilebank",
         ".banking",
         "banking.",
         ".wallet",
