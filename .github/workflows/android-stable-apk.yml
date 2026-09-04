@@ -44,10 +44,9 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          DEFAULT_RUNTIME_URL: ${{ vars.OUR_HOME_DEFAULT_RUNTIME_URL }}
           ENROLLMENT_TOKEN: ${{ secrets.OUR_HOME_ENROLLMENT_TOKEN }}
         run: |
-          for name in KEYSTORE_B64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD DEFAULT_RUNTIME_URL ENROLLMENT_TOKEN; do
+          for name in KEYSTORE_B64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD ENROLLMENT_TOKEN; do
             if [ -z "${!name}" ]; then
               echo "::error::Missing required stable APK configuration: $name"
               exit 1
@@ -75,7 +74,6 @@ jobs:
           OUR_HOME_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           OUR_HOME_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           OUR_HOME_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          OUR_HOME_DEFAULT_RUNTIME_URL: ${{ vars.OUR_HOME_DEFAULT_RUNTIME_URL }}
           OUR_HOME_ENROLLMENT_TOKEN: ${{ secrets.OUR_HOME_ENROLLMENT_TOKEN }}
           OUR_HOME_VERSION_CODE: ${{ github.run_number }}
           OUR_HOME_VERSION_NAME: 0.1.${{ github.run_number }}
