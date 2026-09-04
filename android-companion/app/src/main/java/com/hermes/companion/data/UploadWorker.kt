@@ -10,21 +10,25 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.hermes.companion.BuildConfig
 import java.time.Instant
 import java.util.concurrent.TimeUnit
-import androidx.work.workDataOf
 
 class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
-        val queue = QueueRepository.create(applicationContext)
         val settings = SettingsRepository(applicationContext)
+        if (!TelemetryPolicy.isConfigured(settings.serverUrl(), settings.bootstrapToken(), settings.deviceToken())) {
+            return Result.success()
+        }
+
+        val queue = QueueRepository.create(applicationContext)
         val periodicRun = inputData.getBoolean(KEY_PERIODIC_RUN, false)
         val collectionStartedAt = System.currentTimeMillis()
         if (periodicRun) settings.recordPeriodicCollection(collectionStartedAt)
+
         val status = com.hermes.companion.platform.DeviceStatusReader.read(applicationContext)
         val now = System.currentTimeMillis()
-        val bucket = now / (15 * 60 * 1000L)
         queue.enqueueHeartbeat(
             HeartbeatRequest(
                 deviceId = settings.deviceId(),
@@ -34,18 +38,21 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 connectivityState = if (status.online) "online" else "offline",
                 foregroundPackage = status.foregroundPackage,
                 observedAt = Instant.ofEpochMilli(now).toString(),
-                clientEventId = "periodic-heartbeat:${settings.deviceId()}:$bucket",
+                clientEventId = TelemetryPolicy.periodicHeartbeatEventId(settings.deviceId(), now),
             ),
             scheduleUpload = false,
         )
+
         val usage = com.hermes.companion.platform.UsageTimelineReader.read(applicationContext)
         if (usage != null) {
             queue.enqueueUsageSummary(usage, settings.deviceId(), scheduleUpload = false)
         }
+
         if (!status.online) {
             enqueue(applicationContext)
             return Result.success()
         }
+
         val result = queue.uploadPending()
         return if (result.error == null) Result.success() else Result.retry()
     }
@@ -61,6 +68,13 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .build()
             WorkManager.getInstance(context).enqueueUniqueWork(IMMEDIATE_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
+        }
+
+        fun enqueueIfConfigured(context: Context) {
+            val settings = SettingsRepository(context.applicationContext)
+            if (TelemetryPolicy.isConfigured(settings.serverUrl(), settings.bootstrapToken(), settings.deviceToken())) {
+                enqueue(context)
+            }
         }
 
         fun schedulePeriodic(context: Context) {
