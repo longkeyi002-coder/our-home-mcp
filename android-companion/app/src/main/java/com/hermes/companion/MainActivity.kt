@@ -241,7 +241,7 @@ fun HermesCompanionApp(model: CompanionViewModel) {
             modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text("赫尔墨斯伴侣", style = MaterialTheme.typography.headlineMedium)
+            Text("AI 生活伴侣", style = MaterialTheme.typography.headlineMedium)
             Text(if (state.connected) "连接状态: 已连接" else "连接状态: 离线", color = if (state.connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
             InfoCard(state)
             Text("手动状态", style = MaterialTheme.typography.titleMedium)
@@ -268,7 +268,7 @@ fun HermesCompanionApp(model: CompanionViewModel) {
 private fun InfoCard(state: CompanionUiState) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Server: ${state.serverUrl.ifBlank { "Not configured" }}")
+            Text("Runtime: ${state.serverUrl.ifBlank { "Not configured" }}")
             Text("Battery: ${state.device.batteryPercent}%${if (state.device.charging) " · charging" else ""}")
             Text("Foreground App: ${state.device.foregroundPackage ?: if (state.usageAccess) "not detected" else "需要权限"}")
             state.usage?.let { usage ->
@@ -287,7 +287,7 @@ private fun SettingsPanel(state: CompanionUiState, model: CompanionViewModel) {
     var token by rememberSaveable { mutableStateOf("") }
     HorizontalDivider()
     Text("设置", style = MaterialTheme.typography.titleMedium)
-    OutlinedTextField(server, { server = it }, label = { Text("服务器地址 (HTTP)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(server, { server = it }, label = { Text("Runtime 地址 (HTTP/HTTPS)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     OutlinedTextField(token, { token = it }, label = { Text("注册令牌") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
     Text("Device: ${state.deviceId}")
     Button(onClick = { model.saveAndTestConnection(server, token) }, modifier = Modifier.fillMaxWidth()) { Text("保存并测试连接") }
