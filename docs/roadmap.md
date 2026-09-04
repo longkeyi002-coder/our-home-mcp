@@ -67,9 +67,11 @@ Required:
 - local debounce/dedupe/offline queue;
 - UsageEvents reconciliation fallback;
 - Accessibility service with `canRetrieveWindowContent=false`;
-- per-App visual policy;
+- per-App visual policy with user-visible controls for `NEVER / ASK_ONLY / AUTO`;
+- unknown App fail-closed default;
 - protected banking/payment/password/authentication defaults;
-- temporary visual grants that expire automatically;
+- protected Apps cannot receive persistent `AUTO` visual access;
+- temporary one-time visual grants that expire automatically and bind only to a verified live App session;
 - Android 11+ optional screenshot capability;
 - raw screenshot minimal lifetime;
 - structured visual summaries with provenance;
@@ -106,6 +108,23 @@ Required:
 
 ---
 
+## P3 hard gate — world + provenance schema
+
+**AI World implementation must not begin until GitHub issue #26 is complete.**
+
+Before OH-P3 starts, persisted long-lived factual records must mechanically represent the world boundary and provenance required by the Design Constitution:
+
+- `world`: `EARTH | AI_WORLD | FICTION`;
+- provenance aligned with the canonical design (`observed`, `user_declared`, `inferred`, `simulated`, `authored`, `model_generated`, or the final canonical names);
+- deterministic migration for legacy schema data;
+- validation for illegal world/provenance combinations;
+- Earth-state derivation must reject AI World / Fiction evidence;
+- tests must prove AI World / Fiction records cannot modify Earth facts.
+
+This is a start gate, not merely an OH-P3 completion check. Earth Life / Presence / Wake work may continue before it, but no AI World persisted state may be added first and migrated later.
+
+---
+
 ## OH-P3 — AI World V0.1
 
 Minimum persistent state:
@@ -122,7 +141,7 @@ Minimum persistent state:
 
 Deterministic state progression must not require a model call.
 
-World/provenance separation tests are mandatory before Phase completion.
+World/provenance separation tests are mandatory before Phase completion and are also required by the P3 start gate above.
 
 ---
 
