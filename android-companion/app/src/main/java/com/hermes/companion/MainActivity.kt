@@ -63,6 +63,7 @@ import com.hermes.companion.tunnel.ReverseTunnelService
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -330,6 +331,12 @@ fun HermesCompanionApp(model: CompanionViewModel) {
             if (state.diagnostics) Diagnostics(state, model)
             SettingsPanel(state, model)
             LaunchedEffect(Unit) { model.refresh() }
+            LaunchedEffect(state.tunnelEnabled) {
+                while (state.tunnelEnabled) {
+                    delay(1_000)
+                    model.refresh()
+                }
+            }
         }
     }
 }
