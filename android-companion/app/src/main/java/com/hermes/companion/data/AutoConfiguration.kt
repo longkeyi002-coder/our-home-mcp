@@ -3,6 +3,28 @@ package com.hermes.companion.data
 import android.content.Context
 import com.hermes.companion.BuildConfig
 
+data class AutoConfigurationPlan(
+    val serverUrlToSave: String?,
+    val enrollmentTokenToSave: String?,
+)
+
+fun planAutoConfiguration(
+    existingUrl: String,
+    hasBootstrapToken: Boolean,
+    defaultUrl: String,
+    enrollmentToken: String,
+): AutoConfigurationPlan {
+    val normalizedExisting = existingUrl.trim()
+    val normalizedDefault = defaultUrl.trim()
+    val normalizedEnrollment = enrollmentToken.trim()
+    val urlToSave = normalizedDefault.takeIf { normalizedExisting.isBlank() && it.isNotBlank() }
+    val effectiveUrl = urlToSave ?: normalizedExisting
+    val tokenToSave = normalizedEnrollment.takeIf {
+        !hasBootstrapToken && normalizedDefault.isNotBlank() && effectiveUrl == normalizedDefault && it.isNotBlank()
+    }
+    return AutoConfigurationPlan(urlToSave, tokenToSave)
+}
+
 /**
  * OH-P1.11: apply build-time defaults only when the user has not explicitly
  * configured another Runtime. Local settings always take precedence.
@@ -16,28 +38,19 @@ object AutoConfiguration {
 
     fun applyIfNeeded(context: Context): Result {
         val settings = SettingsRepository(context.applicationContext)
-        val defaultUrl = BuildConfig.DEFAULT_RUNTIME_URL.trim()
-        val enrollmentToken = BuildConfig.ENROLLMENT_TOKEN.trim()
-        val existingUrl = settings.serverUrl().trim()
+        val plan = planAutoConfiguration(
+            existingUrl = settings.serverUrl(),
+            hasBootstrapToken = settings.hasBootstrapToken(),
+            defaultUrl = BuildConfig.DEFAULT_RUNTIME_URL,
+            enrollmentToken = BuildConfig.ENROLLMENT_TOKEN,
+        )
 
-        var urlApplied = false
-        var tokenApplied = false
-
-        if (existingUrl.isBlank() && defaultUrl.isNotBlank()) {
-            settings.saveServerUrl(defaultUrl)
-            urlApplied = true
-        }
-
-        val effectiveUrl = settings.serverUrl().trim()
-        val defaultRuntimeSelected = defaultUrl.isNotBlank() && effectiveUrl == defaultUrl
-        if (defaultRuntimeSelected && !settings.hasBootstrapToken() && enrollmentToken.isNotBlank()) {
-            settings.saveBootstrapToken(enrollmentToken)
-            tokenApplied = true
-        }
+        plan.serverUrlToSave?.let(settings::saveServerUrl)
+        plan.enrollmentTokenToSave?.let(settings::saveBootstrapToken)
 
         return Result(
-            appliedDefaultUrl = urlApplied,
-            appliedEnrollmentToken = tokenApplied,
+            appliedDefaultUrl = plan.serverUrlToSave != null,
+            appliedEnrollmentToken = plan.enrollmentTokenToSave != null,
             configured = TelemetryPolicy.isConfigured(
                 settings.serverUrl(),
                 settings.bootstrapToken(),
