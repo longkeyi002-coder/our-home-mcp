@@ -8,8 +8,6 @@ import com.hermes.companion.vision.VisualObservationWorker
 import java.time.LocalDate
 import java.util.UUID
 import kotlin.math.min
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import retrofit2.HttpException
 
@@ -95,7 +93,7 @@ class QueueRepository private constructor(
      * Room-level claiming remains the long-term crash-safe queue design.
      */
     suspend fun uploadPending(now: Long = System.currentTimeMillis()): UploadResult =
-        uploadMutex.withLock { uploadPendingLocked(now) }
+        UploadSingleFlight.run { uploadPendingLocked(now) }
 
     private suspend fun uploadPendingLocked(now: Long): UploadResult {
         val serverUrl = settings.serverUrl()
@@ -220,7 +218,6 @@ class QueueRepository private constructor(
         const val BASE_BACKOFF_MS = 30_000L
         const val MAX_BACKOFF_MS = 6 * 60 * 60 * 1000L
         const val MAX_PENDING_EVENTS = 500
-        private val uploadMutex = Mutex()
 
         fun create(context: Context): QueueRepository {
             val appContext = context.applicationContext
