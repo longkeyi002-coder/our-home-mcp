@@ -7,6 +7,7 @@ import { createOurHomeServer } from "./server.js";
 import { JsonStore, parseBoolean } from "./store.js";
 import { createDeviceToken, registerPhone } from "./phone-registration.js";
 import { derivePhoneTelemetryStatus } from "./phone-status.js";
+import { deriveVisualRequest } from "./visual-request.js";
 
 const transportMode = process.env.OUR_HOME_MCP_TRANSPORT ?? "stdio";
 const dataFile = process.env.OUR_HOME_DATA_FILE ?? "./data/our-home.json";
@@ -232,6 +233,7 @@ async function handlePhoneObservations(
       return;
     }
     const observations = [];
+    let visualRequest: ReturnType<typeof deriveVisualRequest> = null;
     for (const item of items) {
       const existing = item.clientEventId
         ? store.snapshot().observations.find((observation) => observation.deviceId === item.deviceId && observation.metadata?.clientEventId === item.clientEventId)
@@ -240,15 +242,21 @@ async function handlePhoneObservations(
         observations.push(existing);
         continue;
       }
-      observations.push(await store.recordObservation({
+      const observation = await store.recordObservation({
         ...item,
         observedAt: item.observedAt ?? new Date().toISOString(),
         source: "phone",
         confidence: "observed",
         metadata: item.clientEventId ? { ...(item.metadata ?? {}), clientEventId: item.clientEventId } : item.metadata,
-      }));
+      });
+      observations.push(observation);
+      if (!visualRequest) visualRequest = deriveVisualRequest(observation, store.snapshot().observations);
     }
-    response.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({ observations, dataSource: "phone-ingest" }));
+    response.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({
+      observations,
+      dataSource: "phone-ingest",
+      ...(visualRequest ? { visualRequest } : {}),
+    }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Phone observation failed";
     response.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: message }));
