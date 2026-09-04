@@ -129,6 +129,8 @@ export interface WakeEvent {
   dedupeKey: string;
   lifeState: LifeState;
   previousLifeState: LifeState;
+  /** Durable single-worker lease marker; cleared after success/failure or on owner restart. */
+  processingAt?: string;
 }
 
 export interface WakeEngineState {
@@ -172,6 +174,8 @@ export interface ProactiveCandidate {
   source: "AGENT_LIFE" | "HOME_STATE";
   dedupeKey?: string;
   wakeEventId?: string;
+  /** Durable single-worker lease marker; not a user-visible state. */
+  processingAt?: string;
 }
 
 export interface PhoneDeviceRegistration {
