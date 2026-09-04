@@ -7,7 +7,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import com.hermes.companion.MainActivity
+import com.hermes.companion.CompanionDashboardActivity
 
 data class HermesNotification(val candidateId: String, val title: String, val body: String)
 
@@ -28,7 +28,7 @@ object HermesNotifications {
 
     fun show(context: Context, value: HermesNotification) {
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
-        val intent = Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val intent = Intent(context, CompanionDashboardActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val pending = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
