@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.hermes.companion.BuildConfig
 import com.hermes.companion.platform.UsageTimelineSummary
+import com.hermes.companion.push.PushRegistration
 import com.hermes.companion.vision.VisualObservationWorker
 import java.time.LocalDate
 import java.util.UUID
@@ -16,6 +17,7 @@ class QueueRepository private constructor(
     private val settings: SettingsRepository,
     private val apiFactory: (String) -> HermesApi = ApiClient::create,
     private val visualRequestEnqueuer: (VisualRequestAck) -> Unit = {},
+    private val pushRefresher: () -> Unit = {},
 ) {
     private val json = WireJson
 
@@ -81,6 +83,7 @@ class QueueRepository private constructor(
             val response = verifyRegistration(api, bootstrap, registrationRequest())
             settings.saveDeviceToken(response.token)
             settings.clearApiError()
+            pushRefresher()
             UploadResult(0, null)
         } catch (error: Throwable) {
             fail(describeApiError("registration", error))
@@ -107,6 +110,7 @@ class QueueRepository private constructor(
             if (deviceToken.isNullOrBlank()) {
                 val response = api.register("Bearer ${bootstrap!!}", registrationRequest())
                 settings.saveDeviceToken(response.token)
+                pushRefresher()
                 "Bearer ${response.token}"
             } else "Bearer $deviceToken"
         } catch (error: Throwable) {
@@ -158,6 +162,7 @@ class QueueRepository private constructor(
         val bootstrap = settings.bootstrapToken() ?: throw IllegalStateException("Registration token is missing")
         val response = api.register("Bearer $bootstrap", registrationRequest())
         settings.saveDeviceToken(response.token)
+        pushRefresher()
         return "Bearer ${response.token}"
     }
 
@@ -227,6 +232,7 @@ class QueueRepository private constructor(
                 dao = database.pendingEventDao(),
                 settings = settings,
                 visualRequestEnqueuer = { VisualObservationWorker.enqueue(appContext, it) },
+                pushRefresher = { PushRegistration.refresh(appContext) },
             )
         }
 
@@ -235,7 +241,8 @@ class QueueRepository private constructor(
             settings: SettingsRepository,
             apiFactory: (String) -> HermesApi,
             visualRequestEnqueuer: (VisualRequestAck) -> Unit = {},
-        ) = QueueRepository(dao, settings, apiFactory, visualRequestEnqueuer)
+            pushRefresher: () -> Unit = {},
+        ) = QueueRepository(dao, settings, apiFactory, visualRequestEnqueuer, pushRefresher)
     }
 }
 
