@@ -22,13 +22,13 @@
 | OH-51 | Skill/MCP proposal cannot install without approval | Proposal/approval state-machine tests | TODO |
 | OH-52 | Risk Level 2/3 actions require confirmation | Action policy tests | TODO |
 | OH-60 | Runtime Core is provider-neutral | `BrainAdapter` compile boundary + mock brain tests; add import-boundary guard | PARTIAL |
-| OH-61 | Daily telemetry survives without control WSS | Android HTTPS queue/upload implementation + configuration/immediate-start tests; real-device validation in `OH_P1_ACCEPTANCE.md` | PARTIAL / MANUAL |
+| OH-61 | Daily telemetry survives without control WSS | Android HTTPS queue/upload implementation + configuration/immediate-start tests + compiled `dist/index.js` HTTP integration covering ingest-token and device-token flows; real-device validation remains | PARTIAL / MANUAL |
 | OH-62 | Remote live read uses separate control path | Relay/Local MCP integration test when migrated | TODO |
 | OH-63 | FCM delivery does not depend on WSS | Notifier tests + future disconnected-WSS integration test | PARTIAL |
 | OH-64 | Runtime remains event-driven; no high-frequency LLM life loop | WorkManager 15-minute approximate schedule, Wake/event scheduling tests, queue retry/backoff | PARTIAL |
 | OH-65 | Model calls are bounded to cognition-worthy work | Resource-budget tests when budget layer exists | TODO |
-| OH-67 | Provider/tool failures degrade gracefully | Existing FCM/Hermes retry tests + Android Room queue retry behavior; AI World deterministic progression still pending | PARTIAL |
-| OH-P1 | Real Android observation reaches persisted Life State | `TelemetryPolicyTest`, Runtime provenance/liveness tests, existing Life State/dedupe tests, Android Room instrumentation tests, and `OH_P1_ACCEPTANCE.md`; actual phone evidence still required | PARTIAL / MANUAL |
+| OH-67 | Provider/tool failures degrade gracefully | Existing FCM/Hermes retry tests + Android Room queue retry behavior + production start scripts rebuild current source before executing `dist`; AI World deterministic progression still pending | PARTIAL |
+| OH-P1 | Real Android observation reaches persisted Life State | `TelemetryPolicyTest`, Runtime provenance/liveness tests, compiled-runtime HTTP register/heartbeat/observation/status tests, Android Room instrumentation tests, and `OH_P1_ACCEPTANCE.md`; actual phone evidence still required | PARTIAL / MANUAL |
 | OH-P2 | Earth change → Wake → Brain → Decision → FCM → Android | End-to-end real-device acceptance | TODO / MANUAL |
 | OH-P3 | AI World persists while model sleeps | restart/persistence + deterministic simulation tests | TODO |
 | OH-P4 | Soul evolves slowly and traceably | preference reinforcement/decay/provenance tests | TODO |
@@ -48,6 +48,10 @@ Automated:
 - phone liveness derivation;
 - Life State freshness rules;
 - queue behavior where covered by JVM/Node tests;
+- compiled production Runtime exposes protected `/v1/phone/status`;
+- compiled production Runtime accepts `OUR_HOME_INGEST_TOKEN` directly for heartbeat/observations;
+- registered device credentials continue to work for heartbeat/observations;
+- production npm start scripts rebuild current source before executing `dist`;
 - Android tests + lint + assembleDebug.
 
 Real-device/manual:
