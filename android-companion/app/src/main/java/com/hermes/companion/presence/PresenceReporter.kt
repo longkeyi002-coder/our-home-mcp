@@ -60,6 +60,30 @@ class PresenceReporter(context: Context) {
         }
     }
 
+    fun reportDwell(packageName: String, startedAtMs: Long, durationMs: Long, stage: Int, atMs: Long) {
+        val deviceId = settings.deviceId()
+        val label = PresenceDwellPolicy.stageLabel(stage)
+        scope.launch {
+            queue.enqueueObservation(
+                ObservationRequest(
+                    kind = "presence_app_dwell",
+                    label = packageName,
+                    value = label,
+                    observedAt = Instant.ofEpochMilli(atMs).toString(),
+                    deviceId = deviceId,
+                    metadata = mapOf(
+                        "packageName" to packageName,
+                        "startedAt" to Instant.ofEpochMilli(startedAtMs).toString(),
+                        "durationMs" to durationMs.toString(),
+                        "stage" to stage.toString(),
+                        "stageLabel" to label,
+                    ),
+                    clientEventId = "presence-dwell:$deviceId:$startedAtMs:$stage",
+                ),
+            )
+        }
+    }
+
     fun reportScreen(interactive: Boolean, unlocked: Boolean, atMs: Long, reason: String) {
         val deviceId = settings.deviceId()
         scope.launch {
