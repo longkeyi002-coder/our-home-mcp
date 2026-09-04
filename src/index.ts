@@ -9,6 +9,7 @@ import { createDeviceToken, registerPhone } from "./phone-registration.js";
 import { derivePhoneTelemetryStatus } from "./phone-status.js";
 import { deriveVisualRequest } from "./visual-request.js";
 import { startRuntimeWorker } from "./worker.js";
+import { listenOrThrow } from "./http-listen.js";
 
 const transportMode = process.env.OUR_HOME_MCP_TRANSPORT ?? "stdio";
 const dataFile = process.env.OUR_HOME_DATA_FILE ?? "./data/our-home.json";
@@ -216,9 +217,8 @@ async function startHttpServer(): Promise<void> {
     }
   });
 
-  httpServer.listen(port, host, () => {
-    process.stderr.write(`Our Home MCP listening at http://${host}:${port}/mcp\n`);
-  });
+  await listenOrThrow(httpServer, port, host);
+  process.stderr.write(`Our Home MCP listening at http://${host}:${port}/mcp\n`);
 }
 
 async function handlePhoneObservations(
