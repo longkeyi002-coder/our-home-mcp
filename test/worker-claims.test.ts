@@ -7,6 +7,7 @@ import { JsonStore } from "../src/store.js";
 import {
   claimDueProactiveMessages,
   claimPendingWakeEvents,
+  proactiveRetryDelayMs,
   recoverInterruptedWorkerClaims,
   releaseProactiveClaim,
   releaseWakeEventClaim,
@@ -57,6 +58,41 @@ test("proactive candidate claim is durable and explicitly releasable", async () 
   await releaseProactiveClaim(store, candidate.id);
   const third = await claimDueProactiveMessages(store, "2026-09-05T00:01:02.000Z");
   assert.deepEqual(third.map((item) => item.id), [candidate.id]);
+});
+
+test("failed proactive delivery is exponentially backed off before it can be claimed again", async () => {
+  const store = await createStore();
+  const candidate = await store.scheduleProactiveMessage({
+    title: "test",
+    message: "test",
+    reason: "test",
+    dueAt: "2026-09-05T00:00:00.000Z",
+  });
+  await store.recordProactiveAttempt(candidate.id, "FCM unavailable");
+
+  const tooEarly = await claimDueProactiveMessages(store, "2026-09-05T00:00:20.000Z");
+  assert.equal(tooEarly.length, 0);
+
+  // recordProactiveAttempt uses the real current timestamp, so set deterministic attempt state for this assertion.
+  await store.update((data) => {
+    const item = data.proactiveQueue.find((value) => value.id === candidate.id)!;
+    item.attempts = 1;
+    item.lastAttemptAt = "2026-09-05T00:00:00.000Z";
+    item.processingAt = undefined;
+  });
+  assert.equal(proactiveRetryDelayMs(1), 30_000);
+  assert.equal((await claimDueProactiveMessages(store, "2026-09-05T00:00:29.999Z")).length, 0);
+  assert.deepEqual(
+    (await claimDueProactiveMessages(store, "2026-09-05T00:00:30.000Z")).map((item) => item.id),
+    [candidate.id],
+  );
+});
+
+test("proactive retry delay is bounded", () => {
+  assert.equal(proactiveRetryDelayMs(0), 0);
+  assert.equal(proactiveRetryDelayMs(1), 30_000);
+  assert.equal(proactiveRetryDelayMs(2), 60_000);
+  assert.equal(proactiveRetryDelayMs(20), 30 * 60_000);
 });
 
 test("single owner restart clears orphaned processing claims", async () => {
