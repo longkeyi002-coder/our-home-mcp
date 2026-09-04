@@ -14,7 +14,20 @@ const seed = parseBoolean(process.env.OUR_HOME_SEED, true);
 const store = await JsonStore.open(dataFile, seed);
 
 const phoneObservationSchema = z.object({
-  kind: z.enum(["manual_status", "device_presence", "screen_app", "calendar", "weather", "note", "usage_summary"]),
+  kind: z.enum([
+    "manual_status",
+    "device_presence",
+    "screen_app",
+    "calendar",
+    "weather",
+    "note",
+    "usage_summary",
+    "presence_app_transition",
+    "presence_app_session_end",
+    "presence_app_dwell",
+    "presence_screen",
+    "visual_policy_audit",
+  ]),
   label: z.string().trim().min(1).max(200),
   value: z.string().trim().max(2_000).optional(),
   observedAt: z.string().datetime({ offset: true }).optional(),
