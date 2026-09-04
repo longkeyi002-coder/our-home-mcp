@@ -46,13 +46,8 @@ jobs:
             "platforms;android-35" \
             "build-tools;35.0.0"
 
+      # This workflow validates source only. Its runner-local debug key is not a
+      # stable user signing identity, so it intentionally does not publish an APK.
+      # User-installable builds come from android-stable-apk.yml.
       - name: Test, lint and assemble debug APK
         run: ./gradlew :app:test :app:lint :app:assembleDebug --no-daemon --stacktrace
-
-      - name: Upload debug APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ai-life-companion-debug-apk
-          path: android-companion/app/build/outputs/apk/debug/app-debug.apk
-          if-no-files-found: error
-          retention-days: 14
