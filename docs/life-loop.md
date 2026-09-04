@@ -20,7 +20,7 @@ WakeDecision candidate
 Configured notification delivery
 ```
 
-这不是“AI 一直醒着观察用户”。Runtime 可以独立运行和重试；没有足够事实、没有 Wake Event 或没有用户对话时，Hermes 不需要被调用。
+这不是“AI 一直醒着观察用户”。Runtime 可以持续运行和重试；没有足够事实、没有 Wake Event 或没有用户对话时，Hermes 不需要被调用。
 
 ## 事实、推断与表达
 
@@ -60,6 +60,8 @@ Cloud Runtime → Life State → Wake Engine → Hermes → FCM
 
 Cloud Runtime 接收授权上报、保存历史、维持 activePhoneDeviceId、生成 Wake Event，并在需要时调用 Hermes。当前 Life State 与 FCM 只使用 active device；旧 device 保留历史但不污染当前状态。
 
+在 JSON Store V0.1 阶段，Cloud Runtime 必须由**一个 Node 进程**同时拥有 HTTP/MCP transport、JsonStore 和 Life Loop。Life Loop 不再独立打开第二份 JsonStore；下一轮 cycle 只在上一轮结束后调度，所有 Hermes/Webhook/FCM 出站请求都有超时。不要运行两个进程同时写同一个 JSON data file。
+
 Local 与 Cloud 是明确模式，不得让同一份实时状态同时双写。
 
 ## Roadmap V2
@@ -72,11 +74,14 @@ Local 与 Cloud 是明确模式，不得让同一份实时状态同时双写。
 - Local MCP Streamable HTTP：loopback、安装级 secret、health/device-context/current-usage/local-notification。
 - Cloud 与 Local 模式互斥；不做截图、Accessibility、设备控制或前台服务。
 - Diagnostics 显示 phone → Runtime → Life State → Wake → decision → delivery 的已知检查点。
+- Cloud Runtime 使用单进程 Store owner；Life Loop 不重入，网络出站有 timeout。
+- 周期 app usage 统一为 `usage_summary`；未启用的 `app_timeline` / `steps` 发送路径不保留悬空 contract。
 
 ### V0.2 — 验证与可靠性
 
 - 真机验证 Local MCP 同机宿主兼容性、后台 WorkManager、权限拒绝和厂商省电限制。
 - 补强 observation freshness、重复事件、队列恢复与诊断可读性。
+- 完成随机 device credential、单设备 revoke/rotate；不依赖只能整体轮换的派生 token。
 - 不扩大采集范围；所有“not verified”保持显式。
 
 ### V0.3 — 决策边界
@@ -93,7 +98,7 @@ Local 与 Cloud 是明确模式，不得让同一份实时状态同时双写。
 
 ### V1.0 — 可审计个人 Runtime
 
-- 用可靠持久化层替代原型 JSON store。
+- 用可靠持久化层替代原型 JSON store，优先考虑 SQLite WAL；需要远程多实例时再考虑 Postgres。
 - 完成迁移、备份、访问控制、数据导出/删除与长期兼容。
 - 对每条事实、推断、Wake、决策和投递保留可审计来源链。
 
@@ -104,4 +109,6 @@ V0.4 及之后是路线图，不是当前实现范围。
 - `127.0.0.1` 只能由同一台 Android 手机上的宿主访问；电脑、云端 Hermes 和其他设备不能直接访问。
 - CI 不能替代真机 MCP host compatibility 测试；未做真机测试时必须标记 **not verified**。
 - Runtime 维持状态不代表 Hermes 永久运行。
+- JSON Store 仍是单进程 V0.1 原型，不支持多个独立 Node 进程安全共享同一 data file。
+- device token 目前仍是 V0.1 派生凭据；单设备 revoke/rotate 尚未完成。
 - 在身份、权限和通知确认前，不应把个人生活数据裸露到公网。
