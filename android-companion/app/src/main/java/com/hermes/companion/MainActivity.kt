@@ -146,12 +146,14 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
     fun saveServer(value: String, bootstrapToken: String) {
         settings.saveServerUrl(value)
         settings.saveBootstrapToken(bootstrapToken)
+        UploadWorker.enqueueIfConfigured(appContext)
         refresh()
     }
 
     fun saveAndTestConnection(value: String, bootstrapToken: String) {
         settings.saveServerUrl(value)
         settings.saveBootstrapToken(bootstrapToken)
+        UploadWorker.enqueueIfConfigured(appContext)
         viewModelScope.launch {
             val result = runCatching { com.hermes.companion.data.ApiClient.create(value).health() }
             _state.value = _state.value.copy(
