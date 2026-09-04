@@ -4,11 +4,11 @@ on:
   push:
     branches:
       - main
-      - rebuild/gpt-life-runtime-v01
+      - rebuild/ai-life-runtime-v01
   pull_request:
     branches:
       - main
-      - rebuild/gpt-life-runtime-v01
+      - rebuild/ai-life-runtime-v01
 
 permissions:
   contents: read
