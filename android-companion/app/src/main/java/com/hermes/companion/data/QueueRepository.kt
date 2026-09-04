@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.hermes.companion.BuildConfig
 import com.hermes.companion.platform.UsageTimelineSummary
+import com.hermes.companion.vision.VisualRequestAckHandler
 import java.time.LocalDate
 import java.util.UUID
 import kotlin.math.min
@@ -14,6 +15,7 @@ class QueueRepository private constructor(
     private val dao: PendingEventDao,
     private val settings: SettingsRepository,
     private val apiFactory: (String) -> HermesApi = ApiClient::create,
+    private val visualRequestHandler: suspend (VisualRequestAck) -> ObservationRequest? = { null },
 ) {
     private val json = WireJson
 
@@ -153,10 +155,11 @@ class QueueRepository private constructor(
         var firstError: String? = null
         for (event in dao.ready(now, 20)) {
             try {
-                send(api, authorization, event)
+                val ack = send(api, authorization, event)
                 dao.delete(event.id)
                 uploaded += 1
                 settings.recordSuccessfulUpload(System.currentTimeMillis())
+                handleApiAck(ack)
             } catch (error: Throwable) {
                 if (error is HttpException && error.code() == 401 && settings.hasDeviceToken()) {
                     settings.clearDeviceToken()
@@ -169,10 +172,11 @@ class QueueRepository private constructor(
                         continue
                     }
                     try {
-                        send(api, retryAuthorization, event)
+                        val ack = send(api, retryAuthorization, event)
                         dao.delete(event.id)
                         uploaded += 1
                         settings.recordSuccessfulUpload(System.currentTimeMillis())
+                        handleApiAck(ack)
                     } catch (retryError: Throwable) {
                         val message = describeApiError("upload after re-registration", retryError)
                         firstError = firstError ?: message
@@ -211,12 +215,24 @@ class QueueRepository private constructor(
         pushToken = settings.pushToken(),
     )
 
-    private suspend fun send(api: HermesApi, authorization: String, event: PendingEvent) {
-        when (event.type) {
-            TYPE_HEARTBEAT -> api.heartbeat(authorization, json.decodeFromString(HeartbeatRequest.serializer(), event.payload))
-            TYPE_OBSERVATION -> api.observation(authorization, json.decodeFromString(ObservationRequest.serializer(), event.payload))
-            else -> throw IllegalArgumentException("Unknown event type")
-        }
+    private suspend fun send(api: HermesApi, authorization: String, event: PendingEvent): ApiAck = when (event.type) {
+        TYPE_HEARTBEAT -> api.heartbeat(authorization, json.decodeFromString(HeartbeatRequest.serializer(), event.payload))
+        TYPE_OBSERVATION -> api.observation(authorization, json.decodeFromString(ObservationRequest.serializer(), event.payload))
+        else -> throw IllegalArgumentException("Unknown event type")
+    }
+
+    /**
+     * Telemetry success is authoritative before this side effect runs. Visual failure must
+     * never resurrect a successfully uploaded Presence event or poison normal API diagnostics.
+     */
+    private suspend fun handleApiAck(ack: ApiAck) {
+        val visualRequest = ack.visualRequest ?: return
+        val summary = try {
+            visualRequestHandler(visualRequest)
+        } catch (_: Throwable) {
+            null
+        } ?: return
+        enqueueObservation(summary, scheduleUpload = true)
     }
 
     private suspend fun recordFailure(event: PendingEvent, now: Long, message: String) {
@@ -247,11 +263,23 @@ class QueueRepository private constructor(
         const val MAX_PENDING_EVENTS = 500
 
         fun create(context: Context): QueueRepository {
-            val database = Room.databaseBuilder(context, AppDatabase::class.java, "hermes-companion.db").build()
-            return QueueRepository(database.pendingEventDao(), SettingsRepository(context.applicationContext))
+            val appContext = context.applicationContext
+            val database = Room.databaseBuilder(appContext, AppDatabase::class.java, "hermes-companion.db").build()
+            val settings = SettingsRepository(appContext)
+            val handler = VisualRequestAckHandler(appContext)
+            return QueueRepository(
+                dao = database.pendingEventDao(),
+                settings = settings,
+                visualRequestHandler = handler::handle,
+            )
         }
 
-        fun forTest(dao: PendingEventDao, settings: SettingsRepository, apiFactory: (String) -> HermesApi) = QueueRepository(dao, settings, apiFactory)
+        fun forTest(
+            dao: PendingEventDao,
+            settings: SettingsRepository,
+            apiFactory: (String) -> HermesApi,
+            visualRequestHandler: suspend (VisualRequestAck) -> ObservationRequest? = { null },
+        ) = QueueRepository(dao, settings, apiFactory, visualRequestHandler)
     }
 }
 
