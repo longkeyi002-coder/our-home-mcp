@@ -12,6 +12,7 @@ import com.hermes.companion.MainActivity
 data class HermesNotification(val candidateId: String, val title: String, val body: String)
 
 object HermesNotifications {
+    // Keep the existing channel id for installed-app compatibility; the visible name is provider-neutral.
     const val CHANNEL_ID = "hermes_life"
 
     fun fromPayload(data: Map<String, String>, notificationTitle: String?, notificationBody: String?) = HermesNotification(
@@ -22,7 +23,7 @@ object HermesNotifications {
 
     fun createChannel(context: Context) {
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(CHANNEL_ID, "Hermes Life", NotificationManager.IMPORTANCE_DEFAULT),
+            NotificationChannel(CHANNEL_ID, "AI Life", NotificationManager.IMPORTANCE_DEFAULT),
         )
     }
 
