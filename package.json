@@ -2,7 +2,7 @@
   "name": "our-home-mcp",
   "version": "0.1.0",
   "private": true,
-  "description": "External Our Home MCP server for Hermes Agent",
+  "description": "Provider-neutral AI Life Runtime with Earth sensing, wake logic, AI-world continuity and replaceable brain adapters",
   "type": "module",
   "engines": {
     "node": ">=20"
