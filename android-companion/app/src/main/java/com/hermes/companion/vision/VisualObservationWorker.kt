@@ -25,6 +25,10 @@ class VisualObservationWorker(context: Context, params: WorkerParameters) : Coro
     override suspend fun doWork(): Result {
         val ack = inputData.toVisualRequestAck() ?: return Result.failure()
         return try {
+            // ASK_ONLY/PRIVATE/PROTECTED requests are surfaced locally before screenshot work.
+            // This worker ends immediately; explicit approval schedules a fresh consent-bound attempt.
+            if (VisualConsentPrompt.promptIfNeeded(applicationContext, ack)) return Result.success()
+
             val summary = withTimeout(VISUAL_TIMEOUT_MS) {
                 VisualRequestAckHandler(applicationContext).handle(ack)
             }
@@ -44,9 +48,18 @@ class VisualObservationWorker(context: Context, params: WorkerParameters) : Coro
 
     companion object {
         private const val WORK_PREFIX = "our-home-visual-"
+        private const val CONSENT_WORK_PREFIX = "our-home-visual-consent-"
         private const val VISUAL_TIMEOUT_MS = 45_000L
 
         fun enqueue(context: Context, ack: VisualRequestAck) {
+            enqueueNamed(context, ack, "$WORK_PREFIX${ack.requestId}")
+        }
+
+        fun enqueueAfterConsent(context: Context, ack: VisualRequestAck) {
+            enqueueNamed(context, ack, "$CONSENT_WORK_PREFIX${ack.requestId}")
+        }
+
+        private fun enqueueNamed(context: Context, ack: VisualRequestAck, workName: String) {
             val request = OneTimeWorkRequestBuilder<VisualObservationWorker>()
                 .setInputData(workDataOf(
                     KEY_REQUEST_ID to ack.requestId,
@@ -60,7 +73,7 @@ class VisualObservationWorker(context: Context, params: WorkerParameters) : Coro
                 .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
                 .build()
             WorkManager.getInstance(context.applicationContext).enqueueUniqueWork(
-                "$WORK_PREFIX${ack.requestId}",
+                workName,
                 ExistingWorkPolicy.KEEP,
                 request,
             )
