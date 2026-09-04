@@ -12,7 +12,6 @@ import {
   clearWakeEventClaim,
   recoverInterruptedWorkerClaims,
   releaseProactiveClaim,
-  releaseWakeEventClaim,
 } from "./worker-claims.js";
 
 export type { BrainAdapter } from "./brain.js";
@@ -114,7 +113,10 @@ export async function runProactiveCycle(
         await store.applyWakeDecision(wakeEvent.id, decision, observedAt);
         await clearWakeEventClaim(store, wakeEvent.id);
       } catch (error) {
-        await releaseWakeEventClaim(store, wakeEvent.id);
+        // Do not release the claim immediately. The persisted five-minute lease acts as
+        // the V0.1 Brain retry cooldown, so a failing Hermes/provider cannot be called
+        // again every worker cycle. The claim becomes eligible automatically after the
+        // lease expires; a clean Runtime restart also recovers orphaned claims.
         const message = error instanceof Error ? error.message : "Unknown decision engine error";
         process.stderr.write(`[our-home] wake decision failed: ${wakeEvent.id}: ${message}\n`);
       }
