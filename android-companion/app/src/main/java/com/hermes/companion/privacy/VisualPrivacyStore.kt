@@ -25,6 +25,60 @@ class VisualPrivacyStore(context: Context) {
         edit.apply()
     }
 
+    fun armOneTimeGrant(
+        packageName: String,
+        nowMs: Long,
+        ttlMs: Long = MAX_TEMPORARY_GRANT_MS,
+    ): ArmedVisualGrant {
+        require(packageName.isNotBlank()) { "temporary visual grant package is required" }
+        require(ttlMs in 1..MAX_TEMPORARY_GRANT_MS) { "temporary visual grant ttl out of range" }
+        val grant = ArmedVisualGrant(
+            packageName = packageName,
+            issuedAtMs = nowMs,
+            expiresAtMs = nowMs + ttlMs,
+        )
+        prefs.edit()
+            .putString(KEY_ARMED_PACKAGE, grant.packageName)
+            .putLong(KEY_ARMED_ISSUED_AT, grant.issuedAtMs)
+            .putLong(KEY_ARMED_EXPIRES_AT, grant.expiresAtMs)
+            .apply()
+        return grant
+    }
+
+    fun armedGrant(): ArmedVisualGrant? {
+        val packageName = prefs.getString(KEY_ARMED_PACKAGE, null) ?: return null
+        val issuedAt = prefs.getLong(KEY_ARMED_ISSUED_AT, 0L)
+        val expiresAt = prefs.getLong(KEY_ARMED_EXPIRES_AT, 0L)
+        if (issuedAt <= 0L || expiresAt <= issuedAt) return null
+        return ArmedVisualGrant(packageName, issuedAt, expiresAt)
+    }
+
+    fun bindArmedGrantToSession(packageName: String, sessionId: String, nowMs: Long): TemporaryVisualGrant? {
+        val armed = armedGrant() ?: return null
+        if (!armed.isUsable(packageName, nowMs)) return null
+        val remaining = armed.expiresAtMs - nowMs
+        if (remaining <= 0L) {
+            clearArmedGrant()
+            return null
+        }
+        val grant = issueTemporaryGrant(
+            packageName = packageName,
+            nowMs = nowMs,
+            ttlMs = remaining.coerceAtMost(MAX_TEMPORARY_GRANT_MS),
+            sessionId = sessionId,
+        )
+        clearArmedGrant()
+        return grant
+    }
+
+    fun clearArmedGrant() {
+        prefs.edit()
+            .remove(KEY_ARMED_PACKAGE)
+            .remove(KEY_ARMED_ISSUED_AT)
+            .remove(KEY_ARMED_EXPIRES_AT)
+            .apply()
+    }
+
     fun issueTemporaryGrant(packageName: String, nowMs: Long, ttlMs: Long, sessionId: String = UUID.randomUUID().toString()): TemporaryVisualGrant {
         require(ttlMs in 1..MAX_TEMPORARY_GRANT_MS) { "temporary visual grant ttl out of range" }
         val grant = TemporaryVisualGrant(
@@ -77,11 +131,16 @@ class VisualPrivacyStore(context: Context) {
         if (newPackageName == null || newPackageName != grant.packageName) clearTemporaryGrant()
     }
 
-    fun invalidateGrantForLock() = clearTemporaryGrant()
+    fun invalidateGrantForLock() {
+        clearTemporaryGrant()
+        clearArmedGrant()
+    }
 
     fun pruneExpiredGrant(nowMs: Long) {
-        val grant = temporaryGrant() ?: return
-        if (nowMs >= grant.expiresAtMs || grant.consumed) clearTemporaryGrant()
+        val grant = temporaryGrant()
+        if (grant != null && (nowMs >= grant.expiresAtMs || grant.consumed)) clearTemporaryGrant()
+        val armed = armedGrant()
+        if (armed != null && nowMs >= armed.expiresAtMs) clearArmedGrant()
     }
 
     companion object {
@@ -93,6 +152,9 @@ class VisualPrivacyStore(context: Context) {
         private const val KEY_GRANT_EXPIRES_AT = "grant_expires_at"
         private const val KEY_GRANT_SESSION_ID = "grant_session_id"
         private const val KEY_GRANT_CONSUMED = "grant_consumed"
+        private const val KEY_ARMED_PACKAGE = "armed_package"
+        private const val KEY_ARMED_ISSUED_AT = "armed_issued_at"
+        private const val KEY_ARMED_EXPIRES_AT = "armed_expires_at"
         private fun policyKey(packageName: String) = "policy:${packageName.trim()}"
     }
 }
