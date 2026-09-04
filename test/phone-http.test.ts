@@ -42,7 +42,7 @@ async function stopChild(child: ChildProcess): Promise<void> {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-test("OH-P1 real HTTP register heartbeat retry and observation persist one factual stream", { timeout: 20_000 }, async (t) => {
+test("OH-P1 real HTTP register heartbeat retry observation and diagnostics preserve one factual stream", { timeout: 20_000 }, async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "our-home-phone-http-"));
   const dataFile = join(dir, "data.json");
   const port = await reserveFreePort();
@@ -127,6 +127,35 @@ test("OH-P1 real HTTP register heartbeat retry and observation persist one factu
     }),
   });
   assert.equal(usage.status, 201);
+
+  const unauthorizedStatus = await fetch(`${baseUrl}/v1/phone/status`);
+  assert.equal(unauthorizedStatus.status, 401);
+  const statusResponse = await fetch(`${baseUrl}/v1/phone/status`, {
+    headers: { authorization: "Bearer mcp-secret" },
+  });
+  assert.equal(statusResponse.status, 200);
+  const statusText = await statusResponse.text();
+  assert.doesNotMatch(statusText, new RegExp(registration.token));
+  assert.doesNotMatch(statusText, /bootstrap-secret|mcp-secret/);
+  const status = JSON.parse(statusText) as {
+    devices: Array<{
+      deviceId: string;
+      appVersion: string | null;
+      hasPushAddress: boolean;
+      lastSeenAt: string | null;
+      lastHeartbeatAt: string | null;
+      lastObservationAt: string | null;
+    }>;
+  };
+  assert.deepEqual(status.devices, [{
+    deviceId: "android-http",
+    registeredAt: status.devices[0]?.registeredAt,
+    appVersion: "0.1.0",
+    hasPushAddress: false,
+    lastSeenAt: "2026-09-04T07:02:00.000Z",
+    lastHeartbeatAt: "2026-09-04T07:01:00.000Z",
+    lastObservationAt: "2026-09-04T07:02:00.000Z",
+  }]);
 
   await stopChild(child);
   const persisted = JSON.parse(await readFile(dataFile, "utf8")) as {
