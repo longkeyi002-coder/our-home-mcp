@@ -2,11 +2,25 @@ import type { JsonStore } from "./store.js";
 import type { ProactiveCandidate, WakeEvent } from "./types.js";
 
 export const WORKER_CLAIM_LEASE_MS = 5 * 60_000;
+export const PROACTIVE_RETRY_BASE_MS = 30_000;
+export const PROACTIVE_RETRY_MAX_MS = 30 * 60_000;
 
 function activeClaim(processingAt: string | undefined, asOfMs: number): boolean {
   if (!processingAt) return false;
   const claimedAt = Date.parse(processingAt);
   return Number.isFinite(claimedAt) && asOfMs - claimedAt < WORKER_CLAIM_LEASE_MS;
+}
+
+export function proactiveRetryDelayMs(attempts: number): number {
+  if (!Number.isInteger(attempts) || attempts <= 0) return 0;
+  return Math.min(PROACTIVE_RETRY_BASE_MS * 2 ** Math.min(attempts - 1, 16), PROACTIVE_RETRY_MAX_MS);
+}
+
+function proactiveRetryReady(candidate: ProactiveCandidate, asOfMs: number): boolean {
+  if (!candidate.lastAttemptAt || candidate.attempts <= 0) return true;
+  const lastAttemptAt = Date.parse(candidate.lastAttemptAt);
+  if (!Number.isFinite(lastAttemptAt)) return true;
+  return asOfMs - lastAttemptAt >= proactiveRetryDelayMs(candidate.attempts);
 }
 
 /**
@@ -62,7 +76,12 @@ export async function claimDueProactiveMessages(
       candidate.processingAt = undefined;
     }
     const due = draft.proactiveQueue
-      .filter((candidate) => candidate.status === "pending" && !candidate.processingAt && candidate.dueAt <= asOf)
+      .filter((candidate) =>
+        candidate.status === "pending"
+        && !candidate.processingAt
+        && candidate.dueAt <= asOf
+        && proactiveRetryReady(candidate, asOfMs),
+      )
       .sort((left, right) => left.dueAt.localeCompare(right.dueAt));
     for (const candidate of due.slice(0, limit)) {
       candidate.processingAt = asOf;
