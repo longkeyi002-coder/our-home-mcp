@@ -18,7 +18,7 @@ async function createStore() {
   return JsonStore.open(join(dir, "our-home.json"), false);
 }
 
-test("wake event processing claim prevents a second cycle from claiming the same event", async () => {
+async function createWakeEventStore() {
   const store = await createStore();
   await store.evaluateWakeEvents("2026-09-05T00:00:00.000Z");
   await store.recordObservation({
@@ -30,7 +30,11 @@ test("wake event processing claim prevents a second cycle from claiming the same
     confidence: "observed",
   });
   await store.evaluateWakeEvents("2026-09-05T00:02:00.000Z");
+  return store;
+}
 
+test("wake event processing claim prevents a second cycle from claiming the same event", async () => {
+  const store = await createWakeEventStore();
   const first = await claimPendingWakeEvents(store, "2026-09-05T00:03:00.000Z", 5);
   const second = await claimPendingWakeEvents(store, "2026-09-05T00:03:01.000Z", 5);
   assert.equal(first.length, 1);
@@ -40,6 +44,18 @@ test("wake event processing claim prevents a second cycle from claiming the same
   await releaseWakeEventClaim(store, first[0]!.id);
   const third = await claimPendingWakeEvents(store, "2026-09-05T00:03:02.000Z", 5);
   assert.equal(third.length, 1);
+});
+
+test("wake claim acts as a five minute brain failure cooldown when it is not released", async () => {
+  const store = await createWakeEventStore();
+  const first = await claimPendingWakeEvents(store, "2026-09-05T00:03:00.000Z", 5);
+  assert.equal(first.length, 1);
+
+  assert.equal((await claimPendingWakeEvents(store, "2026-09-05T00:07:59.999Z", 5)).length, 0);
+  assert.deepEqual(
+    (await claimPendingWakeEvents(store, "2026-09-05T00:08:00.000Z", 5)).map((item) => item.id),
+    [first[0]!.id],
+  );
 });
 
 test("proactive candidate claim is durable and explicitly releasable", async () => {
