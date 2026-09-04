@@ -8,6 +8,7 @@ import { JsonStore, parseBoolean } from "./store.js";
 import { createDeviceToken, registerPhone } from "./phone-registration.js";
 import { derivePhoneTelemetryStatus } from "./phone-status.js";
 import { deriveVisualRequest } from "./visual-request.js";
+import { startRuntimeWorker } from "./worker.js";
 
 const transportMode = process.env.OUR_HOME_MCP_TRANSPORT ?? "stdio";
 const dataFile = process.env.OUR_HOME_DATA_FILE ?? "./data/our-home.json";
@@ -116,6 +117,14 @@ if (transportMode === "stdio") {
   await server.connect(new StdioServerTransport());
 } else if (transportMode === "http") {
   await startHttpServer();
+  if (parseBoolean(process.env.OUR_HOME_RUN_WORKER, false)) {
+    const worker = startRuntimeWorker(store);
+    void worker.done.catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : "Unknown fatal worker error";
+      process.stderr.write(`[our-home] fatal embedded worker error: ${message}\n`);
+      process.exitCode = 1;
+    });
+  }
 } else {
   throw new Error(`Unsupported OUR_HOME_MCP_TRANSPORT: ${transportMode}`);
 }
