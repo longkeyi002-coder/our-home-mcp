@@ -21,7 +21,8 @@ export type ObservationKind =
   | "presence_app_session_end"
   | "presence_app_dwell"
   | "presence_screen"
-  | "visual_policy_audit";
+  | "visual_policy_audit"
+  | "visual_observation_summary";
 export type ObservationSource = "user" | "phone" | "screen" | "calendar" | "system" | "mock";
 export type ObservationConfidence = "observed" | "declared" | "inferred";
 export type ProactiveCandidateStatus = "pending" | "delivered" | "dismissed";
