@@ -16,6 +16,11 @@ data class HermesNotification(
     val destination: String,
 )
 
+enum class NotificationDestinationScreen {
+    CHAT_MESSAGE,
+    HOME,
+}
+
 object HermesNotifications {
     // Keep the existing channel id for installed-app compatibility; the visible name is provider-neutral.
     const val CHANNEL_ID = "hermes_life"
@@ -32,6 +37,10 @@ object HermesNotifications {
         destination = data["destination"].takeUnless { it.isNullOrBlank() } ?: CHAT_DESTINATION,
     )
 
+    fun destinationScreen(destination: String): NotificationDestinationScreen =
+        if (destination.trim() == CHAT_DESTINATION) NotificationDestinationScreen.CHAT_MESSAGE
+        else NotificationDestinationScreen.HOME
+
     fun createChannel(context: Context) {
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "Our Home", NotificationManager.IMPORTANCE_DEFAULT),
@@ -40,7 +49,11 @@ object HermesNotifications {
 
     fun show(context: Context, value: HermesNotification) {
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
-        val intent = Intent(context, MainActivity::class.java)
+        val activityClass = when (destinationScreen(value.destination)) {
+            NotificationDestinationScreen.CHAT_MESSAGE -> ChatMessageActivity::class.java
+            NotificationDestinationScreen.HOME -> MainActivity::class.java
+        }
+        val intent = Intent(context, activityClass)
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(EXTRA_DESTINATION, value.destination)
             .putExtra(EXTRA_CANDIDATE_ID, value.candidateId)
