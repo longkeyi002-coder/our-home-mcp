@@ -1,0 +1,100 @@
+name: Our Home Android Stable APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: android-companion
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+          cache-dependency-path: android-companion/**/*.gradle*
+
+      - name: Set up Gradle caching
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Set up Android SDK tools
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager --sdk_root="${ANDROID_SDK_ROOT:-$ANDROID_HOME}" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Validate stable-build configuration
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          DEFAULT_RUNTIME_URL: ${{ vars.OUR_HOME_DEFAULT_RUNTIME_URL }}
+          ENROLLMENT_TOKEN: ${{ secrets.OUR_HOME_ENROLLMENT_TOKEN }}
+        run: |
+          for name in KEYSTORE_B64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD DEFAULT_RUNTIME_URL ENROLLMENT_TOKEN; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing required stable APK configuration: $name"
+              exit 1
+            fi
+          done
+
+      - name: Restore stable signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          printf '%s' "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/our-home-signing.jks"
+          test -s "$RUNNER_TEMP/our-home-signing.jks"
+
+      - name: Restore Firebase config when available
+        env:
+          GOOGLE_SERVICES_JSON_B64: ${{ secrets.GOOGLE_SERVICES_JSON_B64 }}
+        run: |
+          if [ -n "$GOOGLE_SERVICES_JSON_B64" ]; then
+            printf '%s' "$GOOGLE_SERVICES_JSON_B64" | base64 --decode > app/google-services.json
+          fi
+
+      - name: Test, lint and build stable signed APK
+        env:
+          OUR_HOME_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/our-home-signing.jks
+          OUR_HOME_ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          OUR_HOME_ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          OUR_HOME_ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          OUR_HOME_DEFAULT_RUNTIME_URL: ${{ vars.OUR_HOME_DEFAULT_RUNTIME_URL }}
+          OUR_HOME_ENROLLMENT_TOKEN: ${{ secrets.OUR_HOME_ENROLLMENT_TOKEN }}
+          OUR_HOME_VERSION_CODE: ${{ github.run_number }}
+          OUR_HOME_VERSION_NAME: 0.1.${{ github.run_number }}
+        run: ./gradlew :app:test :app:lint :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Verify stable signing certificate
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          test -f "$APK"
+          APKSIGNER="${ANDROID_SDK_ROOT:-$ANDROID_HOME}/build-tools/35.0.0/apksigner"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" | tee signing-cert.txt
+          grep -q "Signer #1 certificate SHA-256 digest:" signing-cert.txt
+
+      - name: Upload stable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: our-home-android-stable-apk
+          path: |
+            android-companion/app/build/outputs/apk/debug/app-debug.apk
+            android-companion/signing-cert.txt
+          if-no-files-found: error
+          retention-days: 30
