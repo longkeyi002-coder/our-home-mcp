@@ -165,13 +165,16 @@ class ReverseTunnelService : Service() {
         private const val MAX_RECONNECT_MS = 30_000L
 
         internal fun buildRelayWebSocketUrl(rawUrl: String, token: String): String? {
-            val parsed = rawUrl.trim().toHttpUrlOrNull() ?: return null
-            if (parsed.scheme != "wss" || token.isBlank()) return null
+            val raw = rawUrl.trim()
+            if (!raw.startsWith("wss://") || token.isBlank()) return null
+            // OkHttp's HttpUrl parser accepts https:// but not the websocket alias wss://.
+            val parsed = ("https://" + raw.removePrefix("wss://")).toHttpUrlOrNull() ?: return null
             return parsed.newBuilder()
                 .removeAllQueryParameters("token")
                 .addQueryParameter("token", token.trim())
                 .build()
                 .toString()
+                .replaceFirst("https://", "wss://")
         }
 
         fun start(context: Context): Boolean {
