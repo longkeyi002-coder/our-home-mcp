@@ -1,163 +1,192 @@
-# Rebuild Roadmap
+# Our Home — Execution Roadmap
 
-This roadmap applies only to `rebuild/ai-life-runtime-v01`.
+> **Canonical design:** `docs/OUR_HOME_DESIGN.md`
+>
+> This file is an execution summary only. If it conflicts with the Design Constitution, `OUR_HOME_DESIGN.md` wins.
 
-## Phase 0 — Clean Foundation
+## OH-P0 — Clean Foundation
 
-Goal: stop feature sprawl and make the repository provider-neutral.
+Goal: stop feature drift and make development traceable.
 
-- establish `BrainAdapter`
-- clean docs and duplicate workflows
-- define Earth / AI World / provenance rules
-- keep `main` and old PR branches as references only
-- do not add new product features
+Required:
 
-Acceptance:
+- provider-neutral `BrainAdapter`;
+- Earth / AI World / provenance rules;
+- README exposes the three core principles;
+- Issue / PR templates require Design Reference;
+- design-derived test matrix;
+- Phase Design Review template;
+- Node + Android CI;
+- no hardcoded production secrets;
+- `main` and old experiments remain reference-only.
 
-- Node checks run on rebuild branch
-- Android tests + assembleDebug + lint run on rebuild branch
-- no new Hermes-specific dependency in Runtime Core
-- no hardcoded long-lived public token/device identity
+Exit gate: run `docs/PHASE_REVIEW_TEMPLATE.md` against `OH-P0`.
 
-## Phase 1 — Earth Telemetry
+---
 
-Goal: phone state reaches Runtime automatically.
+## OH-P1 — Earth Life real-device chain
 
 ```text
 Android sensing
 → local queue
 → HTTPS ingest
 → persisted observation
-→ device lastSeen
 → Life State
 ```
 
-Required:
+Real-device acceptance must cover:
 
-- battery
-- charging
-- connectivity
-- foreground package / usage summary
-- retry / dedupe
-- diagnostics
+- battery;
+- charging;
+- connectivity;
+- foreground package / bounded usage summary;
+- authentication;
+- retry / dedupe;
+- diagnostics.
 
-## Phase 2 — Life State and Wake
+No tap-to-upload dependency for normal telemetry.
 
-Goal: raw observations become meaningful, bounded changes.
+---
 
-Initial wake types:
-
-- became_active
-- became_idle
-- charging_started
-- battery_low
-- device_offline
-- long_usage_session
-
-Required:
-
-- baseline behavior
-- cooldown/dedupe
-- retry
-- no wake storm from repeated heartbeat
-
-## Phase 3 — AI World V0.1
-
-Goal: the AI has persistent virtual life independent of the current provider.
-
-Minimum state:
-
-- virtual clock
-- home/location
-- local virtual weather
-- work state
-- current activity
-- hobbies/interests
-- collection/bookmarks
-- structured task/waiting/plan/idea items
-
-Important:
-
-- AI World state must never become Earth Reality by accident
-- inexpensive deterministic simulation should not require a model call
-
-## Phase 4 — Brain and Thought Continuity
-
-Goal: a replaceable Brain can respond to Wake Events and update structured continuity.
-
-Start with mock/manual BrainAdapter, then connect one real provider.
-
-Required decisions:
-
-- ignore
-- remember/update structured memory
-- update thought/task thread
-- notify
-
-Provider failure must leave the Wake Event retryable.
-
-## Phase 5 — Proactive Delivery
-
-Goal: a real event can lead to a real phone notification.
+## OH-P2 — Wake + proactive-message minimum loop
 
 ```text
-Earth event
+Earth change
 → Life State
 → Wake Event
-→ BrainAdapter
-→ notification decision
+→ Mock/Test Brain
+→ Decision
 → FCM
 → Android notification
 ```
 
-Event trace must expose each step without leaking secrets.
+Start with a Mock Brain so phone/runtime/FCM can be proven independently of Hermes/provider availability.
 
-## Phase 6 — Remote Phone Read
+Required:
 
-Goal: on-demand real device state read.
+- wake cooldown/dedupe;
+- retryable provider failure;
+- retryable notification failure;
+- event trace;
+- quiet/ignore policy foundations.
+
+---
+
+## OH-P3 — AI World V0.1
+
+Minimum persistent state:
+
+- synchronized clock;
+- home / room;
+- virtual location;
+- AI World weather;
+- work state;
+- current activity;
+- tasks / waiting / plans / ideas / questions;
+- hobbies / interests;
+- collection.
+
+Deterministic state progression must not require a model call.
+
+World/provenance separation tests are mandatory before Phase completion.
+
+---
+
+## OH-P4 — Continuity + Soul V0.1
+
+Implement:
+
+- Experience records;
+- Notes / Journal;
+- Thought Thread;
+- nextReviewAt;
+- user feedback records;
+- interest evidence;
+- bounded preference reinforcement/decay;
+- traceable Soul changes.
+
+One interaction must not be able to rewrite long-term identity.
+
+---
+
+## OH-P5 — Autonomous Exploration
+
+AI may spend bounded virtual free time on approved web exploration.
+
+Implement:
+
+- topic selection;
+- search/fetch adapter;
+- web reading;
+- collection/bookmarking;
+- structured reflection;
+- `maybe_share` intent;
+- resource budget and frequency limits.
+
+Do not automate logged-in mobile apps such as Xiaohongshu in this Phase.
+
+---
+
+## OH-P6 — Relationship Feedback Loop
+
+Implement user feedback signals:
+
+- like;
+- reply;
+- ignore;
+- accept/reject suggestion;
+- correction of inference;
+- review of learned preference.
+
+Feedback influences future behavior but does not directly overwrite Soul.
+
+---
+
+## OH-P7 — Remote Read + Controlled Actions
 
 ```text
 Remote client
 → Relay
 → Android outbound WSS
 → Local MCP
-→ get_device_context
 → response
 ```
 
-This is the Control Plane, not the primary telemetry mechanism.
+Migrate useful code selectively from archived experiments.
 
-## Phase 7 — Autonomous Interests and Browsing
+Also establish:
 
-Goal: AI can spend selected virtual free time on its own interests.
+- action risk levels;
+- permissions;
+- approval states;
+- audit trail;
+- active-device isolation;
+- reconnect/reliability tests.
 
-Examples:
+This remains separate from everyday HTTPS telemetry.
 
-- choose a hobby/topic
-- browse allowed web sources
-- save items into its own collection
-- form a structured “maybe share with user” intent
-- share only when policy/context says it is appropriate
+---
 
-Start with web/browser sources. Mobile-app automation such as automatically operating Xiaohongshu is a later, separately reviewed capability because it involves login state, platform rules, account safety and device-control permissions.
+## OH-P8 — Creative Output & Capability Proposals
 
-## Explicitly deferred
+Implement bounded higher-cost capabilities such as:
 
-Until the above foundation is stable:
+- occasional image generation;
+- deeper research;
+- richer AI World creations;
+- Skill/MCP discovery proposals;
+- explicit user approval before installation/configuration.
 
-- screenshots / OCR
-- Accessibility automation
-- arbitrary coordinate tapping
-- reading private chat contents
-- automatic purchases/payments
-- silent permission escalation
-- permanent exact GPS tracking
+---
 
-## V0.1 completion
+## V0.1 acceptance
 
-V0.1 is complete only when both are proven:
+V0.1 requires all of the following to be demonstrably true:
 
-1. `Android observation → Runtime → Wake → Brain → Thought/Decision → FCM notification`
-2. `Remote client → Relay → Android → Local MCP → response`
+1. `Android observation → Runtime → Life State → Wake → Brain → Decision → FCM → Android notification` works on a real device.
+2. AI World persists and progresses while the model is asleep, and a later Wake can continue structured unfinished work.
+3. Earth and AI World factual queries cannot contaminate each other.
+4. Mock Brain and at least one real Brain Provider can run against the same Runtime boundary.
+5. Phase Review is completed and the Design → Test Matrix has no unexplained gaps for V0.1 invariants.
 
-The selected Brain Provider must be replaceable without rebuilding either chain.
+Remote live-read/control can progress in parallel after the life chain is stable, but it must not become the dependency that keeps Earth telemetry alive.
