@@ -13,6 +13,28 @@ const dataFile = process.env.OUR_HOME_DATA_FILE ?? "./data/our-home.json";
 const seed = parseBoolean(process.env.OUR_HOME_SEED, true);
 const store = await JsonStore.open(dataFile, seed);
 
+const VISUAL_SUMMARY_METADATA_KEYS = new Set([
+  "packageName",
+  "activity",
+  "confidence",
+  "provider",
+  "model",
+  "requestId",
+  "sessionId",
+  "curiosityReason",
+]);
+const VISUAL_SUMMARY_ACTIVITIES = new Set([
+  "gaming",
+  "video",
+  "social",
+  "shopping",
+  "work",
+  "reading",
+  "navigation",
+  "other",
+  "unknown",
+]);
+
 const phoneObservationSchema = z.object({
   kind: z.enum([
     "manual_status",
@@ -27,6 +49,7 @@ const phoneObservationSchema = z.object({
     "presence_app_dwell",
     "presence_screen",
     "visual_policy_audit",
+    "visual_observation_summary",
   ]),
   label: z.string().trim().min(1).max(200),
   value: z.string().trim().max(2_000).optional(),
@@ -35,6 +58,39 @@ const phoneObservationSchema = z.object({
   deviceId: z.string().trim().min(1).max(200).optional(),
   metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
   clientEventId: z.string().trim().max(300).optional(),
+}).superRefine((value, ctx) => {
+  if (value.kind !== "visual_observation_summary") return;
+
+  if ((value.value?.length ?? 0) > 240) {
+    ctx.addIssue({ code: "custom", path: ["value"], message: "visual summary content exceeds 240 characters" });
+  }
+  const metadata = value.metadata ?? {};
+  const unknownKeys = Object.keys(metadata).filter((key) => !VISUAL_SUMMARY_METADATA_KEYS.has(key));
+  if (unknownKeys.length > 0) {
+    ctx.addIssue({ code: "custom", path: ["metadata"], message: `visual summary metadata contains forbidden fields: ${unknownKeys.join(", ")}` });
+  }
+  const packageName = metadata.packageName;
+  if (typeof packageName !== "string" || !packageName.trim() || packageName.length > 300) {
+    ctx.addIssue({ code: "custom", path: ["metadata", "packageName"], message: "visual summary requires a bounded packageName" });
+  }
+  const activity = metadata.activity;
+  if (typeof activity !== "string" || !VISUAL_SUMMARY_ACTIVITIES.has(activity)) {
+    ctx.addIssue({ code: "custom", path: ["metadata", "activity"], message: "visual summary activity is invalid" });
+  }
+  const confidence = typeof metadata.confidence === "number"
+    ? metadata.confidence
+    : typeof metadata.confidence === "string"
+      ? Number(metadata.confidence)
+      : Number.NaN;
+  if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) {
+    ctx.addIssue({ code: "custom", path: ["metadata", "confidence"], message: "visual summary confidence must be between 0 and 1" });
+  }
+  for (const key of ["provider", "model", "requestId", "sessionId"] as const) {
+    const field = metadata[key];
+    if (typeof field !== "string" || !field.trim() || field.length > 300) {
+      ctx.addIssue({ code: "custom", path: ["metadata", key], message: `visual summary requires ${key}` });
+    }
+  }
 });
 
 const phoneObservationEnvelopeSchema = z.union([
