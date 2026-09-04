@@ -1,14 +1,7 @@
 package com.hermes.companion.push
 
 import android.content.Context
-import com.google.firebase.FirebaseApp
-import com.google.firebase.installations.FirebaseInstallations
-import com.google.firebase.messaging.FirebaseMessaging
-import com.hermes.companion.data.QueueRepository
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.tasks.await
+import com.hermes.companion.data.SettingsRepository
 
 object PushRegistration {
     fun interface RegistrationSink { suspend fun register(pushFid: String?, pushToken: String) }
@@ -17,24 +10,15 @@ object PushRegistration {
         sink.register(pushFid, pushToken)
     }
 
+    /** Schedule durable registration/retry instead of swallowing coroutine failures. */
     fun refresh(context: Context) {
-        if (FirebaseApp.getApps(context).isEmpty()) return
-        CoroutineScope(Dispatchers.IO).launch {
-            runCatching {
-                val token = FirebaseMessaging.getInstance().token.await()
-                register(context, token)
-            }
-        }
+        PushRegistrationWorker.enqueue(context.applicationContext)
     }
 
+    /** Preserve the newest token locally before the durable worker updates Runtime. */
     fun onTokenRefresh(context: Context, token: String) {
-        CoroutineScope(Dispatchers.IO).launch { runCatching { register(context, token) } }
-    }
-
-    private suspend fun register(context: Context, token: String) {
-        val fid = FirebaseInstallations.getInstance().id.await()
-        handleRefresh(fid, token) { pushFid, pushToken ->
-            QueueRepository.create(context).registerPushAddress(pushFid, pushToken)
-        }
+        val appContext = context.applicationContext
+        SettingsRepository(appContext).savePushAddress(null, token)
+        PushRegistrationWorker.enqueue(appContext)
     }
 }
