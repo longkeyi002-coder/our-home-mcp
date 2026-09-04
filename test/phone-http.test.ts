@@ -140,6 +140,7 @@ test("OH-P1 real HTTP register heartbeat retry observation and diagnostics prese
   const status = JSON.parse(statusText) as {
     devices: Array<{
       deviceId: string;
+      registeredAt: string | null;
       appVersion: string | null;
       hasPushAddress: boolean;
       lastSeenAt: string | null;
@@ -149,7 +150,7 @@ test("OH-P1 real HTTP register heartbeat retry observation and diagnostics prese
   };
   assert.deepEqual(status.devices, [{
     deviceId: "android-http",
-    registeredAt: status.devices[0]?.registeredAt,
+    registeredAt: status.devices[0]?.registeredAt ?? null,
     appVersion: "0.1.0",
     hasPushAddress: false,
     lastSeenAt: "2026-09-04T07:02:00.000Z",
