@@ -2,6 +2,7 @@ package com.hermes.companion
 
 import com.hermes.companion.platform.UsageCategoryClassifier
 import com.hermes.companion.platform.UsageTimelineTracker
+import com.hermes.companion.platform.chooseRecentPackage
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import org.junit.Test
@@ -73,5 +74,34 @@ class UsageTimelineTest {
         assertEquals("other", UsageCategoryClassifier.classify("com.eg.android.AlipayGphone"))
         assertEquals("social", UsageCategoryClassifier.classify("com.tencent.mm"))
         assertEquals("ai", UsageCategoryClassifier.classify("com.openai.chatgpt"))
+    }
+
+    @Test
+    fun recentUsageFallbackChoosesFreshestPackage() {
+        val now = 1_000_000L
+        assertEquals(
+            "com.example.latest",
+            chooseRecentPackage(
+                listOf(
+                    "com.example.old" to now - 90_000,
+                    "com.example.latest" to now - 5_000,
+                ),
+                now,
+            ),
+        )
+    }
+
+    @Test
+    fun recentUsageFallbackRejectsStaleOrFutureEvidence() {
+        val now = 1_000_000L
+        assertNull(
+            chooseRecentPackage(
+                listOf(
+                    "com.example.stale" to now - 121_000,
+                    "com.example.future" to now + 1,
+                ),
+                now,
+            ),
+        )
     }
 }
