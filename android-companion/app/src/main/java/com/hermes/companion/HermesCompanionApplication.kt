@@ -9,6 +9,7 @@ class HermesCompanionApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         UploadWorker.schedulePeriodic(this)
+        UploadWorker.enqueueIfConfigured(this)
         HermesNotifications.createChannel(this)
         PushRegistration.refresh(this)
     }
