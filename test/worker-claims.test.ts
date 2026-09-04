@@ -84,18 +84,17 @@ test("failed proactive delivery is exponentially backed off before it can be cla
     reason: "test",
     dueAt: "2026-09-05T00:00:00.000Z",
   });
-  await store.recordProactiveAttempt(candidate.id, "FCM unavailable");
 
-  const tooEarly = await claimDueProactiveMessages(store, "2026-09-05T00:00:20.000Z");
-  assert.equal(tooEarly.length, 0);
-
-  // recordProactiveAttempt uses the real current timestamp, so set deterministic attempt state for this assertion.
+  // Keep the entire assertion in one deterministic clock domain. Production
+  // recordProactiveAttempt() intentionally uses wall-clock now(), so mixing it
+  // with hard-coded asOf values makes this test timezone/run-time dependent.
   await store.update((data) => {
     const item = data.proactiveQueue.find((value) => value.id === candidate.id)!;
     item.attempts = 1;
     item.lastAttemptAt = "2026-09-05T00:00:00.000Z";
     item.processingAt = undefined;
   });
+
   assert.equal(proactiveRetryDelayMs(1), 30_000);
   assert.equal((await claimDueProactiveMessages(store, "2026-09-05T00:00:29.999Z")).length, 0);
   assert.deepEqual(
