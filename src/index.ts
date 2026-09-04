@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createOurHomeServer } from "./server.js";
 import { JsonStore, parseBoolean } from "./store.js";
 import { createDeviceToken, registerPhone } from "./phone-registration.js";
+import { derivePhoneTelemetryStatus } from "./phone-status.js";
 
 const transportMode = process.env.OUR_HOME_MCP_TRANSPORT ?? "stdio";
 const dataFile = process.env.OUR_HOME_DATA_FILE ?? "./data/our-home.json";
@@ -91,6 +92,18 @@ async function startHttpServer(): Promise<void> {
 
     if (request.url === "/v1/phone/heartbeat" && request.method === "POST") {
       await handlePhoneHeartbeat(request, response);
+      return;
+    }
+
+    if (request.url === "/v1/phone/status" && request.method === "GET") {
+      if (token && request.headers.authorization !== `Bearer ${token}`) {
+        response.writeHead(401, { "content-type": "application/json", "www-authenticate": "Bearer" }).end(JSON.stringify({ error: "Unauthorized" }));
+        return;
+      }
+      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+        devices: derivePhoneTelemetryStatus(store.snapshot()),
+        dataSource: "phone-observations",
+      }));
       return;
     }
 
