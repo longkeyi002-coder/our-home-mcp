@@ -13,7 +13,7 @@ import androidx.core.content.ContextCompat
 import com.hermes.companion.data.SettingsRepository
 import com.hermes.companion.push.HermesNotifications
 import java.util.concurrent.TimeUnit
-import okhttp3.ByteString
+import okio.ByteString
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
