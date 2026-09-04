@@ -1,6 +1,6 @@
 # Rebuild Roadmap
 
-This roadmap applies only to `rebuild/gpt-life-runtime-v01`.
+This roadmap applies only to `rebuild/ai-life-runtime-v01`.
 
 ## Phase 0 — Clean Foundation
 
