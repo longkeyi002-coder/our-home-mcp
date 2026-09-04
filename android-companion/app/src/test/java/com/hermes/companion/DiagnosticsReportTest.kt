@@ -26,6 +26,10 @@ class DiagnosticsReportTest {
             detectedForegroundPackage = null,
             usageCurrentPackage = "com.example.app",
             lastApiError = "registration HTTP 401 — token rejected",
+            pushRegistrationState = "error",
+            lastPushRegistrationAttempt = 0,
+            lastPushRegistrationSuccess = 0,
+            lastPushRegistrationError = "Firebase is not configured in this build",
         ).asText()
 
         assertContains(text, "Runtime URL: https://runtime.example/v1")
@@ -33,6 +37,8 @@ class DiagnosticsReportTest {
         assertContains(text, "Device token present: yes")
         assertContains(text, "Immediate upload worker: retrying (2)")
         assertContains(text, "Pending events: 4")
+        assertContains(text, "Push registration: error")
+        assertContains(text, "Firebase is not configured")
         assertContains(text, "registration HTTP 401")
         assertFalse(text.contains("url-secret"))
         assertFalse(text.contains("fragment"))
