@@ -1,11 +1,14 @@
 package com.hermes.companion
 
-import android.content.Intent
-import android.os.Bundle
-import android.os.Build
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -56,8 +59,8 @@ import com.hermes.companion.platform.UsageTimelineReader
 import com.hermes.companion.platform.UsageTimelineSummary
 import java.time.Instant
 import java.util.UUID
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -94,10 +97,14 @@ data class CompanionUiState(
     val lastSuccessfulUpload: Long = 0,
     val lastManualHeartbeat: Long = 0,
     val lastPeriodicCollection: Long = 0,
-    val backgroundWorkerStatus: String = "unknown",
+    val lastWorkerRun: Long = 0,
+    val periodicWorkerStatus: String = "unknown",
+    val immediateWorkerStatus: String = "unknown",
     val lastError: String = "",
     val usageAccess: Boolean = false,
     val usage: UsageTimelineSummary? = null,
+    val hasBootstrapToken: Boolean = false,
+    val hasDeviceToken: Boolean = false,
     val diagnostics: Boolean = false,
 )
 
@@ -105,20 +112,26 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
     private val settings = SettingsRepository(appContext)
     private val usageAccessOnboarding = UsageAccessOnboarding(settings)
     private val queue = QueueRepository.create(appContext)
-    private val _state = MutableStateFlow(
-        CompanionUiState(
-            deviceId = settings.deviceId(),
-            serverUrl = settings.serverUrl(),
-            lastManualHeartbeat = settings.lastManualHeartbeat(),
-            lastPeriodicCollection = settings.lastPeriodicCollection(),
-            lastSuccessfulUpload = settings.lastSuccessfulUpload(),
-        ),
-    )
+    private val _state = MutableStateFlow(snapshotState())
     val state: StateFlow<CompanionUiState> = _state
 
     init {
         refresh()
+        attemptAutomaticRegistration()
     }
+
+    private fun snapshotState(): CompanionUiState = CompanionUiState(
+        deviceId = settings.deviceId(),
+        serverUrl = settings.serverUrl(),
+        connected = settings.hasDeviceToken() && settings.lastError().isBlank(),
+        lastManualHeartbeat = settings.lastManualHeartbeat(),
+        lastPeriodicCollection = settings.lastPeriodicCollection(),
+        lastWorkerRun = settings.lastWorkerRun(),
+        lastSuccessfulUpload = settings.lastSuccessfulUpload(),
+        lastError = settings.lastError(),
+        hasBootstrapToken = settings.hasBootstrapToken(),
+        hasDeviceToken = settings.hasDeviceToken(),
+    )
 
     fun refresh() {
         viewModelScope.launch {
@@ -127,15 +140,29 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
                 device = status,
                 serverUrl = settings.serverUrl(),
                 deviceId = settings.deviceId(),
+                connected = settings.hasDeviceToken() && settings.lastError().isBlank(),
                 pending = queue.pendingCount(),
                 lastSuccessfulUpload = settings.lastSuccessfulUpload(),
                 lastManualHeartbeat = settings.lastManualHeartbeat(),
                 lastPeriodicCollection = settings.lastPeriodicCollection(),
-                backgroundWorkerStatus = readBackgroundWorkerStatus(),
+                lastWorkerRun = settings.lastWorkerRun(),
+                periodicWorkerStatus = readWorkerStatus(UploadWorker.PERIODIC_WORK_NAME),
+                immediateWorkerStatus = readWorkerStatus(UploadWorker.IMMEDIATE_WORK_NAME),
                 lastError = settings.lastError(),
                 usageAccess = DeviceStatusReader.hasUsageAccess(appContext),
                 usage = UsageTimelineReader.read(appContext),
+                hasBootstrapToken = settings.hasBootstrapToken(),
+                hasDeviceToken = settings.hasDeviceToken(),
             )
+        }
+    }
+
+    private fun attemptAutomaticRegistration() {
+        if (settings.serverUrl().isBlank() || !settings.hasBootstrapToken() || settings.hasDeviceToken()) return
+        viewModelScope.launch {
+            val result = queue.verifyRegistration()
+            if (result.error == null) UploadWorker.enqueueIfConfigured(appContext)
+            refresh()
         }
     }
 
@@ -143,23 +170,12 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
     fun consumeUsageAccessInitialGuide(): Boolean =
         usageAccessOnboarding.consumeInitialGuide(DeviceStatusReader.hasUsageAccess(appContext))
 
-    fun saveServer(value: String, bootstrapToken: String) {
-        settings.saveServerUrl(value)
-        settings.saveBootstrapToken(bootstrapToken)
-        UploadWorker.enqueueIfConfigured(appContext)
-        refresh()
-    }
-
     fun saveAndTestConnection(value: String, bootstrapToken: String) {
         settings.saveServerUrl(value)
         settings.saveBootstrapToken(bootstrapToken)
-        UploadWorker.enqueueIfConfigured(appContext)
         viewModelScope.launch {
-            val result = runCatching { com.hermes.companion.data.ApiClient.create(value).health() }
-            _state.value = _state.value.copy(
-                connected = result.getOrNull()?.ok == true,
-                lastError = result.exceptionOrNull()?.message.orEmpty(),
-            )
+            val result = queue.verifyRegistration()
+            if (result.error == null) UploadWorker.enqueueIfConfigured(appContext)
             refresh()
         }
     }
@@ -179,8 +195,7 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
                 clientEventId = UUID.randomUUID().toString(),
             ))
             settings.recordManualHeartbeat(System.currentTimeMillis())
-            val result = queue.uploadPending()
-            _state.value = _state.value.copy(lastManualHeartbeat = System.currentTimeMillis(), connected = result.error == null, lastError = result.error.orEmpty())
+            queue.uploadPending()
             refresh()
         }
     }
@@ -194,26 +209,26 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
                 observedAt = Instant.now().toString(),
                 deviceId = settings.deviceId(),
             ))
-            val result = queue.uploadPending()
-            _state.value = _state.value.copy(connected = result.error == null, lastError = result.error.orEmpty())
+            queue.uploadPending()
             refresh()
         }
     }
 
-    private suspend fun readBackgroundWorkerStatus(): String = withContext(Dispatchers.IO) {
-        val state = runCatching {
+    private suspend fun readWorkerStatus(uniqueWorkName: String): String = withContext(Dispatchers.IO) {
+        val info = runCatching {
             WorkManager.getInstance(appContext)
-                .getWorkInfosForUniqueWork(UploadWorker.PERIODIC_WORK_NAME)
+                .getWorkInfosForUniqueWork(uniqueWorkName)
                 .get()
-                .firstOrNull()
-                ?.state
+                .maxByOrNull { it.runAttemptCount }
         }.getOrNull()
-        when (state) {
-            WorkInfo.State.ENQUEUED -> "scheduled"
+        when (info?.state) {
+            WorkInfo.State.ENQUEUED -> if (info.runAttemptCount > 0) "retrying (${info.runAttemptCount})" else "scheduled"
             WorkInfo.State.RUNNING -> "running"
             WorkInfo.State.SUCCEEDED -> "succeeded"
             WorkInfo.State.FAILED -> "failed"
-            else -> "unknown"
+            WorkInfo.State.BLOCKED -> "blocked"
+            WorkInfo.State.CANCELLED -> "cancelled"
+            null -> "unknown"
         }
     }
 
@@ -238,13 +253,20 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
 fun HermesCompanionApp(model: CompanionViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val showManualSettings = state.serverUrl.isBlank()
+        || (!state.hasBootstrapToken && !state.hasDeviceToken)
+        || (!state.hasDeviceToken && state.lastError.isNotBlank())
+
     Scaffold { padding ->
         Column(
             modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp).verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text("AI 生活伴侣", style = MaterialTheme.typography.headlineMedium)
-            Text(if (state.connected) "连接状态: 已连接" else "连接状态: 离线", color = if (state.connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error)
+            Text(
+                if (state.connected) "连接状态: 已连接" else if (!showManualSettings) "连接状态: 正在自动连接" else "连接状态: 需要配置",
+                color = if (state.connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            )
             InfoCard(state)
             Text("手动状态", style = MaterialTheme.typography.titleMedium)
             val statuses = listOf("在家", "上班", "通勤", "忙", "休息", "睡觉", "累")
@@ -260,7 +282,7 @@ fun HermesCompanionApp(model: CompanionViewModel) {
             }
             TextButton(onClick = model::toggleDiagnostics) { Text(if (state.diagnostics) "隐藏诊断信息" else "调试 / 诊断") }
             if (state.diagnostics) Diagnostics(state, model)
-            SettingsPanel(state, model)
+            if (showManualSettings) SettingsPanel(state, model)
             LaunchedEffect(Unit) { model.refresh() }
         }
     }
@@ -277,7 +299,7 @@ private fun InfoCard(state: CompanionUiState) {
                 Text("Current App: ${usage.currentPackageName ?: "none"} · ${usage.currentDurationMs / 1000}s")
             }
             Text("Today's tracked apps: ${state.usage?.appTotalsMs?.size ?: 0}")
-            Text("Last manual heartbeat: ${state.lastManualHeartbeat.asTime()}")
+            Text("Last manual heartbeat attempt: ${state.lastManualHeartbeat.asTime()}")
             Text("Pending events: ${state.pending}")
         }
     }
@@ -288,28 +310,64 @@ private fun SettingsPanel(state: CompanionUiState, model: CompanionViewModel) {
     var server by rememberSaveable(state.serverUrl) { mutableStateOf(state.serverUrl) }
     var token by rememberSaveable { mutableStateOf("") }
     HorizontalDivider()
-    Text("设置", style = MaterialTheme.typography.titleMedium)
+    Text("连接设置", style = MaterialTheme.typography.titleMedium)
+    state.lastError.takeIf { it.isNotBlank() }?.let { Text("连接失败: $it", color = MaterialTheme.colorScheme.error) }
     OutlinedTextField(server, { server = it }, label = { Text("Runtime 地址 (HTTP/HTTPS)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
     OutlinedTextField(token, { token = it }, label = { Text("注册令牌") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
     Text("Device: ${state.deviceId}")
-    Button(onClick = { model.saveAndTestConnection(server, token) }, modifier = Modifier.fillMaxWidth()) { Text("保存并测试连接") }
+    Button(onClick = { model.saveAndTestConnection(server, token) }, modifier = Modifier.fillMaxWidth()) { Text("保存并验证注册") }
 }
 
 @Composable
 private fun Diagnostics(state: CompanionUiState, model: CompanionViewModel) {
     var confirmClear by remember { mutableStateOf(false) }
+    val context = LocalContext.current
+    val report = DiagnosticsReport(
+        appVersion = BuildConfig.VERSION_NAME,
+        deviceId = state.deviceId,
+        runtimeUrl = state.serverUrl,
+        bootstrapTokenPresent = state.hasBootstrapToken,
+        deviceTokenPresent = state.hasDeviceToken,
+        connected = state.connected,
+        periodicWorkerStatus = state.periodicWorkerStatus,
+        immediateWorkerStatus = state.immediateWorkerStatus,
+        lastWorkerRun = state.lastWorkerRun,
+        lastPeriodicCollection = state.lastPeriodicCollection,
+        lastSuccessfulUpload = state.lastSuccessfulUpload,
+        lastManualHeartbeat = state.lastManualHeartbeat,
+        pendingEvents = state.pending,
+        usageSummaryAvailable = state.usage != null,
+        usageAccessGranted = state.usageAccess,
+        detectedForegroundPackage = state.device.foregroundPackage,
+        usageCurrentPackage = state.usage?.currentPackageName,
+        lastApiError = state.lastError,
+    )
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Text("Device ID: ${state.deviceId}")
-            Text("Background worker: ${state.backgroundWorkerStatus}")
+            Text("Periodic worker: ${state.periodicWorkerStatus}")
+            Text("Immediate upload worker: ${state.immediateWorkerStatus}")
+            Text("Last worker run: ${state.lastWorkerRun.asTime()}")
             Text("Last periodic collection: ${state.lastPeriodicCollection.asTime()}")
             Text("Last successful upload: ${state.lastSuccessfulUpload.asTime()}")
-            Text("Last manual heartbeat: ${state.lastManualHeartbeat.asTime()}")
+            Text("Last manual heartbeat attempt: ${state.lastManualHeartbeat.asTime()}")
             Text("Pending events: ${state.pending}")
+            Text("Registration token present: ${if (state.hasBootstrapToken) "yes" else "no"}")
+            Text("Device token present: ${if (state.hasDeviceToken) "yes" else "no"}")
             Text("Usage summary available: ${if (state.usage != null) "yes" else "no"}")
             Text("Usage Access: ${if (state.usageAccess) "granted" else "required"}")
             Text("Last API error: ${state.lastError.ifBlank { "none" }}")
             Text("Detected foreground package: ${state.device.foregroundPackage ?: "none"}")
+            Text("Usage current package: ${state.usage?.currentPackageName ?: "none"}")
+            OutlinedButton(
+                onClick = {
+                    val clipboard = context.getSystemService(ClipboardManager::class.java)
+                    clipboard?.setPrimaryClip(ClipData.newPlainText("Our Home diagnostics", report.asText()))
+                    Toast.makeText(context, "诊断信息已复制", Toast.LENGTH_SHORT).show()
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("复制诊断信息") }
             OutlinedButton(onClick = { confirmClear = true }, modifier = Modifier.fillMaxWidth()) { Text("Clear pending queue") }
         }
     }
