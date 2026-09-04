@@ -9,7 +9,7 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     private val prefs = context.getSharedPreferences("companion_settings", Context.MODE_PRIVATE)
     private val secure = SecureTokenStore(context)
 
-    fun serverUrl(): String = prefs.getString(KEY_SERVER_URL, "") ?: ""
+    fun serverUrl(): String = prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
     fun saveServerUrl(value: String) {
         val normalized = value.trim()
         if (TelemetryPolicy.shouldInvalidateDeviceToken(serverUrl(), normalized)) {
@@ -69,6 +69,7 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     override fun markUsageAccessGuideShown() { prefs.edit().putBoolean(KEY_USAGE_ACCESS_GUIDE_SHOWN, true).apply() }
 
     companion object {
+        const val DEFAULT_SERVER_URL = "https://api.yeqingxu.cyou"
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_BOOTSTRAP_TOKEN = "bootstrap_token"
