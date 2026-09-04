@@ -2,6 +2,12 @@ name: Our Home Android Stable APK
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - rebuild/ai-life-runtime-v01
+    paths:
+      - "android-companion/**"
+      - ".github/workflows/android-stable-apk.yml"
 
 permissions:
   contents: read
