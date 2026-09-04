@@ -1,9 +1,19 @@
-import { JsonStore, parseBoolean } from "./store.js";
+import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import type { BrainAdapter } from "./brain.js";
+import type { JsonStore } from "./store.js";
 import type { LifeContext, ProactiveCandidate, WakeDecision, WakeEvent } from "./types.js";
 import { HermesDecisionEngine } from "./hermes-decision.js";
 import { FcmHttpV1Sender, FcmNotifier } from "./fcm.js";
+import {
+  claimDueProactiveMessages,
+  claimPendingWakeEvents,
+  clearProactiveClaim,
+  clearWakeEventClaim,
+  recoverInterruptedWorkerClaims,
+  releaseProactiveClaim,
+  releaseWakeEventClaim,
+} from "./worker-claims.js";
 
 export type { BrainAdapter } from "./brain.js";
 /** Backward-compatible alias for older callers/tests. */
@@ -29,6 +39,7 @@ export class WebhookDecisionEngine implements BrainAdapter {
   constructor(
     private readonly url: string,
     private readonly token?: string,
+    private readonly timeoutMs = 20_000,
   ) {}
 
   async evaluate(input: { wakeEvent: WakeEvent; context: LifeContext }) {
@@ -38,6 +49,7 @@ export class WebhookDecisionEngine implements BrainAdapter {
       method: "POST",
       headers,
       body: JSON.stringify(input),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) throw new Error(`Decision engine returned HTTP ${response.status}`);
     const parsed = decisionResponseSchema.safeParse(await response.json());
@@ -56,6 +68,7 @@ export class WebhookNotifier implements ProactiveNotifier {
   constructor(
     private readonly url: string,
     private readonly token?: string,
+    private readonly timeoutMs = 20_000,
   ) {}
 
   async deliver(candidate: ProactiveCandidate): Promise<void> {
@@ -74,6 +87,7 @@ export class WebhookNotifier implements ProactiveNotifier {
         dueAt: candidate.dueAt,
         source: candidate.source,
       }),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) throw new Error(`Notifier returned HTTP ${response.status}`);
   }
@@ -85,23 +99,29 @@ export async function runProactiveCycle(
   asOf = new Date(),
   decisionEngine?: BrainAdapter,
 ): Promise<{ heartbeatId: string; wakeEventCount: number; dueCount: number; deliveredCount: number; failedCount: number }> {
+  const observedAt = asOf.toISOString();
   const heartbeat = await store.recordHeartbeat("独立 Life Loop 心跳：检查主动消息队列。");
-  const wakeEvents = await store.evaluateWakeEvents(asOf.toISOString());
+  const wakeEvents = await store.evaluateWakeEvents(observedAt);
+
   if (decisionEngine) {
-    for (const wakeEvent of store.listWakeEvents("pending", 5)) {
+    const claimedWakeEvents = await claimPendingWakeEvents(store, observedAt, 5);
+    for (const wakeEvent of claimedWakeEvents) {
       try {
         const decision = decisionResponseSchema.parse(await decisionEngine.evaluate({
           wakeEvent,
-          context: store.getLifeContext(asOf.toISOString()),
+          context: store.getLifeContext(observedAt),
         }));
-        await store.applyWakeDecision(wakeEvent.id, decision, asOf.toISOString());
+        await store.applyWakeDecision(wakeEvent.id, decision, observedAt);
+        await clearWakeEventClaim(store, wakeEvent.id);
       } catch (error) {
+        await releaseWakeEventClaim(store, wakeEvent.id);
         const message = error instanceof Error ? error.message : "Unknown decision engine error";
         process.stderr.write(`[our-home] wake decision failed: ${wakeEvent.id}: ${message}\n`);
       }
     }
   }
-  const due = store.listDueProactiveMessages(asOf.toISOString());
+
+  const due = await claimDueProactiveMessages(store, observedAt, 20);
   let deliveredCount = 0;
   let failedCount = 0;
 
@@ -110,11 +130,13 @@ export async function runProactiveCycle(
       await notifier.deliver(candidate);
       await store.recordProactiveAttempt(candidate.id);
       await store.resolveProactiveMessage(candidate.id, "delivered");
+      await clearProactiveClaim(store, candidate.id);
       deliveredCount += 1;
     } catch (error) {
       failedCount += 1;
       const message = error instanceof Error ? error.message : "Unknown notifier error";
       await store.recordProactiveAttempt(candidate.id, message);
+      await releaseProactiveClaim(store, candidate.id);
       process.stderr.write(`[our-home] proactive delivery failed: ${candidate.id}: ${message}\n`);
     }
   }
@@ -122,9 +144,8 @@ export async function runProactiveCycle(
   return { heartbeatId: heartbeat.id, wakeEventCount: wakeEvents.length, dueCount: due.length, deliveredCount, failedCount };
 }
 
-const dataFile = process.env.OUR_HOME_DATA_FILE ?? "./data/our-home.json";
-const seed = parseBoolean(process.env.OUR_HOME_SEED, true);
 const intervalMs = Number(process.env.OUR_HOME_WORKER_INTERVAL_MS ?? "60000");
+const externalTimeoutMs = Number(process.env.OUR_HOME_EXTERNAL_TIMEOUT_MS ?? "20000");
 const webhookUrl = process.env.OUR_HOME_NOTIFY_WEBHOOK_URL;
 const webhookToken = process.env.OUR_HOME_NOTIFY_WEBHOOK_TOKEN;
 const decisionUrl = process.env.OUR_HOME_DECISION_WEBHOOK_URL;
@@ -143,52 +164,79 @@ export function selectNotifier(
     googleCredentials?: string;
     webhookUrl?: string;
     webhookToken?: string;
+    timeoutMs?: number;
   },
 ): ProactiveNotifier {
+  const timeoutMs = config.timeoutMs ?? externalTimeoutMs;
   if (config.firebaseProjectId && config.googleCredentials) {
-    return new FcmNotifier(store, new FcmHttpV1Sender(config.firebaseProjectId, config.googleCredentials));
+    return new FcmNotifier(store, new FcmHttpV1Sender(config.firebaseProjectId, config.googleCredentials, fetch, timeoutMs));
   }
   return config.webhookUrl
-    ? new WebhookNotifier(config.webhookUrl, config.webhookToken)
+    ? new WebhookNotifier(config.webhookUrl, config.webhookToken, timeoutMs)
     : new NoopNotifier();
 }
 
-if (process.env.OUR_HOME_RUN_WORKER === "true") {
+export interface RuntimeWorkerHandle {
+  stop(): void;
+  done: Promise<void>;
+}
+
+/**
+ * Starts the only Life Loop allowed to mutate the Runtime Store in V0.1.
+ * Each cycle is fully awaited before the delay and next cycle, so cycles cannot overlap.
+ */
+export function startRuntimeWorker(store: JsonStore): RuntimeWorkerHandle {
   if (!Number.isInteger(intervalMs) || intervalMs < 5_000) {
     throw new Error("OUR_HOME_WORKER_INTERVAL_MS must be an integer of at least 5000ms");
   }
+  if (!Number.isInteger(externalTimeoutMs) || externalTimeoutMs < 1_000 || externalTimeoutMs > 120_000) {
+    throw new Error("OUR_HOME_EXTERNAL_TIMEOUT_MS must be an integer between 1000 and 120000ms");
+  }
 
-  const store = await JsonStore.open(dataFile, seed);
   const notifier = selectNotifier(store, {
     firebaseProjectId,
     googleCredentials,
     webhookUrl,
     webhookToken,
+    timeoutMs: externalTimeoutMs,
   });
-
-  // Provider selection is deliberately outside Runtime domain logic. Hermes is the
-  // current concrete adapter; a generic webhook/self-hosted adapter remains available.
   const decisionEngine: BrainAdapter | undefined = hermesApiUrl && hermesApiKey
     ? new HermesDecisionEngine({
       apiUrl: hermesApiUrl,
       apiKey: hermesApiKey,
       conversation: hermesConversation,
       model: hermesModel,
+      timeoutMs: externalTimeoutMs,
     })
     : decisionUrl
-      ? new WebhookDecisionEngine(decisionUrl, decisionToken)
+      ? new WebhookDecisionEngine(decisionUrl, decisionToken, externalTimeoutMs)
       : undefined;
 
-  const cycle = async () => {
-    const result = await runProactiveCycle(store, notifier, new Date(), decisionEngine);
-    process.stderr.write(
-      `[our-home] heartbeat=${result.heartbeatId} due=${result.dueCount} delivered=${result.deliveredCount} failed=${result.failedCount}\n`,
-    );
-  };
+  const controller = new AbortController();
+  const done = (async () => {
+    await recoverInterruptedWorkerClaims(store);
+    while (!controller.signal.aborted) {
+      try {
+        const result = await runProactiveCycle(store, notifier, new Date(), decisionEngine);
+        process.stderr.write(
+          `[our-home] heartbeat=${result.heartbeatId} due=${result.dueCount} delivered=${result.deliveredCount} failed=${result.failedCount}\n`,
+        );
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown worker error";
+        process.stderr.write(`[our-home] worker cycle failed: ${message}\n`);
+      }
+      if (controller.signal.aborted) break;
+      try {
+        await delay(intervalMs, undefined, { signal: controller.signal });
+      } catch (error) {
+        if (controller.signal.aborted) break;
+        throw error;
+      }
+    }
+  })();
 
-  await cycle();
-  setInterval(() => void cycle().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : "Unknown worker error";
-    process.stderr.write(`[our-home] worker cycle failed: ${message}\n`);
-  }), intervalMs);
+  return {
+    stop: () => controller.abort(),
+    done,
+  };
 }
