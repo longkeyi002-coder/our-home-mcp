@@ -134,11 +134,7 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
   let currentActivity: LifeActivity = "unknown";
   let confidence = 0;
 
-  if (devicePresence === "screen_off" && foregroundInvalidatedByScreenOff) {
-    currentActivity = "probably_idle";
-    confidence = 0.9;
-    reasons.push("realtime phone presence reports screen off after the latest foreground observation");
-  } else if (connectivityState === "offline" && !hasRecentActivity) {
+  if (connectivityState === "offline" && !hasRecentActivity) {
     currentActivity = "offline";
     confidence = 0.9;
     reasons.push("latest phone observation reports offline connectivity");
@@ -149,12 +145,16 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
       ? "realtime foreground presence observed recently"
       : "foreground app observed recently");
   } else if (charging === true && hasRecentDevice) {
+    // Charging is a real device fact and remains useful while the screen is off. Screen-off
+    // still invalidates foreground-app knowledge above; it must not erase charging state.
     currentActivity = "charging";
     confidence = 0.8;
     reasons.push("phone reports charging=true");
-    if (activityAgeMs <= LIFE_STATE_OBSERVATION_WINDOW_MS) {
-      reasons.push("charging does not establish what the user is doing");
-    }
+    if (devicePresence === "screen_off") reasons.push("screen is off; no current foreground app is assumed");
+  } else if (devicePresence === "screen_off" && foregroundInvalidatedByScreenOff) {
+    currentActivity = "probably_idle";
+    confidence = 0.9;
+    reasons.push("realtime phone presence reports screen off after the latest foreground observation");
   } else if (hasRecentDevice && (devicePresence === "idle" || devicePresence === "screen_off" || activityAgeMs > LIFE_STATE_ACTIVITY_WINDOW_MS)) {
     currentActivity = "probably_idle";
     confidence = devicePresence === "screen_on" && foregroundInvalidatedByScreenOff ? 0.5 : 0.65;
