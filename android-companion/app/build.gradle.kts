@@ -15,6 +15,7 @@ fun buildConfigString(value: String): String = "\"${value.replace("\\", "\\\\").
 
 val configuredVersionCode = configuredValue("OUR_HOME_VERSION_CODE").toIntOrNull()?.takeIf { it > 0 } ?: 1
 val configuredVersionName = configuredValue("OUR_HOME_VERSION_NAME").ifBlank { "0.1.0" }
+val defaultRuntimeUrl = configuredValue("OUR_HOME_DEFAULT_RUNTIME_URL").ifBlank { "https://api.yeqingxu.cyou" }
 val stableKeystorePath = configuredValue("OUR_HOME_ANDROID_KEYSTORE_PATH")
 val stableKeystorePassword = configuredValue("OUR_HOME_ANDROID_KEYSTORE_PASSWORD")
 val stableKeyAlias = configuredValue("OUR_HOME_ANDROID_KEY_ALIAS")
@@ -37,9 +38,9 @@ android {
         versionCode = configuredVersionCode
         versionName = configuredVersionName
 
-        // OH-P1.11: private builds may inject a default Runtime and register-only
-        // enrollment credential. Values are intentionally empty in source control.
-        buildConfigField("String", "DEFAULT_RUNTIME_URL", buildConfigString(configuredValue("OUR_HOME_DEFAULT_RUNTIME_URL")))
+        // OH-P1.11: the personal Our Home build has a stable default Runtime.
+        // A register-only enrollment credential is still injected at build time.
+        buildConfigField("String", "DEFAULT_RUNTIME_URL", buildConfigString(defaultRuntimeUrl))
         buildConfigField("String", "ENROLLMENT_TOKEN", buildConfigString(configuredValue("OUR_HOME_ENROLLMENT_TOKEN")))
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
