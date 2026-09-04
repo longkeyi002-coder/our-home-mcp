@@ -102,6 +102,14 @@ class PresenceAccessibilityService : AccessibilityService() {
             return
         }
 
+        // A user may arm a one-time grant from the Privacy page before returning to the
+        // target App. Bind it only now, after Android has verified the exact live session.
+        privacy.bindArmedGrantToSession(
+            packageName = request.packageName,
+            sessionId = request.sessionId,
+            nowMs = now,
+        )
+
         val guard = SensitiveVisualGuard.decide(
             VisualRequestContext(
                 packageName = request.packageName,
