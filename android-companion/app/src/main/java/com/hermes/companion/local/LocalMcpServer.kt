@@ -3,6 +3,7 @@ package com.hermes.companion.local
 import android.content.Context
 import androidx.core.app.NotificationManagerCompat
 import com.hermes.companion.AppDefaults
+import com.hermes.companion.CompanionProductState
 import com.hermes.companion.data.SettingsRepository
 import com.hermes.companion.platform.DeviceStatusReader
 import com.hermes.companion.platform.UsageTimelineReader
@@ -87,7 +88,6 @@ object LocalMcpServer {
                             }
                         }
                     } catch (_: RejectedExecutionException) {
-                        // The bounded executor is saturated; do not let one client starve the server.
                         runCatching { client.close() }
                     }
                 }
@@ -131,17 +131,27 @@ object LocalMcpServer {
         val body = readUtf8Body(input, length) ?: return write(writer, 400, error(null, -32600, "Truncated body"))
         val request = runCatching { JSONObject(body) }.getOrElse { return write(writer, 400, error(null, -32700, "Invalid JSON")) }
         val id = request.opt("id")
-        val result = when (request.optString("method")) {
-            "initialize" -> JSONObject().put("protocolVersion", "2025-03-26").put("serverInfo", JSONObject().put("name", "our-home-companion-local").put("version", "0.1.0")).put("capabilities", JSONObject().put("tools", JSONObject()))
-            "notifications/initialized" -> return write(writer, 202, "")
-            "tools/list" -> JSONObject().put("tools", tools())
+        val method = request.optString("method")
+        val productState = CompanionProductState(context)
+        val result = when (method) {
+            "initialize" -> {
+                productState.recordMcpActivity("initialize")
+                JSONObject().put("protocolVersion", "2025-03-26").put("serverInfo", JSONObject().put("name", "our-home-companion-local").put("version", "0.1.0")).put("capabilities", JSONObject().put("tools", JSONObject()))
+            }
+            "notifications/initialized" -> {
+                productState.recordMcpActivity("notifications/initialized")
+                return write(writer, 202, "")
+            }
+            "tools/list" -> {
+                productState.recordMcpActivity("tools/list")
+                JSONObject().put("tools", tools())
+            }
             "tools/call" -> callTool(context, request.optJSONObject("params"))
             else -> return write(writer, 200, error(id, -32601, "Method not found"))
         }
         write(writer, 200, JSONObject().put("jsonrpc", "2.0").put("id", id).put("result", result).toString())
     }
 
-    /** Reads exactly the byte count declared by HTTP Content-Length, then decodes UTF-8 once. */
     internal fun readUtf8Body(input: InputStream, length: Int): String? {
         val bytes = ByteArray(length)
         var offset = 0
@@ -178,7 +188,10 @@ object LocalMcpServer {
 
     private fun callTool(context: Context, params: JSONObject?): JSONObject {
         val args = params?.optJSONObject("arguments") ?: JSONObject()
-        val payload = when (params?.optString("name")) {
+        val toolName = params?.optString("name").orEmpty()
+        val productState = CompanionProductState(context)
+        productState.recordMcpActivity(toolName)
+        val payload = when (toolName) {
             "get_local_health" -> JSONObject()
                 .put("mode", "LOCAL")
                 .put("serverRunning", isRunning())
@@ -191,9 +204,12 @@ object LocalMcpServer {
             "get_device_context" -> deviceContext(context)
             "get_current_usage" -> usage(context)
             "send_local_notification" -> {
-                val title = args.optString("title").trim(); val message = args.optString("message").trim()
+                val title = args.optString("title").trim()
+                val message = args.optString("message").trim()
                 require(title.isNotEmpty() && message.isNotEmpty()) { "title and message are required" }
-                HermesNotifications.show(context, HermesNotification("local-mcp:$title:$message", title, message)); JSONObject().put("accepted", true)
+                HermesNotifications.show(context, HermesNotification("local-mcp:$title:$message", title, message))
+                productState.recordNotification(title)
+                JSONObject().put("accepted", true)
             }
             else -> throw IllegalArgumentException("Unknown tool")
         }
@@ -234,6 +250,7 @@ object LocalMcpServer {
     }
 
     private fun error(id: Any?, code: Int, message: String) = JSONObject().put("jsonrpc", "2.0").put("id", id).put("error", JSONObject().put("code", code).put("message", message)).toString()
+
     private fun write(writer: BufferedWriter, status: Int, body: String) {
         val bytes = body.toByteArray(Charsets.UTF_8)
         writer.write("HTTP/1.1 $status OK\r\nContent-Type: application/json\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n$body")
