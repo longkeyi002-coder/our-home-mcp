@@ -15,6 +15,15 @@ enum class SensitivityClass {
     PROTECTED,
 }
 
+data class ArmedVisualGrant(
+    val packageName: String,
+    val issuedAtMs: Long,
+    val expiresAtMs: Long,
+) {
+    fun isUsable(packageName: String, nowMs: Long): Boolean =
+        this.packageName == packageName && nowMs in issuedAtMs until expiresAtMs
+}
+
 data class TemporaryVisualGrant(
     val packageName: String,
     val issuedAtMs: Long,
