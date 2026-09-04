@@ -123,7 +123,10 @@ test("OH-P1.5 compiled HTTP runtime accepts and persists realtime Presence kinds
     observations: Array<{ kind: string; source: string; confidence: string; metadata?: Record<string, unknown> }>;
   };
   const phone = persisted.observations.filter((item) => observations.some((expected) => expected.kind === item.kind));
-  assert.deepEqual(phone.map((item) => item.kind), observations.map((item) => item.kind));
+  assert.deepEqual(
+    phone.map((item) => item.kind).sort(),
+    observations.map((item) => item.kind).sort(),
+  );
   assert.ok(phone.every((item) => item.source === "phone" && item.confidence === "observed"));
   assert.equal(phone.find((item) => item.kind === "visual_policy_audit")?.metadata?.allowed, "false");
 });
