@@ -1,6 +1,6 @@
 # AI Life Runtime / Our Home
 
-> 当前唯一开发分支：`rebuild/gpt-life-runtime-v01`
+> 当前唯一开发分支：`rebuild/ai-life-runtime-v01`
 >
 > 这个项目不是为 Hermes 专门开发的。Hermes 只是当前可用的一个 Brain Provider；以后可以替换为 GPT、Claude、自建模型、自己的 Agent 或其他兼容适配器。
 
@@ -202,7 +202,7 @@ Runtime → FCM → Android notification
 
 ## 7. 当前开发原则
 
-1. **只在 `rebuild/gpt-life-runtime-v01` 开发。**
+1. **只在 `rebuild/ai-life-runtime-v01` 开发。**
 2. `main` 保留为旧稳定参考，不直接堆新需求。
 3. 不删除 Git 历史，不 force-push。
 4. 不把 Hermes、GPT 或任何 provider 写进 Runtime Core。
@@ -317,7 +317,8 @@ Brain 从 Hermes 换成其他 AI 时，上面两条链不应重写。
 
 | 分支 | 角色 |
 |---|---|
-| `rebuild/gpt-life-runtime-v01` | **唯一新开发线** |
+| `rebuild/ai-life-runtime-v01` | **唯一新开发线** |
+| `rebuild/gpt-life-runtime-v01` | 重命名前的重建快照 / 历史参考 |
 | `main` | 旧稳定基线 / 参考 |
 | `codex/phone-reality-local-mode` | Local MCP / Relay / diagnostics 实验参考 |
 | `codex/android-reverse-tunnel-v01` | reverse tunnel 历史参考 |
