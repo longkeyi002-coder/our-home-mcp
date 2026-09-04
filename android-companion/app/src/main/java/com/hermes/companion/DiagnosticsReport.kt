@@ -1,5 +1,6 @@
 package com.hermes.companion
 
+import java.net.URI
 import java.text.DateFormat
 import java.util.Date
 
@@ -27,7 +28,7 @@ data class DiagnosticsReport(
         appendLine("Our Home Android diagnostics")
         appendLine("App version: $appVersion")
         appendLine("Device ID: $deviceId")
-        appendLine("Runtime URL: ${runtimeUrl.ifBlank { "not configured" }}")
+        appendLine("Runtime URL: ${safeRuntimeUrl(runtimeUrl)}")
         appendLine("Connected: ${yesNo(connected)}")
         appendLine("Registration token present: ${yesNo(bootstrapTokenPresent)}")
         appendLine("Device token present: ${yesNo(deviceTokenPresent)}")
@@ -49,4 +50,12 @@ data class DiagnosticsReport(
 
     private fun formatTime(value: Long): String =
         if (value == 0L) "never" else DateFormat.getDateTimeInstance().format(Date(value))
+
+    private fun safeRuntimeUrl(value: String): String {
+        if (value.isBlank()) return "not configured"
+        return runCatching {
+            val uri = URI(value)
+            URI(uri.scheme, null, uri.host, uri.port, uri.path, null, null).toString()
+        }.getOrDefault("configured (invalid URL hidden)")
+    }
 }
