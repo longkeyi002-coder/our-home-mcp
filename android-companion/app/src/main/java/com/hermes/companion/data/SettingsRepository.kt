@@ -19,6 +19,7 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     }
     fun deviceId(): String = prefs.getString(KEY_DEVICE_ID, null) ?: "android-${UUID.randomUUID()}".also { prefs.edit().putString(KEY_DEVICE_ID, it).apply() }
     fun bootstrapToken(): String? = secure.get(KEY_BOOTSTRAP_TOKEN)
+    fun hasBootstrapToken(): Boolean = !bootstrapToken().isNullOrBlank()
     fun saveBootstrapToken(value: String) {
         val normalized = value.trim()
         if (normalized.isBlank()) return
@@ -26,6 +27,7 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
         secure.put(KEY_BOOTSTRAP_TOKEN, normalized)
     }
     fun deviceToken(): String? = secure.get(KEY_DEVICE_TOKEN)
+    fun hasDeviceToken(): Boolean = !deviceToken().isNullOrBlank()
     fun saveDeviceToken(value: String) = secure.put(KEY_DEVICE_TOKEN, value)
     fun clearDeviceToken() = secure.put(KEY_DEVICE_TOKEN, null)
     fun pushFid(): String? = secure.get(KEY_PUSH_FID)
@@ -39,6 +41,7 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     fun lastManualHeartbeat(): Long = prefs.getLong(KEY_LAST_MANUAL_HEARTBEAT, prefs.getLong(KEY_LAST_HEARTBEAT_LEGACY, 0L))
     fun lastHeartbeat(): Long = lastManualHeartbeat()
     fun lastPeriodicCollection(): Long = prefs.getLong(KEY_LAST_PERIODIC_COLLECTION, 0L)
+    fun lastWorkerRun(): Long = prefs.getLong(KEY_LAST_WORKER_RUN, 0L)
     fun recordManualHeartbeat(at: Long) {
         prefs.edit()
             .putLong(KEY_LAST_MANUAL_HEARTBEAT, at)
@@ -49,6 +52,9 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     fun recordPeriodicCollection(at: Long) {
         prefs.edit().putLong(KEY_LAST_PERIODIC_COLLECTION, at).apply()
     }
+    fun recordWorkerRun(at: Long) {
+        prefs.edit().putLong(KEY_LAST_WORKER_RUN, at).apply()
+    }
     fun recordSuccessfulUpload(at: Long) {
         prefs.edit()
             .putLong(KEY_LAST_SUCCESSFUL_UPLOAD, at)
@@ -58,6 +64,7 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     }
     fun lastError(): String = prefs.getString(KEY_LAST_ERROR, "") ?: ""
     fun recordApiError(value: String) { prefs.edit().putString(KEY_LAST_ERROR, value.take(300)).apply() }
+    fun clearApiError() { prefs.edit().remove(KEY_LAST_ERROR).apply() }
     override fun hasShownUsageAccessGuide(): Boolean = prefs.getBoolean(KEY_USAGE_ACCESS_GUIDE_SHOWN, false)
     override fun markUsageAccessGuideShown() { prefs.edit().putBoolean(KEY_USAGE_ACCESS_GUIDE_SHOWN, true).apply() }
 
@@ -71,6 +78,7 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
         private const val KEY_LAST_SUCCESSFUL_UPLOAD = "last_successful_upload"
         private const val KEY_LAST_MANUAL_HEARTBEAT = "last_manual_heartbeat"
         private const val KEY_LAST_PERIODIC_COLLECTION = "last_periodic_collection"
+        private const val KEY_LAST_WORKER_RUN = "last_worker_run"
         private const val KEY_LAST_UPLOAD_LEGACY = "last_upload"
         private const val KEY_LAST_HEARTBEAT_LEGACY = "last_heartbeat"
         private const val KEY_LAST_ERROR = "last_error"
