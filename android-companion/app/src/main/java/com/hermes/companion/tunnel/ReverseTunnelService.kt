@@ -118,7 +118,7 @@ class ReverseTunnelService : Service() {
         http.dispatcher.executorService.shutdown()
         if (settings.tunnelEnabled()) {
             val previousError = settings.tunnelLastError()
-            settings.recordTunnelState("stopped", previousError.ifBlank { null })
+            settings.recordTunnelState("stopped", previousError.takeIf { it.isNotBlank() })
         } else {
             settings.recordTunnelState("disabled")
         }
