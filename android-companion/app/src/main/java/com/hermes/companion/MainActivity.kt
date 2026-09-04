@@ -56,6 +56,7 @@ import com.hermes.companion.platform.UsageTimelineReader
 import com.hermes.companion.platform.UsageTimelineSummary
 import com.hermes.companion.presence.PresenceSnapshot
 import com.hermes.companion.presence.PresenceStateStore
+import com.hermes.companion.vision.VisionProviderSettingsStore
 import java.time.Instant
 import java.util.UUID
 import kotlinx.coroutines.Dispatchers
@@ -102,12 +103,18 @@ data class CompanionUiState(
     val notificationsEnabled: Boolean = false,
     val batteryOptimizationIgnored: Boolean = false,
     val colorOsFamily: Boolean = false,
+    val visionEnabled: Boolean = false,
+    val visionBaseUrl: String = VisionProviderSettingsStore.DEFAULT_BASE_URL,
+    val visionModel: String = VisionProviderSettingsStore.DEFAULT_MODEL,
+    val visionHasApiKey: Boolean = false,
+    val visionSettingsError: String = "",
 )
 
 class CompanionViewModel(private val appContext: android.content.Context) : ViewModel() {
     private val settings = SettingsRepository(appContext)
     private val queue = QueueRepository.create(appContext)
     private val presenceStore = PresenceStateStore(appContext)
+    private val visionSettings = VisionProviderSettingsStore(appContext)
     private val _state = MutableStateFlow(snapshotState())
     val state: StateFlow<CompanionUiState> = _state
 
@@ -116,27 +123,35 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
         attemptAutomaticRegistration()
     }
 
-    private fun snapshotState(): CompanionUiState = CompanionUiState(
-        deviceId = settings.deviceId(),
-        serverUrl = settings.serverUrl(),
-        connected = settings.hasDeviceToken() && settings.lastError().isBlank(),
-        lastManualHeartbeat = settings.lastManualHeartbeat(),
-        lastPeriodicCollection = settings.lastPeriodicCollection(),
-        lastWorkerRun = settings.lastWorkerRun(),
-        lastSuccessfulUpload = settings.lastSuccessfulUpload(),
-        lastError = settings.lastError(),
-        hasBootstrapToken = settings.hasBootstrapToken(),
-        hasDeviceToken = settings.hasDeviceToken(),
-        presence = presenceStore.snapshot(),
-        accessibilityEnabled = PermissionNavigator.accessibilityEnabled(appContext),
-        notificationsEnabled = PermissionNavigator.notificationsEnabled(appContext),
-        batteryOptimizationIgnored = PermissionNavigator.batteryOptimizationIgnored(appContext),
-        colorOsFamily = PermissionNavigator.isColorOsFamily(),
-    )
+    private fun snapshotState(): CompanionUiState {
+        val vision = visionSettings.snapshot()
+        return CompanionUiState(
+            deviceId = settings.deviceId(),
+            serverUrl = settings.serverUrl(),
+            connected = settings.hasDeviceToken() && settings.lastError().isBlank(),
+            lastManualHeartbeat = settings.lastManualHeartbeat(),
+            lastPeriodicCollection = settings.lastPeriodicCollection(),
+            lastWorkerRun = settings.lastWorkerRun(),
+            lastSuccessfulUpload = settings.lastSuccessfulUpload(),
+            lastError = settings.lastError(),
+            hasBootstrapToken = settings.hasBootstrapToken(),
+            hasDeviceToken = settings.hasDeviceToken(),
+            presence = presenceStore.snapshot(),
+            accessibilityEnabled = PermissionNavigator.accessibilityEnabled(appContext),
+            notificationsEnabled = PermissionNavigator.notificationsEnabled(appContext),
+            batteryOptimizationIgnored = PermissionNavigator.batteryOptimizationIgnored(appContext),
+            colorOsFamily = PermissionNavigator.isColorOsFamily(),
+            visionEnabled = vision.enabled,
+            visionBaseUrl = vision.baseUrl,
+            visionModel = vision.model,
+            visionHasApiKey = vision.hasApiKey,
+        )
+    }
 
     fun refresh() {
         viewModelScope.launch {
             val status = DeviceStatusReader.read(appContext)
+            val vision = visionSettings.snapshot()
             _state.value = _state.value.copy(
                 device = status,
                 serverUrl = settings.serverUrl(),
@@ -159,6 +174,10 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
                 notificationsEnabled = PermissionNavigator.notificationsEnabled(appContext),
                 batteryOptimizationIgnored = PermissionNavigator.batteryOptimizationIgnored(appContext),
                 colorOsFamily = PermissionNavigator.isColorOsFamily(),
+                visionEnabled = vision.enabled,
+                visionBaseUrl = vision.baseUrl,
+                visionModel = vision.model,
+                visionHasApiKey = vision.hasApiKey,
             )
         }
     }
@@ -180,6 +199,35 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
             if (result.error == null) UploadWorker.enqueueIfConfigured(appContext)
             refresh()
         }
+    }
+
+    fun saveVisionSettings(baseUrl: String, model: String, apiKey: String) {
+        val result = runCatching {
+            visionSettings.saveProvider(baseUrl, model)
+            if (apiKey.isNotBlank()) visionSettings.saveApiKey(apiKey)
+        }
+        _state.value = _state.value.copy(
+            visionSettingsError = result.exceptionOrNull()?.message.orEmpty(),
+        )
+        refresh()
+    }
+
+    fun setVisionEnabled(enabled: Boolean) {
+        val snapshot = visionSettings.snapshot()
+        if (enabled && !snapshot.hasApiKey) {
+            _state.value = _state.value.copy(visionSettingsError = "请先填写并保存视觉 Token")
+            return
+        }
+        visionSettings.setEnabled(enabled)
+        _state.value = _state.value.copy(visionSettingsError = "")
+        refresh()
+    }
+
+    fun clearVisionToken() {
+        visionSettings.setEnabled(false)
+        visionSettings.clearApiKey()
+        _state.value = _state.value.copy(visionSettingsError = "")
+        refresh()
     }
 
     fun sendHeartbeat() {
@@ -280,7 +328,11 @@ fun OurHomeCompanionApp(model: CompanionViewModel) {
                     onRequestNotifications = ::requestNotifications,
                     model = model,
                 )
-                CompanionPage.PRIVACY -> PrivacyPage(onBack = { page = CompanionPage.HOME })
+                CompanionPage.PRIVACY -> PrivacyPage(
+                    state = state,
+                    model = model,
+                    onBack = { page = CompanionPage.HOME },
+                )
                 CompanionPage.ADVANCED -> AdvancedPage(
                     state = state,
                     model = model,
@@ -348,7 +400,6 @@ private fun HomePage(
     if (!state.notificationsEnabled) {
         RepairRow("主动消息还没开启", "允许后，哥哥不在 App 前台时也能通过系统通知找到你。", onRequestNotifications)
     }
-
     if (!state.usageAccess) {
         RepairRow("补充使用记录", "用于低频校验 App 使用时间线，不负责实时感知。", onOpenUsage)
     }
@@ -357,7 +408,6 @@ private fun HomePage(
         OutlinedButton(onClick = onOpenPrivacy, modifier = Modifier.weight(1f)) { Text("隐私与感知") }
         OutlinedButton(onClick = onOpenAdvanced, modifier = Modifier.weight(1f)) { Text("设置") }
     }
-
     if (!state.connected && state.lastError.isBlank()) {
         TextButton(onClick = model::refresh) { Text("重新检查连接") }
     }
@@ -377,6 +427,7 @@ private fun PresenceCard(state: CompanionUiState) {
                     else -> "屏幕已关闭"
                 },
             )
+            StatusLine("视觉观察", if (state.visionEnabled) "已开启" else "按需开启")
             StatusLine("主动消息", if (state.notificationsEnabled) "已开启" else "需要开启")
         }
     }
@@ -402,21 +453,73 @@ private fun RepairRow(title: String, body: String, onRepair: () -> Unit) {
 }
 
 @Composable
-private fun PrivacyPage(onBack: () -> Unit) {
+private fun PrivacyPage(state: CompanionUiState, model: CompanionViewModel, onBack: () -> Unit) {
+    var baseUrl by rememberSaveable(state.visionBaseUrl) { mutableStateOf(state.visionBaseUrl) }
+    var visionModel by rememberSaveable(state.visionModel) { mutableStateOf(state.visionModel) }
+    var apiKey by rememberSaveable { mutableStateOf("") }
+
     TextButton(onClick = onBack) { Text("‹ 返回") }
     Text("隐私与感知", style = MaterialTheme.typography.headlineSmall)
     Text("你决定哥哥可以感知到什么。安全规则始终优先于好奇和主动行为。")
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatusLine("实时 App 感知", "开启后仅记录 App 状态变化")
-            StatusLine("敏感内容保护", "已开启")
-            StatusLine("视觉观察", "尚未开启")
+            StatusLine("实时 App 感知", "仅记录状态变化")
+            StatusLine("敏感内容保护", "始终开启")
+            StatusLine("视觉观察", if (state.visionEnabled) "已开启" else "已暂停")
         }
     }
 
-    Text("视觉观察启用后，普通 App 可以按自然频率偶尔观察；银行、支付、密码、身份认证等默认受保护。相机、相册、聊天等私人类别由用户自己决定。")
-    Text("临时允许敏感 App 时，只对当前 App / 当前会话短时有效；切换 App、锁屏或超时会自动恢复保护。")
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Text("视觉观察", style = MaterialTheme.typography.titleMedium)
+            Text("默认使用智谱的免费视觉模型。只有通过本机隐私规则后，哥哥才可以偶尔看一眼。")
+            OutlinedTextField(
+                value = baseUrl,
+                onValueChange = { baseUrl = it },
+                label = { Text("视觉服务地址") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = visionModel,
+                onValueChange = { visionModel = it },
+                label = { Text("视觉模型") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            OutlinedTextField(
+                value = apiKey,
+                onValueChange = { apiKey = it },
+                label = { Text(if (state.visionHasApiKey) "Token（已保存；留空不修改）" else "Token") },
+                visualTransformation = PasswordVisualTransformation(),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            state.visionSettingsError.takeIf { it.isNotBlank() }?.let {
+                Text(it, color = MaterialTheme.colorScheme.error)
+            }
+            Button(
+                onClick = {
+                    model.saveVisionSettings(baseUrl, visionModel, apiKey)
+                    apiKey = ""
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("保存视觉设置") }
+            OutlinedButton(
+                onClick = { model.setVisionEnabled(!state.visionEnabled) },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (state.visionEnabled) "暂停视觉观察" else "允许哥哥偶尔看屏幕")
+            }
+            if (state.visionHasApiKey) {
+                TextButton(onClick = model::clearVisionToken) { Text("删除已保存的 Token") }
+            }
+        }
+    }
+
+    Text("原始截图只在手机内存中短暂存在，并直接发送到你选择的视觉服务；Our Home Runtime 只接收最小化后的活动摘要，不接收原图。")
+    Text("银行、支付、密码、身份认证等默认受保护；浏览器、相机、相册、聊天等默认谨慎。临时授权在切换 App、锁屏或超时后自动失效。")
 }
 
 @Composable
@@ -509,6 +612,7 @@ private fun Diagnostics(state: CompanionUiState, model: CompanionViewModel) {
             Text("Accessibility: ${if (state.accessibilityEnabled) "enabled" else "required"}")
             Text("Presence current app: ${state.presence?.currentPackage ?: "none"}")
             Text("Presence screen: ${if (state.presence?.screenInteractive == true) "on" else "off"}")
+            Text("Vision: ${if (state.visionEnabled) "enabled" else "disabled"}; token=${if (state.visionHasApiKey) "present" else "absent"}")
             Text("Usage Access: ${if (state.usageAccess) "granted" else "required"}")
             Text("Last API error: ${state.lastError.ifBlank { "none" }}")
             OutlinedButton(
