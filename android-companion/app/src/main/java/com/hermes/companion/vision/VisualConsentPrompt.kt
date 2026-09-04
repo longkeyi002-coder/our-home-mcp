@@ -57,6 +57,11 @@ object VisualConsentPrompt {
         ) == true
         if (existingGrant) return false
 
+        // A manual "仅这一次允许" from the Privacy page is an armed package grant.
+        // Let the capture path bind it to this verified session instead of prompting again.
+        val armedGrant = privacy.armedGrant()?.isUsable(ack.packageName, now) == true
+        if (armedGrant) return false
+
         val sensitivity = AppSensitivityClassifier.classify(ack.packageName)
         val needsConsent = sensitivity == SensitivityClass.PROTECTED ||
             sensitivity == SensitivityClass.PRIVATE ||
