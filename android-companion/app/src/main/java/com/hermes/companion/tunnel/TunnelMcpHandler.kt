@@ -43,7 +43,7 @@ internal class TunnelMcpHandler(private val context: Context) {
         }
         return result.fold(
             onSuccess = { value -> TunnelMcpResult(200, response(id, value)) },
-            onFailure = { error -> TunnelMcpResult(200, error(id, -32602, error.message ?: "Request failed")) },
+            onFailure = { failure -> TunnelMcpResult(200, error(id, -32602, failure.message ?: "Request failed")) },
         )
     }
 
