@@ -1,15 +1,16 @@
 import { JsonStore, parseBoolean } from "./store.js";
 import { z } from "zod";
+import type { BrainAdapter } from "./brain.js";
 import type { LifeContext, ProactiveCandidate, WakeDecision, WakeEvent } from "./types.js";
 import { HermesDecisionEngine } from "./hermes-decision.js";
 import { FcmHttpV1Sender, FcmNotifier } from "./fcm.js";
 
+export type { BrainAdapter } from "./brain.js";
+/** Backward-compatible alias for older callers/tests. */
+export type LifeDecisionEngine = BrainAdapter;
+
 export interface ProactiveNotifier {
   deliver(candidate: ProactiveCandidate): Promise<void>;
-}
-
-export interface LifeDecisionEngine {
-  evaluate(input: { wakeEvent: WakeEvent; context: LifeContext }): Promise<WakeDecision>;
 }
 
 const decisionResponseSchema = z.discriminatedUnion("action", [
@@ -23,7 +24,8 @@ const decisionResponseSchema = z.discriminatedUnion("action", [
   }) }),
 ]);
 
-export class WebhookDecisionEngine implements LifeDecisionEngine {
+/** Generic HTTP brain adapter. Any provider/self-hosted agent can implement this contract. */
+export class WebhookDecisionEngine implements BrainAdapter {
   constructor(
     private readonly url: string,
     private readonly token?: string,
@@ -81,7 +83,7 @@ export async function runProactiveCycle(
   store: JsonStore,
   notifier: ProactiveNotifier,
   asOf = new Date(),
-  decisionEngine?: LifeDecisionEngine,
+  decisionEngine?: BrainAdapter,
 ): Promise<{ heartbeatId: string; wakeEventCount: number; dueCount: number; deliveredCount: number; failedCount: number }> {
   const heartbeat = await store.recordHeartbeat("独立 Life Loop 心跳：检查主动消息队列。");
   const wakeEvents = await store.evaluateWakeEvents(asOf.toISOString());
@@ -163,7 +165,10 @@ if (process.env.OUR_HOME_RUN_WORKER === "true") {
     webhookUrl,
     webhookToken,
   });
-  const decisionEngine = hermesApiUrl && hermesApiKey
+
+  // Provider selection is deliberately outside Runtime domain logic. Hermes is the
+  // current concrete adapter; a generic webhook/self-hosted adapter remains available.
+  const decisionEngine: BrainAdapter | undefined = hermesApiUrl && hermesApiKey
     ? new HermesDecisionEngine({
       apiUrl: hermesApiUrl,
       apiKey: hermesApiKey,
