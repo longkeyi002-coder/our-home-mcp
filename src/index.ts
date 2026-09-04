@@ -6,6 +6,7 @@ import { z } from "zod";
 import { createOurHomeServer } from "./server.js";
 import { JsonStore, parseBoolean } from "./store.js";
 import { createDeviceToken, registerPhone } from "./phone-registration.js";
+import { startProactiveLoopFromEnv } from "./worker.js";
 
 const transportMode = process.env.OUR_HOME_MCP_TRANSPORT ?? "stdio";
 const dataFile = process.env.OUR_HOME_DATA_FILE ?? "./data/our-home.json";
@@ -47,6 +48,12 @@ if (transportMode === "stdio") {
   await startHttpServer();
 } else {
   throw new Error(`Unsupported OUR_HOME_MCP_TRANSPORT: ${transportMode}`);
+}
+
+// The Life Loop shares this exact JsonStore instance with the transport process.
+// There is no standalone worker-owned JsonStore anymore, avoiding cross-process JSON overwrites.
+if (process.env.OUR_HOME_RUN_WORKER === "true") {
+  startProactiveLoopFromEnv(store);
 }
 
 async function startHttpServer(): Promise<void> {

@@ -38,14 +38,6 @@ data class ObservationRequest(
     val clientEventId: String? = null,
 )
 
-data class AppTimelineEntry(
-    val packageName: String,
-    val startedAt: String,
-    val endedAt: String?,
-    val durationMs: Long,
-    val category: String = "other",
-)
-
 @Serializable
 data class ApiAck(val dataSource: String? = null)
 

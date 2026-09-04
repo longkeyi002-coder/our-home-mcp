@@ -31,31 +31,6 @@ class QueueRepository private constructor(
         scheduleUpload = scheduleUpload,
     )
 
-    suspend fun enqueueTimeline(entries: List<AppTimelineEntry>, deviceId: String) {
-        entries.forEach { entry ->
-            val sessionId = "timeline:$deviceId:${entry.startedAt}:${entry.packageName}"
-            enqueueObservation(
-                ObservationRequest(
-                    kind = "app_timeline",
-                    label = entry.packageName,
-                    value = entry.packageName,
-                    observedAt = entry.startedAt,
-                    deviceId = deviceId,
-                    metadata = mapOf(
-                        "startedAt" to entry.startedAt,
-                        "endedAt" to (entry.endedAt ?: ""),
-                        "durationMs" to entry.durationMs.toString(),
-                        "category" to entry.category,
-                    ),
-                    clientEventId = sessionId,
-                ),
-                dedupeKey = sessionId,
-                scheduleUpload = false,
-            )
-        }
-        if (entries.isNotEmpty()) UploadWorker.enqueue(settings.context)
-    }
-
     suspend fun enqueueUsageSummary(summary: UsageTimelineSummary, deviceId: String, scheduleUpload: Boolean = true) {
         val day = LocalDate.now().toString()
         val bucket = summary.observedAt / (60 * 60 * 1000L)
@@ -83,27 +58,6 @@ class QueueRepository private constructor(
             scheduleUpload = scheduleUpload,
         )
     }
-
-    suspend fun enqueueSteps(steps: Long, deviceId: String, observedAt: String) {
-        enqueueObservation(
-            ObservationRequest(
-                kind = "steps",
-                label = "今日步数",
-                value = steps.toString(),
-                observedAt = observedAt,
-                deviceId = deviceId,
-                metadata = mapOf("unit" to "steps", "day" to LocalDate.now().toString()),
-            ),
-            dedupeKey = "steps:$deviceId:${LocalDate.now()}",
-        )
-    }
-
-    private suspend fun enqueueObservation(request: ObservationRequest, dedupeKey: String, scheduleUpload: Boolean = true) = enqueue(
-        type = TYPE_OBSERVATION,
-        payload = json.encodeToString(request),
-        dedupeKey = dedupeKey,
-        scheduleUpload = scheduleUpload,
-    )
 
     suspend fun pendingCount(): Int = dao.count()
 

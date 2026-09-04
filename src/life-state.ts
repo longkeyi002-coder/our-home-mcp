@@ -91,12 +91,15 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
   const lastObservedAt = latestAny?.observedAt ?? null;
   const lastPhoneActivityAt = latestActivity?.observedAt ?? null;
   const devicePresence = asDevicePresence(latestDevice?.value);
-  const currentForegroundPackage = foregroundPackage(latestForeground);
+  const rawForegroundPackage = foregroundPackage(latestForeground);
+  const foregroundAgeMs = latestForeground ? asOfMs - timestamp(latestForeground.observedAt) : Number.POSITIVE_INFINITY;
+  const hasRecentForeground = Boolean(rawForegroundPackage) && foregroundAgeMs <= LIFE_STATE_ACTIVITY_WINDOW_MS;
+  const currentForegroundPackage = hasRecentForeground ? rawForegroundPackage : null;
   const batteryPercent = metadataNumber(latestDevice, "batteryPercent");
   const charging = metadataBoolean(latestDevice, "charging");
   const connectivityState = asConnectivity(latestConnectivity?.metadata?.connectivityState);
   const activityAgeMs = lastPhoneActivityAt ? asOfMs - timestamp(lastPhoneActivityAt) : Number.POSITIVE_INFINITY;
-  const hasRecentActivity = Boolean(currentForegroundPackage) && activityAgeMs <= LIFE_STATE_ACTIVITY_WINDOW_MS;
+  const hasRecentActivity = hasRecentForeground;
   const hasRecentDevice = Boolean(latestDevice);
   const reasons: string[] = [];
   let currentActivity: LifeActivity = "unknown";

@@ -48,6 +48,16 @@ test("periodic usage summary drives life state without a screen_app observation"
   assert.equal(state.connectivityState, "online");
 });
 
+test("fresh screen_on does not revive a stale foreground package", () => {
+  const state = deriveLifeState([
+    observation({ kind: "screen_app", observedAt: "2026-09-03T11:50:00.000Z", value: "com.example.old" }),
+    observation({ kind: "device_presence", observedAt: "2026-09-03T11:59:50.000Z", value: "screen_on", metadata: { connectivityState: "online" } }),
+  ], asOf);
+  assert.equal(state.foregroundPackage, null);
+  assert.notEqual(state.currentActivity, "active_on_phone");
+  assert.equal(state.lastPhoneActivityAt, "2026-09-03T11:59:50.000Z");
+});
+
 test("stale foreground app is not treated as current", () => {
   const state = deriveLifeState([
     observation({ kind: "device_presence", observedAt: "2026-09-03T11:40:00.000Z", value: "screen_off", metadata: { batteryPercent: 40, charging: true, connectivityState: "online" } }),

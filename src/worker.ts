@@ -1,4 +1,4 @@
-import { JsonStore, parseBoolean } from "./store.js";
+import type { JsonStore } from "./store.js";
 import { z } from "zod";
 import type { LifeContext, ProactiveCandidate, WakeDecision, WakeEvent } from "./types.js";
 import { HermesDecisionEngine } from "./hermes-decision.js";
@@ -11,6 +11,8 @@ export interface ProactiveNotifier {
 export interface LifeDecisionEngine {
   evaluate(input: { wakeEvent: WakeEvent; context: LifeContext }): Promise<WakeDecision>;
 }
+
+export const DEFAULT_OUTBOUND_TIMEOUT_MS = 30_000;
 
 const decisionResponseSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("ignore") }),
@@ -27,6 +29,7 @@ export class WebhookDecisionEngine implements LifeDecisionEngine {
   constructor(
     private readonly url: string,
     private readonly token?: string,
+    private readonly timeoutMs = DEFAULT_OUTBOUND_TIMEOUT_MS,
   ) {}
 
   async evaluate(input: { wakeEvent: WakeEvent; context: LifeContext }) {
@@ -36,6 +39,7 @@ export class WebhookDecisionEngine implements LifeDecisionEngine {
       method: "POST",
       headers,
       body: JSON.stringify(input),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) throw new Error(`Decision engine returned HTTP ${response.status}`);
     const parsed = decisionResponseSchema.safeParse(await response.json());
@@ -54,6 +58,7 @@ export class WebhookNotifier implements ProactiveNotifier {
   constructor(
     private readonly url: string,
     private readonly token?: string,
+    private readonly timeoutMs = DEFAULT_OUTBOUND_TIMEOUT_MS,
   ) {}
 
   async deliver(candidate: ProactiveCandidate): Promise<void> {
@@ -72,6 +77,7 @@ export class WebhookNotifier implements ProactiveNotifier {
         dueAt: candidate.dueAt,
         source: candidate.source,
       }),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) throw new Error(`Notifier returned HTTP ${response.status}`);
   }
@@ -166,20 +172,6 @@ export async function runProactiveCycle(
   return { heartbeatId: heartbeat.id, wakeEventCount: wakeEvents.length, dueCount: due.length, deliveredCount, failedCount };
 }
 
-const dataFile = process.env.OUR_HOME_DATA_FILE ?? "./data/our-home.json";
-const seed = parseBoolean(process.env.OUR_HOME_SEED, true);
-const intervalMs = Number(process.env.OUR_HOME_WORKER_INTERVAL_MS ?? "60000");
-const webhookUrl = process.env.OUR_HOME_NOTIFY_WEBHOOK_URL;
-const webhookToken = process.env.OUR_HOME_NOTIFY_WEBHOOK_TOKEN;
-const decisionUrl = process.env.OUR_HOME_DECISION_WEBHOOK_URL;
-const decisionToken = process.env.OUR_HOME_DECISION_WEBHOOK_TOKEN;
-const hermesApiUrl = process.env.OUR_HOME_HERMES_API_URL;
-const hermesApiKey = process.env.OUR_HOME_HERMES_API_KEY;
-const hermesConversation = process.env.OUR_HOME_HERMES_CONVERSATION;
-const hermesModel = process.env.OUR_HOME_HERMES_MODEL;
-const firebaseProjectId = process.env.OUR_HOME_FIREBASE_PROJECT_ID;
-const googleCredentials = process.env.GOOGLE_APPLICATION_CREDENTIALS;
-
 export function selectNotifier(
   store: JsonStore,
   config: {
@@ -187,49 +179,92 @@ export function selectNotifier(
     googleCredentials?: string;
     webhookUrl?: string;
     webhookToken?: string;
+    timeoutMs?: number;
   },
 ): ProactiveNotifier {
+  const timeoutMs = config.timeoutMs ?? DEFAULT_OUTBOUND_TIMEOUT_MS;
   if (config.firebaseProjectId && config.googleCredentials) {
-    return new FcmNotifier(store, new FcmHttpV1Sender(config.firebaseProjectId, config.googleCredentials));
+    return new FcmNotifier(store, new FcmHttpV1Sender(config.firebaseProjectId, config.googleCredentials, fetch, timeoutMs));
   }
   return config.webhookUrl
-    ? new WebhookNotifier(config.webhookUrl, config.webhookToken)
+    ? new WebhookNotifier(config.webhookUrl, config.webhookToken, timeoutMs)
     : new NoopNotifier();
 }
 
-if (process.env.OUR_HOME_RUN_WORKER === "true") {
+export interface ProactiveLoopHandle {
+  stop(): void;
+}
+
+export interface ProactiveLoopOptions {
+  intervalMs: number;
+  notifier: ProactiveNotifier;
+  decisionEngine?: LifeDecisionEngine;
+  now?: () => Date;
+  log?: (message: string) => void;
+}
+
+/**
+ * Runs exactly one cycle at a time. The next timer is scheduled only after the
+ * current cycle has settled, so a slow Hermes/webhook call cannot overlap the next cycle.
+ */
+export function startProactiveLoop(store: JsonStore, options: ProactiveLoopOptions): ProactiveLoopHandle {
+  let stopped = false;
+  let timer: NodeJS.Timeout | undefined;
+  const now = options.now ?? (() => new Date());
+  const log = options.log ?? ((message: string) => process.stderr.write(`${message}\n`));
+
+  const run = async () => {
+    try {
+      const result = await runProactiveCycle(store, options.notifier, now(), options.decisionEngine);
+      log(`[our-home] heartbeat=${result.heartbeatId} due=${result.dueCount} delivered=${result.deliveredCount} failed=${result.failedCount}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown worker error";
+      log(`[our-home] worker cycle failed: ${message}`);
+    } finally {
+      if (!stopped) timer = setTimeout(() => void run(), options.intervalMs);
+    }
+  };
+
+  void run();
+  return {
+    stop() {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+    },
+  };
+}
+
+export function startProactiveLoopFromEnv(store: JsonStore): ProactiveLoopHandle {
+  const intervalMs = Number(process.env.OUR_HOME_WORKER_INTERVAL_MS ?? "60000");
+  const timeoutMs = Number(process.env.OUR_HOME_OUTBOUND_TIMEOUT_MS ?? String(DEFAULT_OUTBOUND_TIMEOUT_MS));
   if (!Number.isInteger(intervalMs) || intervalMs < 5_000) {
     throw new Error("OUR_HOME_WORKER_INTERVAL_MS must be an integer of at least 5000ms");
   }
+  if (!Number.isInteger(timeoutMs) || timeoutMs < 1_000) {
+    throw new Error("OUR_HOME_OUTBOUND_TIMEOUT_MS must be an integer of at least 1000ms");
+  }
 
-  const store = await JsonStore.open(dataFile, seed);
   const notifier = selectNotifier(store, {
-    firebaseProjectId,
-    googleCredentials,
-    webhookUrl,
-    webhookToken,
+    firebaseProjectId: process.env.OUR_HOME_FIREBASE_PROJECT_ID,
+    googleCredentials: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+    webhookUrl: process.env.OUR_HOME_NOTIFY_WEBHOOK_URL,
+    webhookToken: process.env.OUR_HOME_NOTIFY_WEBHOOK_TOKEN,
+    timeoutMs,
   });
+  const hermesApiUrl = process.env.OUR_HOME_HERMES_API_URL;
+  const hermesApiKey = process.env.OUR_HOME_HERMES_API_KEY;
+  const decisionUrl = process.env.OUR_HOME_DECISION_WEBHOOK_URL;
   const decisionEngine = hermesApiUrl && hermesApiKey
     ? new HermesDecisionEngine({
       apiUrl: hermesApiUrl,
       apiKey: hermesApiKey,
-      conversation: hermesConversation,
-      model: hermesModel,
+      conversation: process.env.OUR_HOME_HERMES_CONVERSATION,
+      model: process.env.OUR_HOME_HERMES_MODEL,
+      timeoutMs,
     })
     : decisionUrl
-      ? new WebhookDecisionEngine(decisionUrl, decisionToken)
+      ? new WebhookDecisionEngine(decisionUrl, process.env.OUR_HOME_DECISION_WEBHOOK_TOKEN, timeoutMs)
       : undefined;
 
-  const cycle = async () => {
-    const result = await runProactiveCycle(store, notifier, new Date(), decisionEngine);
-    process.stderr.write(
-      `[our-home] heartbeat=${result.heartbeatId} due=${result.dueCount} delivered=${result.deliveredCount} failed=${result.failedCount}\n`,
-    );
-  };
-
-  await cycle();
-  setInterval(() => void cycle().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : "Unknown worker error";
-    process.stderr.write(`[our-home] worker cycle failed: ${message}\n`);
-  }), intervalMs);
+  return startProactiveLoop(store, { intervalMs, notifier, decisionEngine });
 }

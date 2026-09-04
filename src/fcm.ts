@@ -30,6 +30,7 @@ export class FcmHttpV1Sender implements FcmSender {
     private readonly projectId: string,
     private readonly credentialsPath: string,
     private readonly fetcher: typeof fetch = fetch,
+    private readonly timeoutMs = 30_000,
   ) {}
 
   async send(input: FcmSendInput): Promise<void> {
@@ -40,6 +41,7 @@ export class FcmHttpV1Sender implements FcmSender {
         method: "POST",
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         body: JSON.stringify({ message: input }),
+        signal: AbortSignal.timeout(this.timeoutMs),
       },
     );
     if (!response.ok) throw new Error(`FCM send failed with HTTP ${response.status}`);
@@ -67,6 +69,7 @@ export class FcmHttpV1Sender implements FcmSender {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }),
+      signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) throw new Error(`FCM authentication failed with HTTP ${response.status}`);
     const value = await response.json() as { access_token?: unknown; expires_in?: unknown };
