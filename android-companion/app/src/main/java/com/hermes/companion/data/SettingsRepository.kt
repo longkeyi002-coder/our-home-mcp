@@ -10,7 +10,13 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     private val secure = SecureTokenStore(context)
 
     fun serverUrl(): String = prefs.getString(KEY_SERVER_URL, "") ?: ""
-    fun saveServerUrl(value: String) { prefs.edit().putString(KEY_SERVER_URL, value.trim()).apply() }
+    fun saveServerUrl(value: String) {
+        val normalized = value.trim()
+        if (TelemetryPolicy.shouldInvalidateDeviceToken(serverUrl(), normalized)) {
+            secure.put(KEY_DEVICE_TOKEN, null)
+        }
+        prefs.edit().putString(KEY_SERVER_URL, normalized).apply()
+    }
     fun deviceId(): String = prefs.getString(KEY_DEVICE_ID, null) ?: "android-${UUID.randomUUID()}".also { prefs.edit().putString(KEY_DEVICE_ID, it).apply() }
     fun bootstrapToken(): String? = secure.get(KEY_BOOTSTRAP_TOKEN)
     fun saveBootstrapToken(value: String) {
