@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { accessSync, constants } from "node:fs";
 
 export type RuntimeNotifierKind = "fcm" | "webhook" | "none";
 export type RuntimeBrainKind = "hermes" | "webhook" | "none";
@@ -8,9 +8,6 @@ export interface RuntimeMessagingStatus {
   notifier: RuntimeNotifierKind;
   brain: RuntimeBrainKind;
   fcmConfigured: boolean;
-}
-
-export interface ProbedRuntimeMessagingStatus extends RuntimeMessagingStatus {
   fcmCredentialsReadable: boolean;
 }
 
@@ -18,13 +15,28 @@ function enabled(value: string | undefined): boolean {
   return ["1", "true", "yes", "on"].includes(value?.trim().toLowerCase() ?? "");
 }
 
+function defaultCanRead(path: string): boolean {
+  try {
+    accessSync(path, constants.R_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Non-secret P2 capability summary for authenticated diagnostics.
- * It intentionally reports only whether required configuration exists, never
- * credential paths, tokens, project ids, webhook URLs, or API keys.
+ * It intentionally reports only whether required configuration exists and the
+ * configured credential file is readable; it never returns paths, tokens,
+ * project ids, webhook URLs, or API keys.
  */
-export function deriveRuntimeMessagingStatus(env: NodeJS.ProcessEnv): RuntimeMessagingStatus {
-  const fcmConfigured = Boolean(env.OUR_HOME_FIREBASE_PROJECT_ID?.trim() && env.GOOGLE_APPLICATION_CREDENTIALS?.trim());
+export function deriveRuntimeMessagingStatus(
+  env: NodeJS.ProcessEnv,
+  canRead: (path: string) => boolean = defaultCanRead,
+): RuntimeMessagingStatus {
+  const credentialsPath = env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+  const fcmConfigured = Boolean(env.OUR_HOME_FIREBASE_PROJECT_ID?.trim() && credentialsPath);
+  const fcmCredentialsReadable = Boolean(fcmConfigured && credentialsPath && canRead(credentialsPath));
   const notifier: RuntimeNotifierKind = fcmConfigured
     ? "fcm"
     : env.OUR_HOME_NOTIFY_WEBHOOK_URL?.trim()
@@ -42,23 +54,6 @@ export function deriveRuntimeMessagingStatus(env: NodeJS.ProcessEnv): RuntimeMes
     notifier,
     brain,
     fcmConfigured,
+    fcmCredentialsReadable,
   };
-}
-
-export async function probeRuntimeMessagingStatus(
-  env: NodeJS.ProcessEnv,
-  accessFile: (path: string) => Promise<unknown> = access,
-): Promise<ProbedRuntimeMessagingStatus> {
-  const status = deriveRuntimeMessagingStatus(env);
-  const credentialsPath = env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
-  let fcmCredentialsReadable = false;
-  if (status.fcmConfigured && credentialsPath) {
-    try {
-      await accessFile(credentialsPath);
-      fcmCredentialsReadable = true;
-    } catch {
-      fcmCredentialsReadable = false;
-    }
-  }
-  return { ...status, fcmCredentialsReadable };
 }
