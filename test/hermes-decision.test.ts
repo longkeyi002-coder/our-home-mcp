@@ -84,7 +84,7 @@ test("proactive Hermes decision uses existing atomic apply and retry cannot dupl
   assert.equal(store.snapshot().proactiveQueue.filter((item) => item.wakeEventId === event.id).length, 1);
 });
 
-test("failed Hermes activation retries the same wake event exactly once", async (t) => {
+test("failed Hermes activation retries once after the five minute brain cooldown", async (t) => {
   const decision = { action: "proactive_message", candidate: { title: "提醒", message: "休息一下", reason: "wake retry" } };
   let callCount = 0;
   const fake = await fakeHermes((_request, response) => {
@@ -104,14 +104,22 @@ test("failed Hermes activation retries the same wake event exactly once", async 
   assert.equal(store.snapshot().wakeEvents.find((item) => item.id === event.id)?.status, "pending");
   assert.equal(store.snapshot().proactiveQueue.filter((item) => item.wakeEventId === event.id).length, 0);
 
+  // The failed claim intentionally remains leased for five minutes, so a cycle
+  // one minute later must not call Hermes again.
   await runProactiveCycle(store, { deliver: async () => {} }, new Date(at(4)), engine);
+  assert.equal(fake.requests.length, 1);
+  assert.equal(store.snapshot().wakeEvents.find((item) => item.id === event.id)?.status, "pending");
+
+  // At exactly five minutes after the failed claim, the lease expires and the
+  // same wake event may be claimed once more.
+  await runProactiveCycle(store, { deliver: async () => {} }, new Date(at(8)), engine);
   const candidates = store.snapshot().proactiveQueue.filter((item) => item.wakeEventId === event.id);
   assert.equal(store.snapshot().wakeEvents.find((item) => item.id === event.id)?.status, "handled");
   assert.equal(candidates.length, 1);
   assert.equal(candidates[0]?.wakeEventId, event.id);
   assert.equal(fake.requests.length, 2);
 
-  await runProactiveCycle(store, { deliver: async () => {} }, new Date(at(5)), engine);
+  await runProactiveCycle(store, { deliver: async () => {} }, new Date(at(9)), engine);
   assert.equal(fake.requests.length, 2);
   assert.equal(store.snapshot().proactiveQueue.filter((item) => item.wakeEventId === event.id).length, 1);
 });
