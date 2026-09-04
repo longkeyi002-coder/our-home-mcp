@@ -2,6 +2,7 @@ package com.hermes.companion.vision
 
 import android.util.Base64
 import java.io.IOException
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
@@ -37,7 +38,7 @@ data class VisualObservationSummary(
  */
 class ZhipuVisionProvider(
     private val settingsStore: VisionProviderSettingsStore,
-    private val client: OkHttpClient = OkHttpClient(),
+    private val client: OkHttpClient = defaultClient(),
 ) : VisionProvider {
     override suspend fun analyze(frame: EphemeralVisualFrame): VisualObservationSummary = withContext(Dispatchers.IO) {
         try {
@@ -74,6 +75,13 @@ class ZhipuVisionProvider(
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
         private val json = Json { ignoreUnknownKeys = true }
         const val PROVIDER_ID = "zhipu"
+
+        private fun defaultClient(): OkHttpClient = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .callTimeout(35, TimeUnit.SECONDS)
+            .build()
 
         /**
          * The provider is explicitly told not to transcribe private screen text. The job is
@@ -118,46 +126,32 @@ class ZhipuVisionProvider(
                 ?.trim()
                 ?.takeIf { it.isNotEmpty() }
                 ?: throw IOException("vision provider response has no content")
-
-            val summaryJson = stripJsonFence(content)
-            val summary = json.parseToJsonElement(summaryJson).jsonObject
-            return parseSummary(summary, model)
-        }
-
-        private fun parseSummary(value: JsonObject, model: String): VisualObservationSummary {
-            val activity = value["activity"]?.jsonPrimitive?.content?.trim()?.lowercase()
-                ?.takeIf { it in ALLOWED_ACTIVITIES }
-                ?: "unknown"
-            val content = value["content"]?.jsonPrimitive?.content?.trim()
-                ?.replace(Regex("\\s+"), " ")
-                ?.take(MAX_CONTENT_LENGTH)
-                ?.takeIf { it.isNotEmpty() }
-                ?: ""
-            val confidence = value["confidence"]?.jsonPrimitive?.doubleOrNull
-                ?.coerceIn(0.0, 1.0)
-                ?: 0.0
+            val clean = content
+                .removePrefix("```json").removePrefix("```")
+                .removeSuffix("```")
+                .trim()
+            val parsed = json.parseToJsonElement(clean).jsonObject
+            val activity = parsed["activity"]?.jsonPrimitive?.content?.trim().orEmpty()
+            val safeActivity = activity.takeIf(ALLOWED_ACTIVITIES::contains) ?: "unknown"
+            val genericContent = sanitizeContent(parsed["content"]?.jsonPrimitive?.content.orEmpty())
+            val confidence = parsed["confidence"]?.jsonPrimitive?.doubleOrNull?.coerceIn(0.0, 1.0) ?: 0.0
             return VisualObservationSummary(
-                activity = activity,
-                content = content,
+                activity = safeActivity,
+                content = genericContent,
                 confidence = confidence,
                 provider = PROVIDER_ID,
-                model = model.take(120),
+                model = model,
             )
         }
 
-        private fun stripJsonFence(value: String): String {
-            if (!value.startsWith("```")) return value
-            return value
-                .removePrefix("```json")
-                .removePrefix("```JSON")
-                .removePrefix("```")
-                .removeSuffix("```")
-                .trim()
-        }
+        private fun sanitizeContent(value: String): String = value
+            .replace(Regex("[\\r\\n\\t]+"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+            .take(160)
 
         private val ALLOWED_ACTIVITIES = setOf(
             "gaming", "video", "social", "shopping", "work", "reading", "navigation", "other", "unknown",
         )
-        private const val MAX_CONTENT_LENGTH = 240
     }
 }
