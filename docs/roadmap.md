@@ -48,6 +48,39 @@ No tap-to-upload dependency for normal telemetry.
 
 ---
 
+## OH-P1.5 — Presence + Visual Observation
+
+```text
+Android realtime presence
+→ Context Understanding
+→ Curiosity
+→ Sensitive Guard
+→ optional Visual Observation
+→ structured context
+```
+
+Required:
+
+- foreground App transition events;
+- screen on/off + lock/unlock;
+- dwell sessions;
+- local debounce/dedupe/offline queue;
+- UsageEvents reconciliation fallback;
+- Accessibility service with `canRetrieveWindowContent=false`;
+- per-App visual policy;
+- protected banking/payment/password/authentication defaults;
+- temporary visual grants that expire automatically;
+- Android 11+ optional screenshot capability;
+- raw screenshot minimal lifetime;
+- structured visual summaries with provenance;
+- permission onboarding and OEM repair guidance;
+- Curiosity cooldown/budget instead of fixed screenshot cron;
+- real-device acceptance for long-dwell observation and sensitive-app blocking.
+
+Detailed plan: `docs/OH_PRESENCE_VISUAL_PLAN.md`.
+
+---
+
 ## OH-P2 — Wake + proactive-message minimum loop
 
 ```text
@@ -68,7 +101,8 @@ Required:
 - retryable provider failure;
 - retryable notification failure;
 - event trace;
-- quiet/ignore policy foundations.
+- quiet/ignore policy foundations;
+- notification payload can return the user to the corresponding Our Home Chat/message destination rather than only opening the Companion diagnostics surface.
 
 ---
 
@@ -188,5 +222,7 @@ V0.1 requires all of the following to be demonstrably true:
 3. Earth and AI World factual queries cannot contaminate each other.
 4. Mock Brain and at least one real Brain Provider can run against the same Runtime boundary.
 5. Phase Review is completed and the Design → Test Matrix has no unexplained gaps for V0.1 invariants.
+
+Presence / Visual work may progress between OH-P1 and OH-P2, but it must preserve the same rule: deterministic sensing/policy stays cheap, Vision/Brain is only invoked when a bounded reason exists.
 
 Remote live-read/control can progress in parallel after the life chain is stable, but it must not become the dependency that keeps Earth telemetry alive.
