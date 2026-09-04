@@ -63,7 +63,7 @@ test("Hermes activation sends one complete wake context with bearer auth and sta
   assert.equal(fake.requests[0]!.headers.authorization, "Bearer only-from-env");
   assert.equal(fake.requests[0]!.body.conversation, "named-life");
   assert.equal(fake.requests[0]!.body.model, "hermes-agent");
-  assert.match(fake.requests[0]!.body.input, /Hermes Life Runtime wake activation/);
+  assert.match(fake.requests[0]!.body.input, /AI Life Runtime wake activation/);
   for (const value of [event.id, event.type, event.reason, event.observedAt, "wakeEvent", "context", "lifeState", "previousLifeState"]) {
     assert.match(fake.requests[0]!.body.input, new RegExp(String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
