@@ -1,3 +1,5 @@
+import { access } from "node:fs/promises";
+
 export type RuntimeNotifierKind = "fcm" | "webhook" | "none";
 export type RuntimeBrainKind = "hermes" | "webhook" | "none";
 
@@ -6,6 +8,10 @@ export interface RuntimeMessagingStatus {
   notifier: RuntimeNotifierKind;
   brain: RuntimeBrainKind;
   fcmConfigured: boolean;
+}
+
+export interface ProbedRuntimeMessagingStatus extends RuntimeMessagingStatus {
+  fcmCredentialsReadable: boolean;
 }
 
 function enabled(value: string | undefined): boolean {
@@ -37,4 +43,22 @@ export function deriveRuntimeMessagingStatus(env: NodeJS.ProcessEnv): RuntimeMes
     brain,
     fcmConfigured,
   };
+}
+
+export async function probeRuntimeMessagingStatus(
+  env: NodeJS.ProcessEnv,
+  accessFile: (path: string) => Promise<unknown> = access,
+): Promise<ProbedRuntimeMessagingStatus> {
+  const status = deriveRuntimeMessagingStatus(env);
+  const credentialsPath = env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+  let fcmCredentialsReadable = false;
+  if (status.fcmConfigured && credentialsPath) {
+    try {
+      await accessFile(credentialsPath);
+      fcmCredentialsReadable = true;
+    } catch {
+      fcmCredentialsReadable = false;
+    }
+  }
+  return { ...status, fcmCredentialsReadable };
 }
