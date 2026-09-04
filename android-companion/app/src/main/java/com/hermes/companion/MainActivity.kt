@@ -56,6 +56,9 @@ import com.hermes.companion.platform.UsageTimelineReader
 import com.hermes.companion.platform.UsageTimelineSummary
 import com.hermes.companion.presence.PresenceSnapshot
 import com.hermes.companion.presence.PresenceStateStore
+import com.hermes.companion.push.ProactiveMessageHealth
+import com.hermes.companion.push.PushHealth
+import com.hermes.companion.push.PushRegistration
 import com.hermes.companion.vision.VisionProviderSettingsStore
 import java.time.Instant
 import java.util.UUID
@@ -101,6 +104,10 @@ data class CompanionUiState(
     val presence: PresenceSnapshot? = null,
     val accessibilityEnabled: Boolean = false,
     val notificationsEnabled: Boolean = false,
+    val pushRegistrationState: String = SettingsRepository.PUSH_NEVER,
+    val lastPushRegistrationAttempt: Long = 0,
+    val lastPushRegistrationSuccess: Long = 0,
+    val lastPushRegistrationError: String = "",
     val batteryOptimizationIgnored: Boolean = false,
     val colorOsFamily: Boolean = false,
     val visionEnabled: Boolean = false,
@@ -139,6 +146,10 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
             presence = presenceStore.snapshot(),
             accessibilityEnabled = PermissionNavigator.accessibilityEnabled(appContext),
             notificationsEnabled = PermissionNavigator.notificationsEnabled(appContext),
+            pushRegistrationState = settings.pushRegistrationState(),
+            lastPushRegistrationAttempt = settings.lastPushRegistrationAttempt(),
+            lastPushRegistrationSuccess = settings.lastPushRegistrationSuccess(),
+            lastPushRegistrationError = settings.lastPushRegistrationError(),
             batteryOptimizationIgnored = PermissionNavigator.batteryOptimizationIgnored(appContext),
             colorOsFamily = PermissionNavigator.isColorOsFamily(),
             visionEnabled = vision.enabled,
@@ -172,6 +183,10 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
                 presence = presenceStore.snapshot(),
                 accessibilityEnabled = PermissionNavigator.accessibilityEnabled(appContext),
                 notificationsEnabled = PermissionNavigator.notificationsEnabled(appContext),
+                pushRegistrationState = settings.pushRegistrationState(),
+                lastPushRegistrationAttempt = settings.lastPushRegistrationAttempt(),
+                lastPushRegistrationSuccess = settings.lastPushRegistrationSuccess(),
+                lastPushRegistrationError = settings.lastPushRegistrationError(),
                 batteryOptimizationIgnored = PermissionNavigator.batteryOptimizationIgnored(appContext),
                 colorOsFamily = PermissionNavigator.isColorOsFamily(),
                 visionEnabled = vision.enabled,
@@ -199,6 +214,11 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
             if (result.error == null) UploadWorker.enqueueIfConfigured(appContext)
             refresh()
         }
+    }
+
+    fun retryPushRegistration() {
+        PushRegistration.refresh(appContext)
+        refresh()
     }
 
     fun saveVisionSettings(baseUrl: String, model: String, apiKey: String) {
@@ -397,9 +417,26 @@ private fun HomePage(
         }
     }
 
-    if (!state.notificationsEnabled) {
-        RepairRow("主动消息还没开启", "允许后，哥哥不在 App 前台时也能通过系统通知找到你。", onRequestNotifications)
+    val proactiveHealth = PushHealth.evaluate(state.notificationsEnabled, state.pushRegistrationState)
+    when (proactiveHealth) {
+        ProactiveMessageHealth.NOTIFICATION_PERMISSION_REQUIRED -> {
+            RepairRow("主动消息还没开启", "允许通知后，哥哥不在 App 前台时也能通过系统通知找到你。", onRequestNotifications)
+        }
+        ProactiveMessageHealth.PUSH_ERROR -> {
+            RepairRow(
+                "主动消息需要修复",
+                state.lastPushRegistrationError.ifBlank { "通知权限已开启，但手机还没成功登记主动消息地址。" },
+                model::retryPushRegistration,
+            )
+        }
+        ProactiveMessageHealth.PUSH_NOT_READY -> {
+            RepairRow("主动消息还在连接", "通知权限已经开启，再连接一次手机的主动消息地址。", model::retryPushRegistration)
+        }
+        ProactiveMessageHealth.REGISTERING,
+        ProactiveMessageHealth.READY,
+        -> Unit
     }
+
     if (!state.usageAccess) {
         RepairRow("补充使用记录", "用于低频校验 App 使用时间线，不负责实时感知。", onOpenUsage)
     }
@@ -416,6 +453,7 @@ private fun HomePage(
 @Composable
 private fun PresenceCard(state: CompanionUiState) {
     val presence = state.presence
+    val proactiveHealth = PushHealth.evaluate(state.notificationsEnabled, state.pushRegistrationState)
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             StatusLine("App 感知", if (state.accessibilityEnabled) "已开启" else "需要开启")
@@ -428,7 +466,7 @@ private fun PresenceCard(state: CompanionUiState) {
                 },
             )
             StatusLine("视觉观察", if (state.visionEnabled) "已开启" else "按需开启")
-            StatusLine("主动消息", if (state.notificationsEnabled) "已开启" else "需要开启")
+            StatusLine("主动消息", PushHealth.userLabel(proactiveHealth))
         }
     }
 }
@@ -447,7 +485,7 @@ private fun RepairRow(title: String, body: String, onRepair: () -> Unit) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(title, style = MaterialTheme.typography.titleMedium)
             Text(body, style = MaterialTheme.typography.bodyMedium)
-            OutlinedButton(onClick = onRepair, modifier = Modifier.fillMaxWidth()) { Text("去开启") }
+            OutlinedButton(onClick = onRepair, modifier = Modifier.fillMaxWidth()) { Text("去修复") }
         }
     }
 }
@@ -538,6 +576,7 @@ private fun AdvancedPage(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusLine("Our Home Runtime", if (state.connected) "已连接" else "需要检查")
+            StatusLine("主动消息", PushHealth.userLabel(PushHealth.evaluate(state.notificationsEnabled, state.pushRegistrationState)))
             StatusLine("后台周期", state.periodicWorkerStatus)
             StatusLine("待发送事件", state.pending.toString())
         }
@@ -548,6 +587,9 @@ private fun AdvancedPage(
     }
     OutlinedButton(onClick = onOpenBattery, modifier = Modifier.fillMaxWidth()) {
         Text(if (state.batteryOptimizationIgnored) "后台限制：已放宽" else "检查后台运行")
+    }
+    OutlinedButton(onClick = model::retryPushRegistration, modifier = Modifier.fillMaxWidth()) {
+        Text("重新连接主动消息")
     }
     OutlinedButton(onClick = model::sendHeartbeat, modifier = Modifier.fillMaxWidth()) {
         Text("开发验收：立即发送心跳")
@@ -599,6 +641,10 @@ private fun Diagnostics(state: CompanionUiState, model: CompanionViewModel) {
         detectedForegroundPackage = state.device.foregroundPackage,
         usageCurrentPackage = state.usage?.currentPackageName,
         lastApiError = state.lastError,
+        pushRegistrationState = state.pushRegistrationState,
+        lastPushRegistrationAttempt = state.lastPushRegistrationAttempt,
+        lastPushRegistrationSuccess = state.lastPushRegistrationSuccess,
+        lastPushRegistrationError = state.lastPushRegistrationError,
     )
 
     Card(modifier = Modifier.fillMaxWidth()) {
@@ -615,6 +661,11 @@ private fun Diagnostics(state: CompanionUiState, model: CompanionViewModel) {
             Text("Presence current app: ${state.presence?.currentPackage ?: "none"}")
             Text("Presence screen: ${if (state.presence?.screenInteractive == true) "on" else "off"}")
             Text("Vision: ${if (state.visionEnabled) "enabled" else "disabled"}; token=${if (state.visionHasApiKey) "present" else "absent"}")
+            Text("System notifications: ${if (state.notificationsEnabled) "enabled" else "required"}")
+            Text("Push registration: ${state.pushRegistrationState}")
+            Text("Last push registration attempt: ${state.lastPushRegistrationAttempt.asTime()}")
+            Text("Last push registration success: ${state.lastPushRegistrationSuccess.asTime()}")
+            Text("Last push registration error: ${state.lastPushRegistrationError.ifBlank { "none" }}")
             Text("Usage Access: ${if (state.usageAccess) "granted" else "required"}")
             Text("Last API error: ${state.lastError.ifBlank { "none" }}")
             OutlinedButton(
