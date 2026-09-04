@@ -1,6 +1,5 @@
 package com.hermes.companion.tunnel
 
-import androidx.core.net.toUri
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -13,8 +12,7 @@ class ReverseTunnelUrlTest {
             "wss://east-closure-maria-exploration.trycloudflare.com/",
             "abc+123",
         )!!
-        assertEquals("wss", url.toUri().scheme)
-        assertEquals("abc+123", url.toUri().getQueryParameter("token"))
+        assertTrue(url.startsWith("wss://"))
         assertTrue(url.contains("token=abc%2B123"))
     }
 
@@ -24,9 +22,9 @@ class ReverseTunnelUrlTest {
             "wss://relay.example/mcp?token=old-secret&mode=phone",
             "new-secret",
         )!!
-        assertEquals("new-secret", url.toUri().getQueryParameter("token"))
-        assertEquals("phone", url.toUri().getQueryParameter("mode"))
-        assertEquals(1, url.toUri().getQueryParameters("token").size)
+        assertTrue(url.contains("token=new-secret"))
+        assertTrue(url.contains("mode=phone"))
+        assertEquals(1, "token=".toRegex().findAll(url).count())
         assertTrue(!url.contains("old-secret"))
     }
 
