@@ -4,10 +4,12 @@ import android.content.Context
 import androidx.room.Room
 import com.hermes.companion.BuildConfig
 import com.hermes.companion.platform.UsageTimelineSummary
-import com.hermes.companion.vision.VisualRequestAckHandler
+import com.hermes.companion.vision.VisualObservationWorker
 import java.time.LocalDate
 import java.util.UUID
 import kotlin.math.min
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import retrofit2.HttpException
 
@@ -15,7 +17,7 @@ class QueueRepository private constructor(
     private val dao: PendingEventDao,
     private val settings: SettingsRepository,
     private val apiFactory: (String) -> HermesApi = ApiClient::create,
-    private val visualRequestHandler: suspend (VisualRequestAck) -> ObservationRequest? = { null },
+    private val visualRequestEnqueuer: (VisualRequestAck) -> Unit = {},
 ) {
     private val json = WireJson
 
@@ -32,31 +34,6 @@ class QueueRepository private constructor(
         dedupeKey = "observation:${request.deviceId}:${request.observedAt}:${request.kind}:${request.value.orEmpty()}",
         scheduleUpload = scheduleUpload,
     )
-
-    suspend fun enqueueTimeline(entries: List<AppTimelineEntry>, deviceId: String) {
-        entries.forEach { entry ->
-            val sessionId = "timeline:$deviceId:${entry.startedAt}:${entry.packageName}"
-            enqueueObservation(
-                ObservationRequest(
-                    kind = "app_timeline",
-                    label = entry.packageName,
-                    value = entry.packageName,
-                    observedAt = entry.startedAt,
-                    deviceId = deviceId,
-                    metadata = mapOf(
-                        "startedAt" to entry.startedAt,
-                        "endedAt" to (entry.endedAt ?: ""),
-                        "durationMs" to entry.durationMs.toString(),
-                        "category" to entry.category,
-                    ),
-                    clientEventId = sessionId,
-                ),
-                dedupeKey = sessionId,
-                scheduleUpload = false,
-            )
-        }
-        if (entries.isNotEmpty()) UploadWorker.enqueue(settings.context)
-    }
 
     suspend fun enqueueUsageSummary(summary: UsageTimelineSummary, deviceId: String, scheduleUpload: Boolean = true) {
         val day = LocalDate.now().toString()
@@ -86,27 +63,6 @@ class QueueRepository private constructor(
         )
     }
 
-    suspend fun enqueueSteps(steps: Long, deviceId: String, observedAt: String) {
-        enqueueObservation(
-            ObservationRequest(
-                kind = "steps",
-                label = "今日步数",
-                value = steps.toString(),
-                observedAt = observedAt,
-                deviceId = deviceId,
-                metadata = mapOf("unit" to "steps", "day" to LocalDate.now().toString()),
-            ),
-            dedupeKey = "steps:$deviceId:${LocalDate.now()}",
-        )
-    }
-
-    private suspend fun enqueueObservation(request: ObservationRequest, dedupeKey: String, scheduleUpload: Boolean = true) = enqueue(
-        type = TYPE_OBSERVATION,
-        payload = json.encodeToString(request),
-        dedupeKey = dedupeKey,
-        scheduleUpload = scheduleUpload,
-    )
-
     suspend fun pendingCount(): Int = dao.count()
 
     suspend fun clearPendingQueue(): Int = dao.deleteAll()
@@ -133,7 +89,15 @@ class QueueRepository private constructor(
         }
     }
 
-    suspend fun uploadPending(now: Long = System.currentTimeMillis()): UploadResult {
+    /**
+     * Process-wide single-flight. Immediate and periodic WorkManager jobs can overlap, but
+     * only one QueueRepository instance may SELECT/send/delete pending events at a time.
+     * Room-level claiming remains the long-term crash-safe queue design.
+     */
+    suspend fun uploadPending(now: Long = System.currentTimeMillis()): UploadResult =
+        uploadMutex.withLock { uploadPendingLocked(now) }
+
+    private suspend fun uploadPendingLocked(now: Long): UploadResult {
         val serverUrl = settings.serverUrl()
         val bootstrap = settings.bootstrapToken()
         if (serverUrl.isBlank() || bootstrap.isNullOrBlank() && settings.deviceToken().isNullOrBlank()) {
@@ -159,7 +123,7 @@ class QueueRepository private constructor(
                 dao.delete(event.id)
                 uploaded += 1
                 settings.recordSuccessfulUpload(System.currentTimeMillis())
-                handleApiAck(ack)
+                enqueueVisualAck(ack)
             } catch (error: Throwable) {
                 if (error is HttpException && error.code() == 401 && settings.hasDeviceToken()) {
                     settings.clearDeviceToken()
@@ -176,7 +140,7 @@ class QueueRepository private constructor(
                         dao.delete(event.id)
                         uploaded += 1
                         settings.recordSuccessfulUpload(System.currentTimeMillis())
-                        handleApiAck(ack)
+                        enqueueVisualAck(ack)
                     } catch (retryError: Throwable) {
                         val message = describeApiError("upload after re-registration", retryError)
                         firstError = firstError ?: message
@@ -222,17 +186,12 @@ class QueueRepository private constructor(
     }
 
     /**
-     * Telemetry success is authoritative before this side effect runs. Visual failure must
-     * never resurrect a successfully uploaded Presence event or poison normal API diagnostics.
+     * ACK handling is enqueue-only. Screenshot/provider work happens in VisualObservationWorker,
+     * never on the telemetry upload coroutine.
      */
-    private suspend fun handleApiAck(ack: ApiAck) {
+    private fun enqueueVisualAck(ack: ApiAck) {
         val visualRequest = ack.visualRequest ?: return
-        val summary = try {
-            visualRequestHandler(visualRequest)
-        } catch (_: Throwable) {
-            null
-        } ?: return
-        enqueueObservation(summary, scheduleUpload = true)
+        runCatching { visualRequestEnqueuer(visualRequest) }
     }
 
     private suspend fun recordFailure(event: PendingEvent, now: Long, message: String) {
@@ -261,16 +220,16 @@ class QueueRepository private constructor(
         const val BASE_BACKOFF_MS = 30_000L
         const val MAX_BACKOFF_MS = 6 * 60 * 60 * 1000L
         const val MAX_PENDING_EVENTS = 500
+        private val uploadMutex = Mutex()
 
         fun create(context: Context): QueueRepository {
             val appContext = context.applicationContext
             val database = Room.databaseBuilder(appContext, AppDatabase::class.java, "hermes-companion.db").build()
             val settings = SettingsRepository(appContext)
-            val handler = VisualRequestAckHandler(appContext)
             return QueueRepository(
                 dao = database.pendingEventDao(),
                 settings = settings,
-                visualRequestHandler = handler::handle,
+                visualRequestEnqueuer = { VisualObservationWorker.enqueue(appContext, it) },
             )
         }
 
@@ -278,8 +237,8 @@ class QueueRepository private constructor(
             dao: PendingEventDao,
             settings: SettingsRepository,
             apiFactory: (String) -> HermesApi,
-            visualRequestHandler: suspend (VisualRequestAck) -> ObservationRequest? = { null },
-        ) = QueueRepository(dao, settings, apiFactory, visualRequestHandler)
+            visualRequestEnqueuer: (VisualRequestAck) -> Unit = {},
+        ) = QueueRepository(dao, settings, apiFactory, visualRequestEnqueuer)
     }
 }
 
