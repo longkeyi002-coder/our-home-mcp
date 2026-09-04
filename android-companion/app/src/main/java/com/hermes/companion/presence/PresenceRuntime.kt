@@ -32,6 +32,7 @@ object PresenceRuntime {
             unlocked = power?.isInteractive == true && keyguard?.isKeyguardLocked != true,
         )
         privacy.pruneExpiredGrant(System.currentTimeMillis())
+        PresenceDwellMonitor(appContext, store, reporter).start()
 
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(receiverContext: Context?, intent: Intent?) {
