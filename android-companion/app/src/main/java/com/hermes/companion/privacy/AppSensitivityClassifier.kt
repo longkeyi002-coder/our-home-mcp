@@ -1,12 +1,17 @@
 package com.hermes.companion.privacy
 
 /**
- * OH-45: conservative package-level defaults. Users may make PRIVATE apps more open,
- * but PROTECTED apps still require an explicit temporary grant.
+ * OH-45: fail-closed package-level defaults.
+ *
+ * An unrecognized package is PRIVATE, not NORMAL. Automatic visual observation is only
+ * possible after the user explicitly marks that app AUTO (or after a future reviewed
+ * low-sensitivity allowlist classifies it NORMAL). This prevents novel banking/payment/
+ * identity apps from becoming screenshot-eligible just because their package name lacks
+ * an obvious keyword.
  *
  * Scene-level password/OTP/payment detection is intentionally NOT claimed here.
- * Until a reliable pre-upload local scene detector exists, financial/auth apps stay
- * PROTECTED and browsers stay PRIVATE because they may contain login/payment pages.
+ * Until a reliable pre-upload local scene detector exists, known financial/auth apps stay
+ * PROTECTED and browsers/private-content apps stay PRIVATE.
  */
 object AppSensitivityClassifier {
     private val protectedExact = setOf(
@@ -69,6 +74,6 @@ object AppSensitivityClassifier {
         if (privateExact.any { it.lowercase() == normalized } || privateTokens.any(normalized::contains)) {
             return SensitivityClass.PRIVATE
         }
-        return SensitivityClass.NORMAL
+        return SensitivityClass.PRIVATE
     }
 }
