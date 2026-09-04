@@ -13,13 +13,12 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
@@ -127,9 +126,7 @@ class CompanionDashboardViewModel(private val appContext: android.content.Contex
     }
 
     fun refresh() {
-        viewModelScope.launch {
-            _state.value = withContext(Dispatchers.Default) { readState() }
-        }
+        viewModelScope.launch { _state.value = withContext(Dispatchers.Default) { readState() } }
     }
 
     fun start() {
@@ -174,8 +171,7 @@ class CompanionDashboardViewModel(private val appContext: android.content.Contex
         diagnosticsRunning = true
         refresh()
         viewModelScope.launch {
-            val report = withContext(Dispatchers.IO) { CompanionDiagnosticRunner(appContext).run() }
-            diagnosticReport = report
+            diagnosticReport = withContext(Dispatchers.IO) { CompanionDiagnosticRunner(appContext).run() }
             diagnosticLastAt = System.currentTimeMillis()
             diagnosticsRunning = false
             refresh()
@@ -188,9 +184,9 @@ class CompanionDashboardViewModel(private val appContext: android.content.Contex
         HermesNotifications.show(
             appContext,
             HermesNotification(
-                id = "diagnostic-${System.currentTimeMillis()}",
+                candidateId = "diagnostic-${System.currentTimeMillis()}",
                 title = title,
-                message = "如果你看到这条通知，说明手机通知能力正常。",
+                body = "如果你看到这条通知，说明手机通知能力正常。",
             ),
         )
         productState.recordNotification(title)
@@ -251,9 +247,7 @@ class CompanionDashboardViewModel(private val appContext: android.content.Contex
     }
 }
 
-private data class HttpCheck(val code: Int?, val body: String, val error: String?) {
-    val ok: Boolean get() = code != null && code in 200..299 && error == null
-}
+private data class HttpCheck(val code: Int?, val body: String, val error: String?)
 
 private class CompanionDiagnosticRunner(private val context: android.content.Context) {
     private val settings = SettingsRepository(context)
@@ -265,8 +259,7 @@ private class CompanionDiagnosticRunner(private val context: android.content.Con
         .build()
 
     fun run(): String {
-        val beforeRunning = LocalMcpServer.isRunning()
-        if (!beforeRunning) LocalMcpServer.start(context)
+        if (!LocalMcpServer.isRunning()) LocalMcpServer.start(context)
         val localRunning = LocalMcpServer.isRunning()
         val usageAccess = DeviceStatusReader.hasUsageAccess(context)
         val notificationEnabled = NotificationManagerCompat.from(context).areNotificationsEnabled()
@@ -275,20 +268,22 @@ private class CompanionDiagnosticRunner(private val context: android.content.Con
         val checks = mutableListOf<String>()
 
         checks += checkLine("Local MCP :${AppDefaults.LOCAL_MCP_PORT}", localRunning, settings.localMcpLastError())
-
         if (localRunning) {
             val initialize = postJson(
                 JSONObject()
                     .put("jsonrpc", "2.0")
                     .put("id", 1)
                     .put("method", "initialize")
-                    .put("params", JSONObject()
-                        .put("protocolVersion", "2025-03-26")
-                        .put("capabilities", JSONObject())
-                        .put("clientInfo", JSONObject().put("name", "gpt-diagnostic").put("version", BuildConfig.VERSION_NAME)))
+                    .put(
+                        "params",
+                        JSONObject()
+                            .put("protocolVersion", "2025-03-26")
+                            .put("capabilities", JSONObject())
+                            .put("clientInfo", JSONObject().put("name", "gpt-diagnostic").put("version", BuildConfig.VERSION_NAME)),
+                    )
                     .toString(),
             )
-            checks += httpLine("MCP initialize", initialize, expectedCode = 200)
+            checks += httpLine("MCP initialize", initialize, 200)
 
             val initialized = postJson(
                 JSONObject().put("jsonrpc", "2.0").put("method", "notifications/initialized").toString(),
@@ -299,18 +294,15 @@ private class CompanionDiagnosticRunner(private val context: android.content.Con
                 "[FAIL] MCP notifications/initialized -> ${initialized.describe()}"
             }
 
-            val tools = postJson(JSONObject().put("jsonrpc", "2.0").put("id", 2).put("method", "tools/list").toString())
-            checks += httpLine("MCP tools/list", tools, expectedCode = 200)
-
-            val health = callTool(3, "get_local_health")
-            checks += httpLine("tool get_local_health", health, expectedCode = 200)
-
-            val deviceContext = callTool(4, "get_device_context")
-            checks += httpLine("tool get_device_context", deviceContext, expectedCode = 200)
-
+            checks += httpLine(
+                "MCP tools/list",
+                postJson(JSONObject().put("jsonrpc", "2.0").put("id", 2).put("method", "tools/list").toString()),
+                200,
+            )
+            checks += httpLine("tool get_local_health", callTool(3, "get_local_health"), 200)
+            checks += httpLine("tool get_device_context", callTool(4, "get_device_context"), 200)
             if (usageAccess) {
-                val currentUsage = callTool(5, "get_current_usage")
-                checks += httpLine("tool get_current_usage", currentUsage, expectedCode = 200)
+                checks += httpLine("tool get_current_usage", callTool(5, "get_current_usage"), 200)
             } else {
                 checks += "[SKIP] tool get_current_usage -> Usage Access 未授权"
             }
@@ -364,7 +356,7 @@ private class CompanionDiagnosticRunner(private val context: android.content.Con
             appendLine("lastError=$lastError")
             appendLine()
             appendLine("[SELF TEST]")
-            checks.forEach(::appendLine)
+            checks.forEach { appendLine(it) }
             appendLine()
             appendLine("[CAPABILITIES]")
             appendLine("get_local_health=implemented")
@@ -421,7 +413,6 @@ private class CompanionDiagnosticRunner(private val context: android.content.Con
 private fun CompanionDashboard(model: CompanionDashboardViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
-
     Scaffold { padding ->
         Column(
             modifier = Modifier
@@ -436,7 +427,6 @@ private fun CompanionDashboard(model: CompanionDashboardViewModel) {
                 "当前先作为 GPT 调试版：把手机端能力、权限和连接状态跑通。检测报告可以一键复制给 GPT，等稳定后再切回阿里云 Hermes。",
                 style = MaterialTheme.typography.bodyMedium,
             )
-
             StatusCard(state, model)
             PermissionCard(state)
             PhoneStateCard(state)
@@ -461,19 +451,18 @@ private fun StatusCard(state: DashboardState, model: CompanionDashboardViewModel
             Text("我现在是什么状态", style = MaterialTheme.typography.titleLarge)
             StatusRow("手机能力服务", if (state.localMcpRunning) "正常" else "未运行")
             StatusRow("手机网络", if (state.online) "在线" else "离线")
-            StatusRow("远端桥接", when {
-                state.connected -> "已连接"
-                state.enabled && state.tunnelState in setOf("connecting", "reconnecting", "enabled") -> "正在连接"
-                state.enabled -> "未连接"
-                else -> "未启动"
-            })
+            StatusRow(
+                "远端桥接",
+                when {
+                    state.connected -> "已连接"
+                    state.enabled && state.tunnelState in setOf("connecting", "reconnecting", "enabled") -> "正在连接"
+                    state.enabled -> "未连接"
+                    else -> "未启动"
+                },
+            )
             StatusRow("GPT 调试报告", if (state.diagnosticLastAt > 0L) "已生成" else "等待检测")
-            if (state.lastRelayConnectedAt > 0L) {
-                Text("最近一次远端连接：${state.lastRelayConnectedAt.displayTime()}", style = MaterialTheme.typography.bodySmall)
-            }
-            if (state.error.isNotBlank()) {
-                Text("当前错误：${state.error}", style = MaterialTheme.typography.bodySmall)
-            }
+            if (state.lastRelayConnectedAt > 0L) Text("最近一次远端连接：${state.lastRelayConnectedAt.displayTime()}")
+            if (state.error.isNotBlank()) Text("当前错误：${state.error}", style = MaterialTheme.typography.bodySmall)
             Button(
                 onClick = { if (state.enabled) model.stop() else model.start() },
                 modifier = Modifier.fillMaxWidth(),
@@ -565,21 +554,15 @@ private fun RecentActivityCard(state: DashboardState) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("最近发生了什么", style = MaterialTheme.typography.titleMedium)
-            if (state.lastMcpActivityAt > 0L) {
-                StatusRow("最近 MCP 调用", "${state.lastMcpActivity.activityLabel()} · ${state.lastMcpActivityAt.displayTime()}")
-            } else {
-                StatusRow("最近 MCP 调用", "还没有")
-            }
-            if (state.lastNotificationAt > 0L) {
-                StatusRow("最近通知", "${state.lastNotificationTitle.ifBlank { "手机通知" }} · ${state.lastNotificationAt.displayTime()}")
-            } else {
-                StatusRow("最近通知", "还没有")
-            }
-            if (state.lastRelayConnectedAt > 0L) {
-                StatusRow("最近远端连接", state.lastRelayConnectedAt.displayTime())
-            } else {
-                StatusRow("最近远端连接", "还没有")
-            }
+            StatusRow(
+                "最近 MCP 调用",
+                if (state.lastMcpActivityAt > 0L) "${state.lastMcpActivity.activityLabel()} · ${state.lastMcpActivityAt.displayTime()}" else "还没有",
+            )
+            StatusRow(
+                "最近通知",
+                if (state.lastNotificationAt > 0L) "${state.lastNotificationTitle.ifBlank { "手机通知" }} · ${state.lastNotificationAt.displayTime()}" else "还没有",
+            )
+            StatusRow("最近远端连接", if (state.lastRelayConnectedAt > 0L) state.lastRelayConnectedAt.displayTime() else "还没有")
         }
     }
 }
@@ -593,7 +576,7 @@ private fun DiagnosticReportCard(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("GPT 检测报告", style = MaterialTheme.typography.titleMedium)
-            Text("遇到问题时先点“运行完整检测”，然后点“复制检测报告”直接发给 GPT。报告不会复制 Tunnel Token。")
+            Text("遇到问题时先运行完整检测，再复制报告直接发给 GPT。报告不会复制 Tunnel Token。")
             Button(
                 onClick = model::runDiagnostics,
                 enabled = !state.diagnosticsRunning,
@@ -608,9 +591,7 @@ private fun DiagnosticReportCard(
                 enabled = !state.diagnosticsRunning && state.diagnosticReport.isNotBlank(),
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("复制检测报告") }
-            if (state.diagnosticLastAt > 0L) {
-                Text("最近检测：${state.diagnosticLastAt.displayTime()}", style = MaterialTheme.typography.bodySmall)
-            }
+            if (state.diagnosticLastAt > 0L) Text("最近检测：${state.diagnosticLastAt.displayTime()}")
             SelectionContainer {
                 Text(
                     state.diagnosticReport,
@@ -623,13 +604,14 @@ private fun DiagnosticReportCard(
 
 @Composable
 private fun StatusRow(label: String, value: String) {
-    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
-        Text(value, modifier = Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+    Column(modifier = Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, style = MaterialTheme.typography.labelMedium)
+        Text(value, style = MaterialTheme.typography.bodyMedium)
     }
 }
 
-private fun Long.displayTime(): String = DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(this))
+private fun Long.displayTime(): String =
+    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(this))
 
 private fun Long.durationText(): String {
     val totalMinutes = this / 60_000L
