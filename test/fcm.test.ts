@@ -62,7 +62,7 @@ test("push addresses are absent from life and Hermes wake context", async () => 
   assert.equal(serialized.includes("private-token"), false);
 });
 
-test("FCM sends one minimal payload, routes it to chat, and success marks candidate delivered", async () => {
+test("FCM sends one high-priority data-only payload, routes it to chat, and success marks candidate delivered", async () => {
   const store = await freshStore();
   await store.registerPhoneDevice({ deviceId: "android-main", pushToken: "target-token" });
   const candidate = await due(store);
@@ -72,15 +72,18 @@ test("FCM sends one minimal payload, routes it to chat, and success marks candid
   assert.equal(sent.length, 1);
   assert.deepEqual(sent[0], {
     token: "target-token",
-    notification: { title: candidate.title, body: candidate.message },
     data: {
       candidateId: candidate.id,
       wakeEventId: "wake-1",
       reason: candidate.reason,
       source: "AGENT_LIFE",
       destination: "/chat",
+      title: candidate.title,
+      body: candidate.message,
     },
+    android: { priority: "HIGH" },
   });
+  assert.equal("notification" in sent[0]!, false);
   assert.equal(store.snapshot().proactiveQueue[0]?.status, "delivered");
 });
 
@@ -96,14 +99,20 @@ for (const failure of ["FCM send failed with HTTP 401", "FCM send failed with HT
   });
 }
 
-test("no target stays pending; the next cycle retries the same candidate successfully", async () => {
+test("no target stays pending and retry backoff does not duplicate immediately", async () => {
   const store = await freshStore();
   const candidate = await due(store);
   await runProactiveCycle(store, new FcmNotifier(store, { send: async () => assert.fail("must not send") }), new Date("2026-09-03T00:01:00Z"));
   assert.equal(store.snapshot().proactiveQueue[0]?.status, "pending");
+  await store.update((data) => {
+    const item = data.proactiveQueue.find((value) => value.id === candidate.id)!;
+    item.lastAttemptAt = "2026-09-03T00:01:00Z";
+  });
   await store.registerPhoneDevice({ deviceId: "android-main", pushToken: "now-ready" });
   let calls = 0;
-  await runProactiveCycle(store, new FcmNotifier(store, { send: async () => { calls += 1; } }), new Date("2026-09-03T00:02:00Z"));
+  await runProactiveCycle(store, new FcmNotifier(store, { send: async () => { calls += 1; } }), new Date("2026-09-03T00:01:20Z"));
+  assert.equal(calls, 0);
+  await runProactiveCycle(store, new FcmNotifier(store, { send: async () => { calls += 1; } }), new Date("2026-09-03T00:01:31Z"));
   assert.equal(calls, 1);
   assert.equal(store.snapshot().proactiveQueue.length, 1);
   assert.equal(store.snapshot().proactiveQueue[0]?.id, candidate.id);
