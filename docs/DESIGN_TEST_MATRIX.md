@@ -18,6 +18,11 @@
 | OH-40 | Repeated events do not produce wake/message storms | Wake cooldown/dedupe tests + `TelemetryPolicyTest` stable heartbeat bucket ID + Room unique dedupe key instrumentation coverage | COVERED |
 | OH-41 | User can correct/delete/revoke/pause | Configuration gate + explicit manual fallback + diagnostics copy without credential values; broader pause/delete/revoke controls still pending | PARTIAL |
 | OH-42 | Sensitive sensing/credentials are minimized | `TelemetryPolicyTest`; register-only enrollment token cannot ingest directly (`phone-enrollment.test.ts`); diagnostics URL query/secret redaction test; Usage Access manual acceptance | PARTIAL / MANUAL |
+| OH-43 | Presence distinguishes observed/user-declared/inferred context; stale sessions end on screen/app changes | Presence state/session tests + Runtime Context Understanding tests | TODO / MANUAL |
+| OH-44 | Visual observation is curiosity-driven, not fixed high-frequency cron; looking and messaging are separate decisions | Curiosity cooldown/budget/state tests + no-per-transition Brain/Vision regression test | TODO |
+| OH-45 | Sensitive Guard blocks protected apps/scenes before upload and cannot be bypassed by Brain/Curiosity; temporary grants expire | Local privacy-policy unit tests + secure-window/manual device acceptance + temporary-grant lifecycle tests | TODO / MANUAL |
+| OH-46 | Permission onboarding detects current state and routes users to the shortest supported system setting without bypassing OS security | Android permission-state/navigation tests + OPPO/OnePlus real-device manual acceptance | TODO / MANUAL |
+| OH-47 | FCM notification opens the intended Our Home Chat/message destination and obeys preview policy | Notification payload/deep-link tests + foreground/background real-device acceptance | TODO / MANUAL |
 | OH-50 | Autonomous browsing cannot silently perform external side effects | Capability policy tests | TODO |
 | OH-51 | Skill/MCP proposal cannot install without approval | Proposal/approval state-machine tests | TODO |
 | OH-52 | Risk Level 2/3 actions require confirmation | Action policy tests | TODO |
@@ -29,8 +34,11 @@
 | OH-65 | Model calls are bounded to cognition-worthy work | Resource-budget tests when budget layer exists | TODO |
 | OH-66 | Runtime/Android state is diagnosable without secret leakage | compiled `/v1/phone/status` tests; staged Android API-error tests; `DiagnosticsReportTest`; periodic/immediate worker state exposed | PARTIAL / MANUAL |
 | OH-67 | Provider/tool failures degrade gracefully | FCM/Hermes retry tests + Android Room retry + staged auth errors + production start scripts rebuild current source before `dist`; AI World deterministic progression pending | PARTIAL |
+| OH-68 | Realtime Presence uses event-driven package/screen events, local dedupe/queue, no Accessibility tree retrieval, while UsageEvents remains reconciliation | Accessibility config/service tests + transition dedupe tests + queue tests + real-device verification | TODO / MANUAL |
+| OH-69 | Raw screenshot is ephemeral, guarded before provider upload, never placed in ordinary diagnostics/logs, and retries are bounded | Visual pipeline lifecycle/redaction tests + manual provider failure test | TODO / MANUAL |
 | OH-P1 | Real Android observation reaches persisted Life State | Runtime integration tests, Android telemetry/usage/auto-config tests, diagnostics tests and `OH_P1_ACCEPTANCE.md`; actual phone evidence still required | PARTIAL / MANUAL |
-| OH-P2 | Earth change → Wake → Brain → Decision → FCM → Android | End-to-end real-device acceptance | TODO / MANUAL |
+| OH-P1.5 | Realtime Presence → Context → Curiosity → Guard → optional Visual summary works on a real phone | `OH_PRESENCE_VISUAL_PLAN.md` scenarios A-C + automated policy/session tests | TODO / MANUAL |
+| OH-P2 | Earth change → Wake → Brain → Decision → FCM → Android notification | End-to-end real-device acceptance including destination deep link | TODO / MANUAL |
 | OH-P3 | AI World persists while model sleeps | restart/persistence + deterministic simulation tests | TODO |
 | OH-P4 | Soul evolves slowly and traceably | preference reinforcement/decay/provenance tests | TODO |
 | OH-P5 | Autonomous exploration produces traceable experience/share intent | browser adapter + intent tests | TODO |
@@ -73,6 +81,33 @@ Real-device/manual:
 - diagnostics evidence matches persisted Runtime state.
 
 Procedure: `docs/OH_P1_ACCEPTANCE.md`.
+
+## OH-P1.5 evidence split
+
+Automated:
+
+- package transition debounce/dedupe;
+- screen/app session lifecycle;
+- no Accessibility UI-tree retrieval configuration;
+- per-app visual policy precedence;
+- protected category defaults;
+- temporary grant expiry on timeout/app switch/lock;
+- Curiosity cooldown/budget and no fixed screenshot cron;
+- raw visual payload redaction/non-persistence;
+- notification destination payload parsing.
+
+Real-device/manual:
+
+- Accessibility enable/disable and OEM permission repair flow;
+- OPPO/OnePlus restricted-settings onboarding where applicable;
+- foreground app transitions arrive near-real-time;
+- screen off/on and lock/unlock update Presence;
+- Android 11+ screenshot works only after explicit permission and is blocked for protected/Secure windows;
+- long dwell can trigger an occasional visual observation without repeated mechanical capture;
+- user-declared activity reduces but does not permanently disable later observation;
+- sensitive temporary grant expires correctly.
+
+Procedure and scenarios: `docs/OH_PRESENCE_VISUAL_PLAN.md`.
 
 ## Rule for adding features
 
