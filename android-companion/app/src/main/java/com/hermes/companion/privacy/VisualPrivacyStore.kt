@@ -6,10 +6,20 @@ import java.util.UUID
 class VisualPrivacyStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun policyFor(packageName: String): VisualAppPolicy? =
-        prefs.getString(policyKey(packageName), null)?.let { runCatching { VisualAppPolicy.valueOf(it) }.getOrNull() }
+    fun policyFor(packageName: String): VisualAppPolicy? {
+        val stored = prefs.getString(policyKey(packageName), null)
+            ?.let { runCatching { VisualAppPolicy.valueOf(it) }.getOrNull() }
+        return VisualPolicyRules.normalizePersistentPolicy(
+            sensitivity = AppSensitivityClassifier.classify(packageName),
+            policy = stored,
+        )
+    }
 
     fun setPolicy(packageName: String, policy: VisualAppPolicy?) {
+        VisualPolicyRules.requirePersistable(
+            sensitivity = AppSensitivityClassifier.classify(packageName),
+            policy = policy,
+        )
         val edit = prefs.edit()
         if (policy == null) edit.remove(policyKey(packageName)) else edit.putString(policyKey(packageName), policy.name)
         edit.apply()
