@@ -78,7 +78,7 @@ export class FcmHttpV1Sender implements FcmSender {
     const response = await this.fetcher(tokenUri, {
       method: "POST",
       headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth-grant-type:jwt-bearer", assertion }),
+      body: new URLSearchParams({ grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer", assertion }),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
     if (!response.ok) throw new Error(`FCM authentication failed with HTTP ${response.status}`);
