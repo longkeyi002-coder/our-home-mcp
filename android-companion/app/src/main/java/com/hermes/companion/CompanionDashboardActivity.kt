@@ -424,7 +424,7 @@ private fun CompanionDashboard(model: CompanionDashboardViewModel) {
         ) {
             Text("Hermes 手机伴侣", style = MaterialTheme.typography.headlineMedium)
             Text(
-                "当前先作为 GPT 调试版：把手机端能力、权限和连接状态跑通。检测报告可以一键复制给 GPT，等稳定后再切回阿里云 Hermes。",
+                "当前先作为 GPT 调试版：把手机端能力、权限和连接状态跑通。检测报告可以一键复制或分享给 GPT，等稳定后再切回阿里云 Hermes。",
                 style = MaterialTheme.typography.bodyMedium,
             )
             StatusCard(state, model)
@@ -576,7 +576,7 @@ private fun DiagnosticReportCard(
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("GPT 检测报告", style = MaterialTheme.typography.titleMedium)
-            Text("遇到问题时先运行完整检测，再复制报告直接发给 GPT。报告不会复制 Tunnel Token。")
+            Text("遇到问题时先运行完整检测，再复制或分享报告直接发给 GPT。报告不会包含 Tunnel Token。")
             Button(
                 onClick = model::runDiagnostics,
                 enabled = !state.diagnosticsRunning,
@@ -588,9 +588,26 @@ private fun DiagnosticReportCard(
                     clipboard.setPrimaryClip(ClipData.newPlainText("Hermes GPT Diagnostic Report", state.diagnosticReport))
                     Toast.makeText(context, "检测报告已复制", Toast.LENGTH_SHORT).show()
                 },
-                enabled = !state.diagnosticsRunning && state.diagnosticReport.isNotBlank(),
+                enabled = !state.diagnosticsRunning && state.diagnosticLastAt > 0L,
                 modifier = Modifier.fillMaxWidth(),
             ) { Text("复制检测报告") }
+            OutlinedButton(
+                onClick = {
+                    val shareText = buildString {
+                        appendLine("请检查这份 Hermes Companion / GPT Diagnostic Report，判断问题在哪里，并告诉我下一步需要怎么处理。")
+                        appendLine()
+                        append(state.diagnosticReport)
+                    }
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_SUBJECT, "Hermes Companion GPT 检测报告")
+                        putExtra(Intent.EXTRA_TEXT, shareText)
+                    }
+                    context.startActivity(Intent.createChooser(shareIntent, "分享检测报告给 GPT"))
+                },
+                enabled = !state.diagnosticsRunning && state.diagnosticLastAt > 0L,
+                modifier = Modifier.fillMaxWidth(),
+            ) { Text("分享检测报告") }
             if (state.diagnosticLastAt > 0L) Text("最近检测：${state.diagnosticLastAt.displayTime()}")
             SelectionContainer {
                 Text(
