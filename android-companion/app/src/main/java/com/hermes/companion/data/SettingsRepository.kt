@@ -36,6 +36,35 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
         secure.put(KEY_PUSH_FID, fid)
         secure.put(KEY_PUSH_TOKEN, token)
     }
+
+    fun pushRegistrationState(): String = prefs.getString(KEY_PUSH_STATE, PUSH_NEVER) ?: PUSH_NEVER
+    fun lastPushRegistrationAttempt(): Long = prefs.getLong(KEY_LAST_PUSH_ATTEMPT, 0L)
+    fun lastPushRegistrationSuccess(): Long = prefs.getLong(KEY_LAST_PUSH_SUCCESS, 0L)
+    fun lastPushRegistrationError(): String = prefs.getString(KEY_LAST_PUSH_ERROR, "") ?: ""
+    fun recordPushRegistrationScheduled() {
+        prefs.edit().putString(KEY_PUSH_STATE, PUSH_SCHEDULED).apply()
+    }
+    fun recordPushRegistrationAttempt(at: Long = System.currentTimeMillis()) {
+        prefs.edit()
+            .putString(KEY_PUSH_STATE, PUSH_REGISTERING)
+            .putLong(KEY_LAST_PUSH_ATTEMPT, at)
+            .remove(KEY_LAST_PUSH_ERROR)
+            .apply()
+    }
+    fun recordPushRegistrationSuccess(at: Long = System.currentTimeMillis()) {
+        prefs.edit()
+            .putString(KEY_PUSH_STATE, PUSH_REGISTERED)
+            .putLong(KEY_LAST_PUSH_SUCCESS, at)
+            .remove(KEY_LAST_PUSH_ERROR)
+            .apply()
+    }
+    fun recordPushRegistrationError(value: String) {
+        prefs.edit()
+            .putString(KEY_PUSH_STATE, PUSH_ERROR)
+            .putString(KEY_LAST_PUSH_ERROR, value.take(300))
+            .apply()
+    }
+
     fun lastSuccessfulUpload(): Long = prefs.getLong(KEY_LAST_SUCCESSFUL_UPLOAD, prefs.getLong(KEY_LAST_UPLOAD_LEGACY, 0L))
     fun lastUpload(): Long = lastSuccessfulUpload()
     fun lastManualHeartbeat(): Long = prefs.getLong(KEY_LAST_MANUAL_HEARTBEAT, prefs.getLong(KEY_LAST_HEARTBEAT_LEGACY, 0L))
@@ -70,12 +99,21 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
 
     companion object {
         const val DEFAULT_SERVER_URL = "https://api.yeqingxu.cyou"
+        const val PUSH_NEVER = "never"
+        const val PUSH_SCHEDULED = "scheduled"
+        const val PUSH_REGISTERING = "registering"
+        const val PUSH_REGISTERED = "registered"
+        const val PUSH_ERROR = "error"
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_BOOTSTRAP_TOKEN = "bootstrap_token"
         private const val KEY_DEVICE_TOKEN = "device_token"
         private const val KEY_PUSH_FID = "push_fid"
         private const val KEY_PUSH_TOKEN = "push_token"
+        private const val KEY_PUSH_STATE = "push_registration_state"
+        private const val KEY_LAST_PUSH_ATTEMPT = "last_push_registration_attempt"
+        private const val KEY_LAST_PUSH_SUCCESS = "last_push_registration_success"
+        private const val KEY_LAST_PUSH_ERROR = "last_push_registration_error"
         private const val KEY_LAST_SUCCESSFUL_UPLOAD = "last_successful_upload"
         private const val KEY_LAST_MANUAL_HEARTBEAT = "last_manual_heartbeat"
         private const val KEY_LAST_PERIODIC_COLLECTION = "last_periodic_collection"
