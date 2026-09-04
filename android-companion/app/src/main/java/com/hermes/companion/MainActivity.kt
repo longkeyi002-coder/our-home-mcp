@@ -1,73 +1,38 @@
 package com.hermes.companion
 
 import android.Manifest
-import android.content.ClipData
-import android.content.ClipboardManager
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.grid.GridCells
-import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.items
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
-import androidx.work.WorkInfo
-import androidx.work.WorkManager
 import com.hermes.companion.data.CompanionMode
-import com.hermes.companion.data.HeartbeatRequest
-import com.hermes.companion.data.ObservationRequest
-import com.hermes.companion.data.QueueRepository
 import com.hermes.companion.data.SettingsRepository
 import com.hermes.companion.data.UploadWorker
 import com.hermes.companion.local.LocalMcpServer
-import com.hermes.companion.platform.DeviceStatus
-import com.hermes.companion.platform.DeviceStatusReader
-import com.hermes.companion.platform.UsageTimelineReader
-import com.hermes.companion.platform.UsageTimelineSummary
-import com.hermes.companion.push.PushRegistration
 import com.hermes.companion.tunnel.ReverseTunnelService
-import java.time.Instant
-import java.util.UUID
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 class MainActivity : ComponentActivity() {
     private lateinit var model: CompanionViewModel
@@ -85,213 +50,74 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         model.resumeTunnelIfEnabled()
         model.refresh()
-        if (model.consumeUsageAccessInitialGuide()) {
-            startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
-        }
     }
 
     companion object { private const val NOTIFICATION_PERMISSION_REQUEST = 1001 }
 }
 
 data class CompanionUiState(
-    val device: DeviceStatus = DeviceStatus(0, false, false, null),
-    val serverUrl: String = "",
-    val deviceId: String = "",
+    val enabled: Boolean = false,
     val connected: Boolean = false,
-    val deviceRegistered: Boolean = false,
-    val localMode: Boolean = false,
-    val localMcpUrl: String = "",
-    val localMcpRunning: Boolean = false,
-    val localMcpError: String = "",
-    val tunnelRelayUrl: String = "",
-    val tunnelEnabled: Boolean = false,
     val tunnelState: String = "disabled",
-    val tunnelError: String = "",
-    val pending: Int = 0,
-    val lastSuccessfulUpload: Long = 0,
-    val lastManualHeartbeat: Long = 0,
-    val lastPeriodicCollection: Long = 0,
-    val backgroundWorkerStatus: String = "unknown",
-    val lastError: String = "",
-    val usageAccess: Boolean = false,
-    val usage: UsageTimelineSummary? = null,
-    val diagnostics: Boolean = false,
+    val error: String = "",
 )
 
 class CompanionViewModel(private val appContext: android.content.Context) : ViewModel() {
     private val settings = SettingsRepository(appContext)
-    private val usageAccessOnboarding = UsageAccessOnboarding(settings)
-    private val queue = QueueRepository.create(appContext)
-    private val _state = MutableStateFlow(
-        CompanionUiState(
-            deviceId = settings.deviceId(),
-            serverUrl = settings.serverUrl(),
-            tunnelRelayUrl = settings.tunnelRelayUrl(),
-            tunnelEnabled = settings.tunnelEnabled(),
-            tunnelState = settings.tunnelState(),
-            lastManualHeartbeat = settings.lastManualHeartbeat(),
-            lastPeriodicCollection = settings.lastPeriodicCollection(),
-            lastSuccessfulUpload = settings.lastSuccessfulUpload(),
-        ),
-    )
+    private val _state = MutableStateFlow(readState())
     val state: StateFlow<CompanionUiState> = _state
 
-    init { refresh() }
-
-    fun refresh() {
-        viewModelScope.launch {
-            val status = DeviceStatusReader.read(appContext)
-            _state.value = _state.value.copy(
-                device = status,
-                serverUrl = settings.serverUrl(),
-                localMode = settings.isLocalMode(),
-                localMcpUrl = LocalMcpServer.endpoint(appContext),
-                localMcpRunning = LocalMcpServer.isRunning(),
-                localMcpError = settings.localMcpLastError(),
-                tunnelRelayUrl = settings.tunnelRelayUrl(),
-                tunnelEnabled = settings.tunnelEnabled(),
-                tunnelState = settings.tunnelState(),
-                tunnelError = settings.tunnelLastError(),
-                deviceId = settings.deviceId(),
-                deviceRegistered = !settings.deviceToken().isNullOrBlank(),
-                pending = queue.pendingCount(),
-                lastSuccessfulUpload = settings.lastSuccessfulUpload(),
-                lastManualHeartbeat = settings.lastManualHeartbeat(),
-                lastPeriodicCollection = settings.lastPeriodicCollection(),
-                backgroundWorkerStatus = readBackgroundWorkerStatus(),
-                lastError = settings.lastError(),
-                usageAccess = DeviceStatusReader.hasUsageAccess(appContext),
-                usage = UsageTimelineReader.read(appContext),
-            )
-        }
+    init {
+        settings.setMode(CompanionMode.LOCAL)
+        UploadWorker.cancelCloudWork(appContext)
+        refresh()
     }
 
-    fun consumeUsageAccessInitialGuide(): Boolean =
-        usageAccessOnboarding.consumeInitialGuide(DeviceStatusReader.hasUsageAccess(appContext))
+    fun refresh() {
+        viewModelScope.launch { _state.value = readState() }
+    }
 
-    fun setMode(mode: CompanionMode) {
-        settings.setMode(mode)
-        if (mode == CompanionMode.LOCAL) {
-            UploadWorker.cancelCloudWork(appContext)
-            LocalMcpServer.ensureForCurrentMode(appContext)
-        } else {
-            LocalMcpServer.ensureForCurrentMode(appContext)
-            UploadWorker.schedulePeriodic(appContext)
-            PushRegistration.refresh(appContext)
+    fun start() {
+        settings.setMode(CompanionMode.LOCAL)
+        UploadWorker.cancelCloudWork(appContext)
+        LocalMcpServer.start(appContext)
+        if (!LocalMcpServer.isRunning()) {
+            _state.value = readState().copy(error = settings.localMcpLastError().ifBlank { "Local MCP failed to start" })
+            return
         }
+        settings.setTunnelEnabled(true)
+        if (!ReverseTunnelService.start(appContext)) {
+            settings.setTunnelEnabled(false)
+            LocalMcpServer.stop()
+        }
+        refresh()
+    }
+
+    fun stop() {
+        ReverseTunnelService.stop(appContext)
+        LocalMcpServer.stop()
         refresh()
     }
 
     fun resumeTunnelIfEnabled() {
-        if (settings.tunnelEnabled() && settings.tunnelState() != "connected" && settings.tunnelState() != "connecting") {
+        if (!settings.tunnelEnabled()) return
+        settings.setMode(CompanionMode.LOCAL)
+        UploadWorker.cancelCloudWork(appContext)
+        LocalMcpServer.start(appContext)
+        if (settings.tunnelState() != "connected" && settings.tunnelState() != "connecting") {
             ReverseTunnelService.start(appContext)
         }
     }
 
-    fun startTunnel(relayUrl: String, token: String) {
-        if (!relayUrl.trim().startsWith("wss://") || token.isBlank()) {
-            _state.value = _state.value.copy(tunnelError = "Tunnel relay must use wss:// and a token")
-            return
+    private fun readState(): CompanionUiState {
+        val enabled = settings.tunnelEnabled()
+        val connected = enabled && settings.tunnelState() == "connected" && LocalMcpServer.isRunning()
+        val error = when {
+            settings.tunnelLastError().isNotBlank() -> settings.tunnelLastError()
+            settings.localMcpLastError().isNotBlank() -> settings.localMcpLastError()
+            else -> ""
         }
-        settings.saveTunnelRelayUrl(relayUrl)
-        settings.saveTunnelToken(token)
-        settings.setTunnelEnabled(true)
-        ReverseTunnelService.start(appContext)
-        refresh()
-    }
-
-    fun stopTunnel() {
-        ReverseTunnelService.stop(appContext)
-        refresh()
-    }
-
-    fun saveServer(value: String, bootstrapToken: String) {
-        settings.saveServerUrl(value)
-        settings.saveBootstrapToken(bootstrapToken)
-        refresh()
-    }
-
-    fun saveAndTestConnection(value: String, bootstrapToken: String) {
-        settings.saveServerUrl(value)
-        settings.saveBootstrapToken(bootstrapToken)
-        viewModelScope.launch {
-            val result = runCatching { com.hermes.companion.data.ApiClient.create(value).health() }
-            _state.value = _state.value.copy(
-                connected = result.getOrNull()?.ok == true,
-                lastError = result.exceptionOrNull()?.message.orEmpty(),
-            )
-            refresh()
-        }
-    }
-
-    fun sendHeartbeat() {
-        viewModelScope.launch {
-            if (settings.isLocalMode()) {
-                _state.value = _state.value.copy(lastError = "Local Mode does not upload Cloud heartbeats")
-                return@launch
-            }
-            val now = Instant.now().toString()
-            val status = DeviceStatusReader.read(appContext)
-            queue.enqueueHeartbeat(HeartbeatRequest(
-                deviceId = settings.deviceId(),
-                batteryPercent = status.batteryPercent,
-                charging = status.charging,
-                appVersion = BuildConfig.VERSION_NAME,
-                connectivityState = if (status.online) "online" else "offline",
-                foregroundPackage = status.foregroundPackage,
-                observedAt = now,
-                clientEventId = UUID.randomUUID().toString(),
-            ))
-            settings.recordManualHeartbeat(System.currentTimeMillis())
-            val result = queue.uploadPending()
-            _state.value = _state.value.copy(lastManualHeartbeat = System.currentTimeMillis(), connected = result.error == null, lastError = result.error.orEmpty())
-            refresh()
-        }
-    }
-
-    fun sendManualStatus(label: String) {
-        viewModelScope.launch {
-            if (settings.isLocalMode()) {
-                _state.value = _state.value.copy(lastError = "Local Mode does not upload Cloud manual status")
-                return@launch
-            }
-            queue.enqueueObservation(ObservationRequest(
-                kind = "manual_status",
-                label = label,
-                value = label,
-                observedAt = Instant.now().toString(),
-                deviceId = settings.deviceId(),
-            ))
-            val result = queue.uploadPending()
-            _state.value = _state.value.copy(connected = result.error == null, lastError = result.error.orEmpty())
-            refresh()
-        }
-    }
-
-    private suspend fun readBackgroundWorkerStatus(): String = withContext(Dispatchers.IO) {
-        val state = runCatching {
-            WorkManager.getInstance(appContext)
-                .getWorkInfosForUniqueWork(UploadWorker.PERIODIC_WORK_NAME)
-                .get()
-                .firstOrNull()
-                ?.state
-        }.getOrNull()
-        when (state) {
-            WorkInfo.State.ENQUEUED -> "scheduled"
-            WorkInfo.State.RUNNING -> "running"
-            WorkInfo.State.SUCCEEDED -> "succeeded"
-            WorkInfo.State.FAILED -> "failed"
-            else -> "unknown"
-        }
-    }
-
-    fun toggleDiagnostics() { _state.value = _state.value.copy(diagnostics = !_state.value.diagnostics) }
-
-    fun clearPendingQueue() {
-        viewModelScope.launch {
-            queue.clearPendingQueue()
-            refresh()
-        }
+        return CompanionUiState(enabled, connected, settings.tunnelState(), error)
     }
 
     companion object {
@@ -305,139 +131,32 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
 @Composable
 fun HermesCompanionApp(model: CompanionViewModel) {
     val state by model.state.collectAsStateWithLifecycle()
-    val context = LocalContext.current
     Scaffold { padding ->
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).padding(20.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.fillMaxSize().padding(padding).padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             Text("赫尔墨斯伴侣", style = MaterialTheme.typography.headlineMedium)
-            Text("Server reachable: ${if (state.connected) "yes" else "not checked"}")
-            Text("Device registered: ${if (state.deviceRegistered) "yes" else "no"}")
-            InfoCard(state)
-            Text("手动状态", style = MaterialTheme.typography.titleMedium)
-            val statuses = listOf("在家", "上班", "通勤", "忙", "休息", "睡觉", "累")
-            LazyVerticalGrid(columns = GridCells.Fixed(2), modifier = Modifier.height(180.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(statuses) { label -> Button(onClick = { model.sendManualStatus(label) }, modifier = Modifier.fillMaxWidth()) { Text(label) } }
+            Text(
+                if (state.connected) "已连接" else "未连接",
+                style = MaterialTheme.typography.titleLarge,
+                color = if (state.connected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            )
+            Button(
+                onClick = { if (state.enabled) model.stop() else model.start() },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(if (state.enabled) "停止" else "启动")
             }
-            var showCustom by rememberSaveable { mutableStateOf(false) }
-            OutlinedButton(onClick = { showCustom = true }, modifier = Modifier.fillMaxWidth()) { Text("自定义状态") }
-            if (showCustom) CustomStatusDialog(onDismiss = { showCustom = false }, onSend = { showCustom = false; model.sendManualStatus(it) })
-            Button(onClick = model::sendHeartbeat, modifier = Modifier.fillMaxWidth()) { Text("立即发送心跳") }
-            OutlinedButton(onClick = { context.startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)) }, modifier = Modifier.fillMaxWidth()) {
-                Text(if (state.usageAccess) "使用权限: 已授予" else "使用权限: 打开设置")
-            }
-            TextButton(onClick = model::toggleDiagnostics) { Text(if (state.diagnostics) "隐藏诊断信息" else "调试 / 诊断") }
-            if (state.diagnostics) Diagnostics(state, model)
-            SettingsPanel(state, model)
-            LaunchedEffect(Unit) { model.refresh() }
-            LaunchedEffect(state.tunnelEnabled) {
-                while (state.tunnelEnabled) {
-                    delay(1_000)
-                    model.refresh()
-                }
+            if (!state.connected && state.enabled && state.error.isNotBlank()) {
+                Text(state.error, style = MaterialTheme.typography.bodySmall)
             }
         }
     }
-}
-
-@Composable
-private fun InfoCard(state: CompanionUiState) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Server: ${state.serverUrl.ifBlank { "Not configured" }}")
-            Text("Battery: ${state.device.batteryPercent}%${if (state.device.charging) " · charging" else ""}")
-            Text("Foreground App: ${state.device.foregroundPackage ?: if (state.usageAccess) "not detected" else "需要权限"}")
-            state.usage?.let { usage -> Text("Current App: ${usage.currentPackageName ?: "none"} · ${usage.currentDurationMs / 1000}s") }
-            Text("Today's tracked apps: ${state.usage?.appTotalsMs?.size ?: 0}")
-            Text("Last manual heartbeat: ${state.lastManualHeartbeat.asTime()}")
-            Text("Pending events: ${state.pending}")
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(1_000)
+            model.refresh()
         }
     }
 }
-
-@Composable
-private fun SettingsPanel(state: CompanionUiState, model: CompanionViewModel) {
-    val context = LocalContext.current
-    var server by rememberSaveable(state.serverUrl) { mutableStateOf(state.serverUrl) }
-    var token by rememberSaveable { mutableStateOf("") }
-    HorizontalDivider()
-    Text("设置", style = MaterialTheme.typography.titleMedium)
-    OutlinedTextField(server, { server = it }, label = { Text("服务器地址 (HTTP)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-    OutlinedTextField(token, { token = it }, label = { Text("注册令牌") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
-    Text("Device: ${state.deviceId}")
-    Text("Mode: ${if (state.localMode) "LOCAL" else "CLOUD"}")
-    OutlinedButton(onClick = { model.setMode(CompanionMode.LOCAL) }, modifier = Modifier.fillMaxWidth()) { Text("Use Local MCP Mode") }
-    OutlinedButton(onClick = { model.setMode(CompanionMode.CLOUD) }, modifier = Modifier.fillMaxWidth()) { Text("Use Cloud Mode") }
-    if (state.localMode) {
-        Text("Local MCP running: ${if (state.localMcpRunning) "yes" else "no"}")
-        Text(state.localMcpUrl)
-        if (state.localMcpError.isNotBlank()) Text("Local MCP error: ${state.localMcpError}")
-        OutlinedButton(onClick = { (context.getSystemService(ClipboardManager::class.java)).setPrimaryClip(ClipData.newPlainText("Our Home Local MCP", state.localMcpUrl)) }, modifier = Modifier.fillMaxWidth()) { Text("Copy Local MCP URL") }
-    } else {
-        Button(onClick = { model.saveAndTestConnection(server, token) }, modifier = Modifier.fillMaxWidth()) { Text("保存并测试连接") }
-    }
-
-    HorizontalDivider()
-    Text("Reverse Tunnel", style = MaterialTheme.typography.titleMedium)
-    var relayUrl by rememberSaveable(state.tunnelRelayUrl) { mutableStateOf(state.tunnelRelayUrl) }
-    var relayToken by rememberSaveable { mutableStateOf("") }
-    OutlinedTextField(relayUrl, { relayUrl = it }, label = { Text("Relay WebSocket URL (wss://)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-    OutlinedTextField(relayToken, { relayToken = it }, label = { Text("Tunnel token") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
-    Text("Tunnel: ${state.tunnelState}")
-    if (state.tunnelError.isNotBlank()) Text("Tunnel error: ${state.tunnelError}")
-    if (state.tunnelEnabled) {
-        OutlinedButton(onClick = model::stopTunnel, modifier = Modifier.fillMaxWidth()) { Text("Stop reverse tunnel") }
-    } else {
-        Button(onClick = { model.startTunnel(relayUrl, relayToken) }, modifier = Modifier.fillMaxWidth()) { Text("Start reverse tunnel") }
-    }
-}
-
-@Composable
-private fun Diagnostics(state: CompanionUiState, model: CompanionViewModel) {
-    var confirmClear by remember { mutableStateOf(false) }
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("Device ID: ${state.deviceId}")
-            Text("Server reachable: ${if (state.connected) "yes" else "not checked"}")
-            Text("Device registered: ${if (state.deviceRegistered) "yes" else "no"}")
-            Text("Background worker: ${state.backgroundWorkerStatus}")
-            Text("Last periodic collection: ${state.lastPeriodicCollection.asTime()}")
-            Text("Last successful upload: ${state.lastSuccessfulUpload.asTime()}")
-            Text("Last manual heartbeat: ${state.lastManualHeartbeat.asTime()}")
-            Text("Pending events: ${state.pending}")
-            Text("Usage summary available: ${if (state.usage != null) "yes" else "no"}")
-            Text("Usage Access: ${if (state.usageAccess) "granted" else "required"}")
-            Text("Local MCP running: ${if (state.localMcpRunning) "yes" else "no"}")
-            Text("Local MCP error: ${state.localMcpError.ifBlank { "none" }}")
-            Text("Reverse tunnel: ${state.tunnelState}")
-            Text("Tunnel error: ${state.tunnelError.ifBlank { "none" }}")
-            Text("Last API error: ${state.lastError.ifBlank { "none" }}")
-            Text("Detected foreground package: ${state.device.foregroundPackage ?: "none"}")
-            OutlinedButton(onClick = { confirmClear = true }, modifier = Modifier.fillMaxWidth()) { Text("Clear pending queue") }
-        }
-    }
-    if (confirmClear) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            title = { Text("Clear pending queue?") },
-            text = { Text("Only unsent events will be removed. Device registration and settings stay unchanged.") },
-            confirmButton = { TextButton(onClick = { confirmClear = false; model.clearPendingQueue() }) { Text("Clear") } },
-            dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
-        )
-    }
-}
-
-@Composable
-private fun CustomStatusDialog(onDismiss: () -> Unit, onSend: (String) -> Unit) {
-    var value by remember { mutableStateOf("") }
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("自定义状态") },
-        text = { OutlinedTextField(value, { value = it }, label = { Text("状态") }, singleLine = true) },
-        confirmButton = { TextButton(onClick = { if (value.isNotBlank()) onSend(value.trim()) }) { Text("发送") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
-    )
-}
-
-private fun Long.asTime(): String = if (this == 0L) "never" else java.text.DateFormat.getDateTimeInstance().format(java.util.Date(this))

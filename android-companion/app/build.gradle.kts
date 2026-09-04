@@ -25,7 +25,19 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
+    // Prototype-only stable debug key. This prevents every ephemeral CI runner from
+    // producing a differently signed APK. Never reuse this signing key for production.
+    signingConfigs {
+        create("stableDebug") {
+            storeFile = rootProject.file("hermes-ci-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
+        debug { signingConfig = signingConfigs.getByName("stableDebug") }
         release { isMinifyEnabled = false }
     }
 

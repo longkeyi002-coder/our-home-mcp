@@ -1,6 +1,7 @@
 package com.hermes.companion.data
 
 import android.content.Context
+import com.hermes.companion.AppDefaults
 import com.hermes.companion.UsageAccessOnboarding
 import java.util.UUID
 
@@ -11,7 +12,7 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     private val prefs = context.getSharedPreferences("companion_settings", Context.MODE_PRIVATE)
     private val secure = SecureTokenStore(context)
 
-    fun mode(): CompanionMode = runCatching { CompanionMode.valueOf(prefs.getString(KEY_MODE, CompanionMode.CLOUD.name) ?: CompanionMode.CLOUD.name) }.getOrDefault(CompanionMode.CLOUD)
+    fun mode(): CompanionMode = runCatching { CompanionMode.valueOf(prefs.getString(KEY_MODE, CompanionMode.LOCAL.name) ?: CompanionMode.LOCAL.name) }.getOrDefault(CompanionMode.LOCAL)
     fun isLocalMode(): Boolean = mode() == CompanionMode.LOCAL
     fun setMode(value: CompanionMode) { prefs.edit().putString(KEY_MODE, value.name).apply() }
     fun localMcpSecret(): String = secure.get(KEY_LOCAL_MCP_SECRET) ?: UUID.randomUUID().toString().replace("-", "").also { secure.put(KEY_LOCAL_MCP_SECRET, it) }
@@ -19,13 +20,11 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     fun recordLocalMcpError(value: String) { prefs.edit().putString(KEY_LOCAL_MCP_LAST_ERROR, value.take(300)).apply() }
     fun clearLocalMcpError() { prefs.edit().remove(KEY_LOCAL_MCP_LAST_ERROR).apply() }
 
-    fun tunnelRelayUrl(): String = prefs.getString(KEY_TUNNEL_RELAY_URL, "") ?: ""
-    fun saveTunnelRelayUrl(value: String) { prefs.edit().putString(KEY_TUNNEL_RELAY_URL, value.trim()).apply() }
-    fun tunnelToken(): String? = secure.get(KEY_TUNNEL_TOKEN)
-    fun saveTunnelToken(value: String) {
-        val normalized = value.trim()
-        if (normalized.isBlank()) secure.put(KEY_TUNNEL_TOKEN, null) else secure.put(KEY_TUNNEL_TOKEN, normalized)
-    }
+    // Prototype provisioning is baked into the APK. Legacy setters are intentionally no-ops.
+    fun tunnelRelayUrl(): String = AppDefaults.TUNNEL_RELAY_URL
+    fun saveTunnelRelayUrl(@Suppress("UNUSED_PARAMETER") value: String) = Unit
+    fun tunnelToken(): String = AppDefaults.TUNNEL_TOKEN
+    fun saveTunnelToken(@Suppress("UNUSED_PARAMETER") value: String) = Unit
     fun tunnelEnabled(): Boolean = prefs.getBoolean(KEY_TUNNEL_ENABLED, false)
     fun setTunnelEnabled(value: Boolean) {
         prefs.edit()
@@ -43,7 +42,7 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
 
     fun serverUrl(): String = prefs.getString(KEY_SERVER_URL, "") ?: ""
     fun saveServerUrl(value: String) { prefs.edit().putString(KEY_SERVER_URL, value.trim()).apply() }
-    fun deviceId(): String = prefs.getString(KEY_DEVICE_ID, null) ?: "android-${UUID.randomUUID()}".also { prefs.edit().putString(KEY_DEVICE_ID, it).apply() }
+    fun deviceId(): String = AppDefaults.DEVICE_ID
     fun bootstrapToken(): String? = secure.get(KEY_BOOTSTRAP_TOKEN)
     fun saveBootstrapToken(value: String) {
         val normalized = value.trim()
@@ -90,12 +89,9 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     companion object {
         private const val KEY_MODE = "mode"
         private const val KEY_SERVER_URL = "server_url"
-        private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_BOOTSTRAP_TOKEN = "bootstrap_token"
         private const val KEY_LOCAL_MCP_SECRET = "local_mcp_secret"
         private const val KEY_LOCAL_MCP_LAST_ERROR = "local_mcp_last_error"
-        private const val KEY_TUNNEL_RELAY_URL = "tunnel_relay_url"
-        private const val KEY_TUNNEL_TOKEN = "tunnel_token"
         private const val KEY_TUNNEL_ENABLED = "tunnel_enabled"
         private const val KEY_TUNNEL_STATE = "tunnel_state"
         private const val KEY_TUNNEL_LAST_ERROR = "tunnel_last_error"
