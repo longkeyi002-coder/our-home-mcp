@@ -1,12 +1,12 @@
 package com.hermes.companion
 
-import android.content.Intent
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.os.Bundle
-import android.os.Build
-import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -47,22 +47,23 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
-import com.hermes.companion.data.HeartbeatRequest
 import com.hermes.companion.data.CompanionMode
-import com.hermes.companion.local.LocalMcpServer
+import com.hermes.companion.data.HeartbeatRequest
 import com.hermes.companion.data.ObservationRequest
 import com.hermes.companion.data.QueueRepository
 import com.hermes.companion.data.SettingsRepository
 import com.hermes.companion.data.UploadWorker
+import com.hermes.companion.local.LocalMcpServer
 import com.hermes.companion.platform.DeviceStatus
 import com.hermes.companion.platform.DeviceStatusReader
 import com.hermes.companion.platform.UsageTimelineReader
 import com.hermes.companion.platform.UsageTimelineSummary
 import com.hermes.companion.push.PushRegistration
+import com.hermes.companion.tunnel.ReverseTunnelService
 import java.time.Instant
 import java.util.UUID
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -81,6 +82,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        model.resumeTunnelIfEnabled()
         model.refresh()
         if (model.consumeUsageAccessInitialGuide()) {
             startActivity(Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS))
@@ -98,6 +100,12 @@ data class CompanionUiState(
     val deviceRegistered: Boolean = false,
     val localMode: Boolean = false,
     val localMcpUrl: String = "",
+    val localMcpRunning: Boolean = false,
+    val localMcpError: String = "",
+    val tunnelRelayUrl: String = "",
+    val tunnelEnabled: Boolean = false,
+    val tunnelState: String = "disabled",
+    val tunnelError: String = "",
     val pending: Int = 0,
     val lastSuccessfulUpload: Long = 0,
     val lastManualHeartbeat: Long = 0,
@@ -117,6 +125,9 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
         CompanionUiState(
             deviceId = settings.deviceId(),
             serverUrl = settings.serverUrl(),
+            tunnelRelayUrl = settings.tunnelRelayUrl(),
+            tunnelEnabled = settings.tunnelEnabled(),
+            tunnelState = settings.tunnelState(),
             lastManualHeartbeat = settings.lastManualHeartbeat(),
             lastPeriodicCollection = settings.lastPeriodicCollection(),
             lastSuccessfulUpload = settings.lastSuccessfulUpload(),
@@ -124,9 +135,7 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
     )
     val state: StateFlow<CompanionUiState> = _state
 
-    init {
-        refresh()
-    }
+    init { refresh() }
 
     fun refresh() {
         viewModelScope.launch {
@@ -136,6 +145,12 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
                 serverUrl = settings.serverUrl(),
                 localMode = settings.isLocalMode(),
                 localMcpUrl = LocalMcpServer.endpoint(appContext),
+                localMcpRunning = LocalMcpServer.isRunning(),
+                localMcpError = settings.localMcpLastError(),
+                tunnelRelayUrl = settings.tunnelRelayUrl(),
+                tunnelEnabled = settings.tunnelEnabled(),
+                tunnelState = settings.tunnelState(),
+                tunnelError = settings.tunnelLastError(),
                 deviceId = settings.deviceId(),
                 deviceRegistered = !settings.deviceToken().isNullOrBlank(),
                 pending = queue.pendingCount(),
@@ -150,7 +165,6 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
         }
     }
 
-    /** Called from Activity.onResume, including when Usage Access Settings closes. */
     fun consumeUsageAccessInitialGuide(): Boolean =
         usageAccessOnboarding.consumeInitialGuide(DeviceStatusReader.hasUsageAccess(appContext))
 
@@ -164,6 +178,29 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
             UploadWorker.schedulePeriodic(appContext)
             PushRegistration.refresh(appContext)
         }
+        refresh()
+    }
+
+    fun resumeTunnelIfEnabled() {
+        if (settings.tunnelEnabled() && settings.tunnelState() != "connected" && settings.tunnelState() != "connecting") {
+            ReverseTunnelService.start(appContext)
+        }
+    }
+
+    fun startTunnel(relayUrl: String, token: String) {
+        if (!relayUrl.trim().startsWith("wss://") || token.isBlank()) {
+            _state.value = _state.value.copy(tunnelError = "Tunnel relay must use wss:// and a token")
+            return
+        }
+        settings.saveTunnelRelayUrl(relayUrl)
+        settings.saveTunnelToken(token)
+        settings.setTunnelEnabled(true)
+        ReverseTunnelService.start(appContext)
+        refresh()
+    }
+
+    fun stopTunnel() {
+        ReverseTunnelService.stop(appContext)
         refresh()
     }
 
@@ -304,9 +341,7 @@ private fun InfoCard(state: CompanionUiState) {
             Text("Server: ${state.serverUrl.ifBlank { "Not configured" }}")
             Text("Battery: ${state.device.batteryPercent}%${if (state.device.charging) " · charging" else ""}")
             Text("Foreground App: ${state.device.foregroundPackage ?: if (state.usageAccess) "not detected" else "需要权限"}")
-            state.usage?.let { usage ->
-                Text("Current App: ${usage.currentPackageName ?: "none"} · ${usage.currentDurationMs / 1000}s")
-            }
+            state.usage?.let { usage -> Text("Current App: ${usage.currentPackageName ?: "none"} · ${usage.currentDurationMs / 1000}s") }
             Text("Today's tracked apps: ${state.usage?.appTotalsMs?.size ?: 0}")
             Text("Last manual heartbeat: ${state.lastManualHeartbeat.asTime()}")
             Text("Pending events: ${state.pending}")
@@ -328,9 +363,27 @@ private fun SettingsPanel(state: CompanionUiState, model: CompanionViewModel) {
     OutlinedButton(onClick = { model.setMode(CompanionMode.LOCAL) }, modifier = Modifier.fillMaxWidth()) { Text("Use Local MCP Mode") }
     OutlinedButton(onClick = { model.setMode(CompanionMode.CLOUD) }, modifier = Modifier.fillMaxWidth()) { Text("Use Cloud Mode") }
     if (state.localMode) {
+        Text("Local MCP running: ${if (state.localMcpRunning) "yes" else "no"}")
         Text(state.localMcpUrl)
+        if (state.localMcpError.isNotBlank()) Text("Local MCP error: ${state.localMcpError}")
         OutlinedButton(onClick = { (context.getSystemService(ClipboardManager::class.java)).setPrimaryClip(ClipData.newPlainText("Our Home Local MCP", state.localMcpUrl)) }, modifier = Modifier.fillMaxWidth()) { Text("Copy Local MCP URL") }
-    } else Button(onClick = { model.saveAndTestConnection(server, token) }, modifier = Modifier.fillMaxWidth()) { Text("保存并测试连接") }
+    } else {
+        Button(onClick = { model.saveAndTestConnection(server, token) }, modifier = Modifier.fillMaxWidth()) { Text("保存并测试连接") }
+    }
+
+    HorizontalDivider()
+    Text("Reverse Tunnel", style = MaterialTheme.typography.titleMedium)
+    var relayUrl by rememberSaveable(state.tunnelRelayUrl) { mutableStateOf(state.tunnelRelayUrl) }
+    var relayToken by rememberSaveable { mutableStateOf("") }
+    OutlinedTextField(relayUrl, { relayUrl = it }, label = { Text("Relay WebSocket URL (wss://)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+    OutlinedTextField(relayToken, { relayToken = it }, label = { Text("Tunnel token") }, visualTransformation = PasswordVisualTransformation(), singleLine = true, modifier = Modifier.fillMaxWidth())
+    Text("Tunnel: ${state.tunnelState}")
+    if (state.tunnelError.isNotBlank()) Text("Tunnel error: ${state.tunnelError}")
+    if (state.tunnelEnabled) {
+        OutlinedButton(onClick = model::stopTunnel, modifier = Modifier.fillMaxWidth()) { Text("Stop reverse tunnel") }
+    } else {
+        Button(onClick = { model.startTunnel(relayUrl, relayToken) }, modifier = Modifier.fillMaxWidth()) { Text("Start reverse tunnel") }
+    }
 }
 
 @Composable
@@ -348,6 +401,10 @@ private fun Diagnostics(state: CompanionUiState, model: CompanionViewModel) {
             Text("Pending events: ${state.pending}")
             Text("Usage summary available: ${if (state.usage != null) "yes" else "no"}")
             Text("Usage Access: ${if (state.usageAccess) "granted" else "required"}")
+            Text("Local MCP running: ${if (state.localMcpRunning) "yes" else "no"}")
+            Text("Local MCP error: ${state.localMcpError.ifBlank { "none" }}")
+            Text("Reverse tunnel: ${state.tunnelState}")
+            Text("Tunnel error: ${state.tunnelError.ifBlank { "none" }}")
             Text("Last API error: ${state.lastError.ifBlank { "none" }}")
             Text("Detected foreground package: ${state.device.foregroundPackage ?: "none"}")
             OutlinedButton(onClick = { confirmClear = true }, modifier = Modifier.fillMaxWidth()) { Text("Clear pending queue") }
@@ -358,9 +415,7 @@ private fun Diagnostics(state: CompanionUiState, model: CompanionViewModel) {
             onDismissRequest = { confirmClear = false },
             title = { Text("Clear pending queue?") },
             text = { Text("Only unsent events will be removed. Device registration and settings stay unchanged.") },
-            confirmButton = {
-                TextButton(onClick = { confirmClear = false; model.clearPendingQueue() }) { Text("Clear") }
-            },
+            confirmButton = { TextButton(onClick = { confirmClear = false; model.clearPendingQueue() }) { Text("Clear") } },
             dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("Cancel") } },
         )
     }

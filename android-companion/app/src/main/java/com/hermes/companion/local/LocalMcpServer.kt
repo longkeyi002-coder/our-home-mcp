@@ -15,6 +15,8 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
@@ -24,9 +26,12 @@ object LocalMcpServer {
     private const val HOST = "127.0.0.1"
     private const val PORT = 5000
     private const val MAX_BODY_BYTES = 64 * 1024
+    private const val READ_TIMEOUT_MS = 10_000
+    private const val MAX_CLIENTS = 4
     private val running = AtomicBoolean(false)
     @Volatile private var startedAt = 0L
     @Volatile private var socket: ServerSocket? = null
+    @Volatile private var clients: ExecutorService? = null
 
     fun endpoint(context: Context): String = "http://$HOST:$PORT/mcp/${SettingsRepository(context).localMcpSecret()}"
     fun ensureForCurrentMode(context: Context) { if (SettingsRepository(context).isLocalMode()) start(context) else stop() }
@@ -35,22 +40,61 @@ object LocalMcpServer {
     @Synchronized fun start(context: Context) {
         if (running.get()) return
         val app = context.applicationContext
+        val settings = SettingsRepository(app)
         try {
             val server = ServerSocket()
             server.reuseAddress = true
             server.bind(InetSocketAddress(InetAddress.getByName(HOST), PORT))
+            val executor = Executors.newFixedThreadPool(MAX_CLIENTS) { runnable ->
+                Thread(runnable, "hermes-local-mcp-client").apply { isDaemon = true }
+            }
             socket = server
+            clients = executor
             startedAt = System.currentTimeMillis()
             running.set(true)
+            settings.clearLocalMcpError()
             Thread({
-                while (running.get()) runCatching { server.accept() }.getOrNull()?.use { client ->
-                    runCatching { handle(app, client) }
+                while (running.get()) {
+                    val client = try {
+                        server.accept()
+                    } catch (error: Exception) {
+                        if (running.get()) settings.recordLocalMcpError(error.message ?: error::class.simpleName.orEmpty())
+                        break
+                    }
+                    val pool = clients
+                    if (pool == null) {
+                        runCatching { client.close() }
+                        continue
+                    }
+                    pool.execute {
+                        client.use {
+                            it.soTimeout = READ_TIMEOUT_MS
+                            runCatching { handle(app, it) }.onFailure { error ->
+                                settings.recordLocalMcpError(error.message ?: error::class.simpleName.orEmpty())
+                            }
+                        }
+                    }
                 }
-            }, "hermes-local-mcp").apply { isDaemon = true }.start()
-        } catch (_: Exception) { socket?.close(); socket = null; running.set(false) }
+            }, "hermes-local-mcp-accept").apply { isDaemon = true }.start()
+        } catch (error: Exception) {
+            runCatching { socket?.close() }
+            socket = null
+            clients?.shutdownNow()
+            clients = null
+            startedAt = 0L
+            running.set(false)
+            settings.recordLocalMcpError(error.message ?: error::class.simpleName.orEmpty())
+        }
     }
 
-    @Synchronized fun stop() { running.set(false); socket?.close(); socket = null; startedAt = 0L }
+    @Synchronized fun stop() {
+        running.set(false)
+        runCatching { socket?.close() }
+        socket = null
+        clients?.shutdownNow()
+        clients = null
+        startedAt = 0L
+    }
 
     private fun handle(context: Context, client: Socket) {
         if (!client.inetAddress.isLoopbackAddress) return
@@ -119,7 +163,15 @@ object LocalMcpServer {
     private fun callTool(context: Context, params: JSONObject?): JSONObject {
         val args = params?.optJSONObject("arguments") ?: JSONObject()
         val payload = when (params?.optString("name")) {
-            "get_local_health" -> JSONObject().put("mode", "LOCAL").put("serverRunning", isRunning()).put("bindAddress", HOST).put("port", PORT).put("usageAccess", DeviceStatusReader.hasUsageAccess(context)).put("notificationPermission", NotificationManagerCompat.from(context).areNotificationsEnabled()).put("startedAt", startedAt)
+            "get_local_health" -> JSONObject()
+                .put("mode", "LOCAL")
+                .put("serverRunning", isRunning())
+                .put("bindAddress", HOST)
+                .put("port", PORT)
+                .put("usageAccess", DeviceStatusReader.hasUsageAccess(context))
+                .put("notificationPermission", NotificationManagerCompat.from(context).areNotificationsEnabled())
+                .put("startedAt", startedAt)
+                .put("lastError", SettingsRepository(context).localMcpLastError())
             "get_device_context" -> {
                 val status = DeviceStatusReader.read(context)
                 JSONObject().put("battery", status.batteryPercent).put("charging", status.charging).put("connectivity", if (status.online) "online" else "offline").put("foregroundPackage", status.foregroundPackage).put("observedAt", System.currentTimeMillis()).put("freshness", if (status.foregroundPackage == null) "unavailable" else "current")
@@ -143,5 +195,9 @@ object LocalMcpServer {
     }
 
     private fun error(id: Any?, code: Int, message: String) = JSONObject().put("jsonrpc", "2.0").put("id", id).put("error", JSONObject().put("code", code).put("message", message)).toString()
-    private fun write(writer: BufferedWriter, status: Int, body: String) { writer.write("HTTP/1.1 $status OK\r\nContent-Type: application/json\r\nContent-Length: ${body.toByteArray().size}\r\nConnection: close\r\n\r\n$body"); writer.flush() }
+    private fun write(writer: BufferedWriter, status: Int, body: String) {
+        val bytes = body.toByteArray(Charsets.UTF_8)
+        writer.write("HTTP/1.1 $status OK\r\nContent-Type: application/json\r\nContent-Length: ${bytes.size}\r\nConnection: close\r\n\r\n$body")
+        writer.flush()
+    }
 }

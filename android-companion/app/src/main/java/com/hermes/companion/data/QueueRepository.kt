@@ -7,6 +7,8 @@ import com.hermes.companion.platform.UsageTimelineSummary
 import java.time.LocalDate
 import java.util.UUID
 import kotlin.math.min
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.encodeToString
 import retrofit2.HttpException
 
@@ -63,7 +65,16 @@ class QueueRepository private constructor(
 
     suspend fun clearPendingQueue(): Int = dao.deleteAll()
 
-    suspend fun uploadPending(now: Long = System.currentTimeMillis()): UploadResult {
+    /**
+     * All Cloud uploads in this process share one mutex. WorkManager periodic/immediate work and
+     * manual UI uploads therefore cannot read and send the same pending row concurrently.
+     */
+    suspend fun uploadPending(now: Long = System.currentTimeMillis()): UploadResult = uploadMutex.withLock {
+        if (settings.isLocalMode()) return@withLock UploadResult(0, null)
+        uploadPendingLocked(now)
+    }
+
+    private suspend fun uploadPendingLocked(now: Long): UploadResult {
         val serverUrl = settings.serverUrl()
         val bootstrap = settings.bootstrapToken()
         if (serverUrl.isBlank() || bootstrap.isNullOrBlank() && settings.deviceToken().isNullOrBlank()) {
@@ -122,6 +133,7 @@ class QueueRepository private constructor(
 
     suspend fun registerPushAddress(pushFid: String?, pushToken: String) {
         settings.savePushAddress(pushFid, pushToken)
+        if (settings.isLocalMode()) return
         val serverUrl = settings.serverUrl()
         val bootstrap = settings.bootstrapToken() ?: throw IllegalStateException("Registration token is missing")
         require(serverUrl.isNotBlank()) { "Server URL is missing" }
@@ -152,7 +164,7 @@ class QueueRepository private constructor(
     private suspend fun enqueue(type: String, payload: String, dedupeKey: String, scheduleUpload: Boolean = true) {
         dao.insert(PendingEvent(UUID.randomUUID().toString(), type, payload, dedupeKey, System.currentTimeMillis()))
         dao.trimToLimit(MAX_PENDING_EVENTS)
-        if (scheduleUpload) UploadWorker.enqueue(settings.context)
+        if (scheduleUpload && !settings.isLocalMode()) UploadWorker.enqueue(settings.context)
     }
 
     data class UploadResult(val uploaded: Int, val error: String?)
@@ -163,6 +175,7 @@ class QueueRepository private constructor(
         const val BASE_BACKOFF_MS = 30_000L
         const val MAX_BACKOFF_MS = 6 * 60 * 60 * 1000L
         const val MAX_PENDING_EVENTS = 500
+        private val uploadMutex = Mutex()
 
         fun create(context: Context): QueueRepository {
             val database = Room.databaseBuilder(context, AppDatabase::class.java, "hermes-companion.db").build()

@@ -10,6 +10,7 @@ import com.hermes.companion.push.PushRegistration
 class HermesCompanionApplication : Application() {
     override fun onCreate() {
         super.onCreate()
+        HermesNotifications.createChannel(this)
         val settings = SettingsRepository(this)
         if (settings.isLocalMode()) {
             UploadWorker.cancelCloudWork(this)
@@ -18,6 +19,5 @@ class HermesCompanionApplication : Application() {
             UploadWorker.schedulePeriodic(this)
             PushRegistration.refresh(this)
         }
-        HermesNotifications.createChannel(this)
     }
 }

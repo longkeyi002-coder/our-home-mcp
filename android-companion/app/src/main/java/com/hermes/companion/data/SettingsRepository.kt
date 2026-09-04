@@ -15,6 +15,31 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
     fun isLocalMode(): Boolean = mode() == CompanionMode.LOCAL
     fun setMode(value: CompanionMode) { prefs.edit().putString(KEY_MODE, value.name).apply() }
     fun localMcpSecret(): String = secure.get(KEY_LOCAL_MCP_SECRET) ?: UUID.randomUUID().toString().replace("-", "").also { secure.put(KEY_LOCAL_MCP_SECRET, it) }
+    fun localMcpLastError(): String = prefs.getString(KEY_LOCAL_MCP_LAST_ERROR, "") ?: ""
+    fun recordLocalMcpError(value: String) { prefs.edit().putString(KEY_LOCAL_MCP_LAST_ERROR, value.take(300)).apply() }
+    fun clearLocalMcpError() { prefs.edit().remove(KEY_LOCAL_MCP_LAST_ERROR).apply() }
+
+    fun tunnelRelayUrl(): String = prefs.getString(KEY_TUNNEL_RELAY_URL, "") ?: ""
+    fun saveTunnelRelayUrl(value: String) { prefs.edit().putString(KEY_TUNNEL_RELAY_URL, value.trim()).apply() }
+    fun tunnelToken(): String? = secure.get(KEY_TUNNEL_TOKEN)
+    fun saveTunnelToken(value: String) {
+        val normalized = value.trim()
+        if (normalized.isBlank()) secure.put(KEY_TUNNEL_TOKEN, null) else secure.put(KEY_TUNNEL_TOKEN, normalized)
+    }
+    fun tunnelEnabled(): Boolean = prefs.getBoolean(KEY_TUNNEL_ENABLED, false)
+    fun setTunnelEnabled(value: Boolean) {
+        prefs.edit()
+            .putBoolean(KEY_TUNNEL_ENABLED, value)
+            .putString(KEY_TUNNEL_STATE, if (value) "enabled" else "disabled")
+            .apply()
+    }
+    fun tunnelState(): String = prefs.getString(KEY_TUNNEL_STATE, if (tunnelEnabled()) "enabled" else "disabled") ?: "disabled"
+    fun tunnelLastError(): String = prefs.getString(KEY_TUNNEL_LAST_ERROR, "") ?: ""
+    fun recordTunnelState(state: String, error: String? = null) {
+        val editor = prefs.edit().putString(KEY_TUNNEL_STATE, state)
+        if (error.isNullOrBlank()) editor.remove(KEY_TUNNEL_LAST_ERROR) else editor.putString(KEY_TUNNEL_LAST_ERROR, error.take(300))
+        editor.apply()
+    }
 
     fun serverUrl(): String = prefs.getString(KEY_SERVER_URL, "") ?: ""
     fun saveServerUrl(value: String) { prefs.edit().putString(KEY_SERVER_URL, value.trim()).apply() }
@@ -68,6 +93,12 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
         private const val KEY_DEVICE_ID = "device_id"
         private const val KEY_BOOTSTRAP_TOKEN = "bootstrap_token"
         private const val KEY_LOCAL_MCP_SECRET = "local_mcp_secret"
+        private const val KEY_LOCAL_MCP_LAST_ERROR = "local_mcp_last_error"
+        private const val KEY_TUNNEL_RELAY_URL = "tunnel_relay_url"
+        private const val KEY_TUNNEL_TOKEN = "tunnel_token"
+        private const val KEY_TUNNEL_ENABLED = "tunnel_enabled"
+        private const val KEY_TUNNEL_STATE = "tunnel_state"
+        private const val KEY_TUNNEL_LAST_ERROR = "tunnel_last_error"
         private const val KEY_DEVICE_TOKEN = "device_token"
         private const val KEY_PUSH_FID = "push_fid"
         private const val KEY_PUSH_TOKEN = "push_token"
