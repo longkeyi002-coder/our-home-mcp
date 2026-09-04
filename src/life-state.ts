@@ -76,6 +76,12 @@ function isForegroundObservation(item: LifeObservation): boolean {
     || item.kind === "presence_app_dwell" && Boolean(metadataString(item, "packageName") || item.value?.trim());
 }
 
+function isScreenOffObservation(item: LifeObservation): boolean {
+  return item.kind === "presence_screen"
+    && (item.value === "off" || metadataBoolean(item, "interactive") === false)
+    || item.kind === "device_presence" && item.value === "screen_off";
+}
+
 function isPhoneActivity(item: LifeObservation): boolean {
   return isForegroundObservation(item)
     || item.kind === "device_presence" && item.value === "screen_on"
@@ -103,6 +109,7 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
   );
   const latestAny = newest(historical, () => true);
   const latestPresence = newest(usable, (item) => item.kind === "device_presence" || item.kind === "presence_screen");
+  const latestScreenOff = newest(usable, isScreenOffObservation);
   const latestDeviceMetrics = newest(usable, (item) => item.kind === "device_presence");
   const latestForeground = newest(usable, isForegroundObservation);
   const latestConnectivity = newest(usable, (item) => item.metadata?.connectivityState !== undefined);
@@ -111,10 +118,12 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
   const lastObservedAt = latestAny?.observedAt ?? null;
   const lastPhoneActivityAt = latestActivity?.observedAt ?? null;
   const devicePresence = devicePresenceFromObservation(latestPresence);
-  const screenOffAfterForeground = devicePresence === "screen_off"
-    && Boolean(latestPresence)
-    && (!latestForeground || timestamp(latestPresence!.observedAt) >= timestamp(latestForeground.observedAt));
-  const currentForegroundPackage = screenOffAfterForeground ? null : foregroundPackage(latestForeground);
+  // Lock/screen-off terminates knowledge about the old foreground session. A later screen-on
+  // is not enough to resurrect that package; a new transition/dwell/usage observation must
+  // occur after the screen-off event.
+  const foregroundInvalidatedByScreenOff = Boolean(latestScreenOff)
+    && (!latestForeground || timestamp(latestScreenOff!.observedAt) >= timestamp(latestForeground.observedAt));
+  const currentForegroundPackage = foregroundInvalidatedByScreenOff ? null : foregroundPackage(latestForeground);
   const batteryPercent = metadataNumber(latestDeviceMetrics, "batteryPercent");
   const charging = metadataBoolean(latestDeviceMetrics, "charging");
   const connectivityState = asConnectivity(latestConnectivity?.metadata?.connectivityState);
@@ -125,7 +134,7 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
   let currentActivity: LifeActivity = "unknown";
   let confidence = 0;
 
-  if (devicePresence === "screen_off" && screenOffAfterForeground) {
+  if (devicePresence === "screen_off" && foregroundInvalidatedByScreenOff) {
     currentActivity = "probably_idle";
     confidence = 0.9;
     reasons.push("realtime phone presence reports screen off after the latest foreground observation");
@@ -148,8 +157,10 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
     }
   } else if (hasRecentDevice && (devicePresence === "idle" || devicePresence === "screen_off" || activityAgeMs > LIFE_STATE_ACTIVITY_WINDOW_MS)) {
     currentActivity = "probably_idle";
-    confidence = 0.65;
-    reasons.push("no recent foreground app activity was observed");
+    confidence = devicePresence === "screen_on" && foregroundInvalidatedByScreenOff ? 0.5 : 0.65;
+    reasons.push(foregroundInvalidatedByScreenOff && devicePresence === "screen_on"
+      ? "screen is on again but no new foreground app has been observed since the previous screen-off"
+      : "no recent foreground app activity was observed");
   } else if (connectivityState === "unknown" && !hasRecentDevice) {
     reasons.push("no current phone observation is available");
   }
