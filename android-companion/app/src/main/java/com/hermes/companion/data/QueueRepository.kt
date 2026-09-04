@@ -109,13 +109,35 @@ class QueueRepository private constructor(
 
     suspend fun clearPendingQueue(): Int = dao.deleteAll()
 
+    /**
+     * OH-P1/OH-66: a connection test is not successful until both reachability and
+     * bootstrap registration authentication have succeeded. A successful call stores
+     * the device-scoped token that normal telemetry uses afterwards.
+     */
+    suspend fun verifyRegistration(): UploadResult {
+        val serverUrl = settings.serverUrl()
+        val bootstrap = settings.bootstrapToken()
+        if (serverUrl.isBlank()) return fail("registration: Runtime URL is missing")
+        if (bootstrap.isNullOrBlank()) return fail("registration: registration token is missing")
+        val api = runCatching { apiFactory(serverUrl) }
+            .getOrElse { return fail(describeApiError("configuration", it)) }
+        return try {
+            val response = verifyRegistration(api, bootstrap, registrationRequest())
+            settings.saveDeviceToken(response.token)
+            settings.clearApiError()
+            UploadResult(0, null)
+        } catch (error: Throwable) {
+            fail(describeApiError("registration", error))
+        }
+    }
+
     suspend fun uploadPending(now: Long = System.currentTimeMillis()): UploadResult {
         val serverUrl = settings.serverUrl()
         val bootstrap = settings.bootstrapToken()
         if (serverUrl.isBlank() || bootstrap.isNullOrBlank() && settings.deviceToken().isNullOrBlank()) {
-            return fail("Server URL or registration token is missing")
+            return fail("configuration: Server URL or registration token is missing")
         }
-        val api = runCatching { apiFactory(serverUrl) }.getOrElse { return fail(it.safeMessage()) }
+        val api = runCatching { apiFactory(serverUrl) }.getOrElse { return fail(describeApiError("configuration", it)) }
         val authorization = try {
             val deviceToken = settings.deviceToken()
             if (deviceToken.isNullOrBlank()) {
@@ -123,8 +145,8 @@ class QueueRepository private constructor(
                 settings.saveDeviceToken(response.token)
                 "Bearer ${response.token}"
             } else "Bearer $deviceToken"
-        } catch (error: Exception) {
-            return fail(error.safeMessage())
+        } catch (error: Throwable) {
+            return fail(describeApiError("registration", error))
         }
 
         var uploaded = 0
@@ -135,24 +157,31 @@ class QueueRepository private constructor(
                 dao.delete(event.id)
                 uploaded += 1
                 settings.recordSuccessfulUpload(System.currentTimeMillis())
-            } catch (error: Exception) {
-                val retryAuthorization = if (error is HttpException && error.code() == 401 && settings.deviceToken() != null) {
+            } catch (error: Throwable) {
+                if (error is HttpException && error.code() == 401 && settings.hasDeviceToken()) {
                     settings.clearDeviceToken()
-                    runCatching { registerDevice(api) }.getOrNull()
-                } else null
-                try {
-                    if (retryAuthorization == null) throw error
-                    send(api, retryAuthorization, event)
-                    dao.delete(event.id)
-                    uploaded += 1
-                    settings.recordSuccessfulUpload(System.currentTimeMillis())
-                } catch (retryError: Exception) {
-                    val message = retryError.safeMessage()
+                    val retryAuthorization = try {
+                        registerDevice(api)
+                    } catch (registrationError: Throwable) {
+                        val message = describeApiError("re-registration", registrationError)
+                        firstError = firstError ?: message
+                        recordFailure(event, now, message)
+                        continue
+                    }
+                    try {
+                        send(api, retryAuthorization, event)
+                        dao.delete(event.id)
+                        uploaded += 1
+                        settings.recordSuccessfulUpload(System.currentTimeMillis())
+                    } catch (retryError: Throwable) {
+                        val message = describeApiError("upload after re-registration", retryError)
+                        firstError = firstError ?: message
+                        recordFailure(event, now, message)
+                    }
+                } else {
+                    val message = describeApiError("upload", error)
                     firstError = firstError ?: message
-                    val attempts = event.attempts + 1
-                    val delay = min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * (1L shl min(attempts, 8)))
-                    dao.recordFailure(event.id, message, now + delay)
-                    settings.recordApiError(message)
+                    recordFailure(event, now, message)
                 }
             }
         }
@@ -188,6 +217,13 @@ class QueueRepository private constructor(
             TYPE_OBSERVATION -> api.observation(authorization, json.decodeFromString(ObservationRequest.serializer(), event.payload))
             else -> throw IllegalArgumentException("Unknown event type")
         }
+    }
+
+    private suspend fun recordFailure(event: PendingEvent, now: Long, message: String) {
+        val attempts = event.attempts + 1
+        val delay = min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * (1L shl min(attempts, 8)))
+        dao.recordFailure(event.id, message, now + delay)
+        settings.recordApiError(message)
     }
 
     private fun fail(message: String): UploadResult {
