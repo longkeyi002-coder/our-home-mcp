@@ -5,23 +5,32 @@ import android.content.Intent
 import android.os.Handler
 import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
+import com.hermes.companion.privacy.VisualPrivacyStore
 
 class PresenceAccessibilityService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private lateinit var store: PresenceStateStore
     private lateinit var reporter: PresenceReporter
+    private lateinit var privacy: VisualPrivacyStore
     private var pendingPackage: String? = null
     private val commitPending = Runnable {
         val candidate = pendingPackage ?: return@Runnable
         pendingPackage = null
         val now = System.currentTimeMillis()
-        store.commitPackage(candidate, now)?.let(reporter::reportTransition)
+        store.commitPackage(candidate, now)?.let { transition ->
+            // OH-45: a sensitive visual grant is scoped to the current App session.
+            // Switching away invalidates it before any future visual request can use it.
+            privacy.invalidateGrantForPackageChange(transition.toPackage)
+            reporter.reportTransition(transition)
+        }
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         store = PresenceStateStore(applicationContext)
         reporter = PresenceReporter(applicationContext)
+        privacy = VisualPrivacyStore(applicationContext)
+        privacy.pruneExpiredGrant(System.currentTimeMillis())
         store.setAccessibilityConnected(true)
         PresenceRuntime.start(applicationContext)
     }

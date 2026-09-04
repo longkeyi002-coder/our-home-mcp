@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.PowerManager
+import com.hermes.companion.privacy.VisualPrivacyStore
 
 /**
  * OH-43/OH-68: low-cost process-local screen presence monitor.
@@ -22,6 +23,7 @@ object PresenceRuntime {
         val appContext = context.applicationContext
         val store = PresenceStateStore(appContext)
         val reporter = PresenceReporter(appContext)
+        val privacy = VisualPrivacyStore(appContext)
         val power = appContext.getSystemService(PowerManager::class.java)
         val keyguard = appContext.getSystemService(KeyguardManager::class.java)
 
@@ -29,6 +31,7 @@ object PresenceRuntime {
             interactive = power?.isInteractive == true,
             unlocked = power?.isInteractive == true && keyguard?.isKeyguardLocked != true,
         )
+        privacy.pruneExpiredGrant(System.currentTimeMillis())
 
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(receiverContext: Context?, intent: Intent?) {
@@ -36,6 +39,7 @@ object PresenceRuntime {
                 when (intent?.action) {
                     Intent.ACTION_SCREEN_OFF -> {
                         val before = store.snapshot()
+                        privacy.invalidateGrantForLock()
                         if (before.screenInteractive || before.unlocked) {
                             store.setScreenState(interactive = false, unlocked = false)
                             store.endCurrentSession(now, "screen_off")?.let(reporter::reportSessionEnd)
