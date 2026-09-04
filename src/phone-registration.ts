@@ -20,6 +20,12 @@ export function constantTimeTokenEqual(actual: string | undefined, expected: str
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
+/**
+ * OH-P1/OH-42: the Android enrollment token is register-only. It may be injected
+ * into a private APK because compromise grants only device enrollment, not MCP or
+ * direct telemetry ingest. The existing ingest token remains accepted for backward
+ * compatibility and is still the secret used to derive device-scoped credentials.
+ */
 export async function registerPhone(
   store: JsonStore,
   ingestToken: string,
@@ -29,7 +35,10 @@ export async function registerPhone(
   const presentedToken = authorization?.startsWith("Bearer ")
     ? authorization.slice("Bearer ".length)
     : undefined;
-  if (!constantTimeTokenEqual(presentedToken, ingestToken)) throw new Error("Unauthorized");
+  const enrollmentToken = process.env.OUR_HOME_ENROLLMENT_TOKEN?.trim();
+  const authorized = constantTimeTokenEqual(presentedToken, ingestToken)
+    || Boolean(enrollmentToken && constantTimeTokenEqual(presentedToken, enrollmentToken));
+  if (!authorized) throw new Error("Unauthorized");
   const input = phoneRegisterSchema.parse(body);
   await store.registerPhoneDevice(input);
   return {
