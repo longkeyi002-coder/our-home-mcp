@@ -13,6 +13,19 @@ if (file("google-services.json").exists()) {
 fun configuredValue(name: String): String = providers.gradleProperty(name).orNull ?: System.getenv(name).orEmpty()
 fun buildConfigString(value: String): String = "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
 
+val configuredVersionCode = configuredValue("OUR_HOME_VERSION_CODE").toIntOrNull()?.takeIf { it > 0 } ?: 1
+val configuredVersionName = configuredValue("OUR_HOME_VERSION_NAME").ifBlank { "0.1.0" }
+val stableKeystorePath = configuredValue("OUR_HOME_ANDROID_KEYSTORE_PATH")
+val stableKeystorePassword = configuredValue("OUR_HOME_ANDROID_KEYSTORE_PASSWORD")
+val stableKeyAlias = configuredValue("OUR_HOME_ANDROID_KEY_ALIAS")
+val stableKeyPassword = configuredValue("OUR_HOME_ANDROID_KEY_PASSWORD")
+val stableSigningAvailable = listOf(
+    stableKeystorePath,
+    stableKeystorePassword,
+    stableKeyAlias,
+    stableKeyPassword,
+).all { it.isNotBlank() }
+
 android {
     namespace = "com.hermes.companion"
     compileSdk = 35
@@ -21,8 +34,8 @@ android {
         applicationId = "com.hermes.companion"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = configuredVersionCode
+        versionName = configuredVersionName
 
         // OH-P1.11: private builds may inject a default Runtime and register-only
         // enrollment credential. Values are intentionally empty in source control.
@@ -33,8 +46,25 @@ android {
         vectorDrawables { useSupportLibrary = true }
     }
 
+    signingConfigs {
+        if (stableSigningAvailable) {
+            create("ourHomeStable") {
+                storeFile = file(stableKeystorePath)
+                storePassword = stableKeystorePassword
+                keyAlias = stableKeyAlias
+                keyPassword = stableKeyPassword
+            }
+        }
+    }
+
     buildTypes {
-        release { isMinifyEnabled = false }
+        debug {
+            if (stableSigningAvailable) signingConfig = signingConfigs.getByName("ourHomeStable")
+        }
+        release {
+            isMinifyEnabled = false
+            if (stableSigningAvailable) signingConfig = signingConfigs.getByName("ourHomeStable")
+        }
     }
 
     compileOptions {
