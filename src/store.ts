@@ -703,7 +703,7 @@ export class JsonStore {
 
   private async persist(data: OurHomeData): Promise<void> {
       await mkdir(dirname(this.filePath), { recursive: true });
-      const temporaryPath = `${this.filePath}.tmp`;
+      const temporaryPath = `${this.filePath}.tmp-${process.pid}-${randomUUID()}`;
       await this.fileSystem.writeFile(temporaryPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
       await rename(temporaryPath, this.filePath);
   }
