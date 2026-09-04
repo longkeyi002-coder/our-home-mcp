@@ -33,7 +33,7 @@ Required for the normal phone/runtime path:
 Required for direct FCM delivery:
 
 - `OUR_HOME_FIREBASE_PROJECT_ID`
-- `GOOGLE_APPLICATION_CREDENTIALS` pointing to the Firebase service-account JSON on the Runtime host
+- `GOOGLE_APPLICATION_CREDENTIALS` pointing to a readable Firebase service-account JSON on the Runtime host
 
 Required for automatic Wake -> Brain decisions, choose one:
 
@@ -81,7 +81,8 @@ Expected for a complete FCM + Hermes deployment:
     "workerEnabled": true,
     "notifier": "fcm",
     "brain": "hermes",
-    "fcmConfigured": true
+    "fcmConfigured": true,
+    "fcmCredentialsReadable": true
   },
   "devices": [
     {
@@ -91,7 +92,7 @@ Expected for a complete FCM + Hermes deployment:
 }
 ```
 
-A generic decision webhook may report `brain: "webhook"` instead. The endpoint reports only capability categories and booleans; it must never return project ids, credential paths, URLs, tokens, or API keys.
+A generic decision webhook may report `brain: "webhook"` instead. `fcmConfigured=true` only means the required environment variables exist; `fcmCredentialsReadable=true` separately proves that the configured credential file is readable by the Runtime process. The endpoint reports only capability categories and booleans; it must never return project ids, credential paths, URLs, tokens, or API keys.
 
 ## Layer 3 — Notifier-only proof
 
@@ -143,7 +144,8 @@ Acceptance:
 | Push registration is `error` | last push registration error; Runtime registration/auth |
 | `hasPushAddress=false` | Android registration did not reach Runtime |
 | `notifier=none` | Runtime FCM/webhook configuration missing |
-| `fcmConfigured=false` | project id or service-account credential path missing |
+| `fcmConfigured=false` | project id or credential path environment variable missing |
+| `fcmCredentialsReadable=false` | configured credential file missing/unreadable on Runtime host |
 | `workerEnabled=false` | Runtime started without embedded Life Loop |
 | `brain=none` | no Hermes or decision webhook configured; notifier-only test can still work |
 | Candidate remains pending | notifier error/backoff; inspect Runtime logs without secrets |
@@ -155,7 +157,7 @@ P2 proactive messaging is not complete until one real Android device proves all 
 
 - Stable APK contains Firebase config and keeps stable signing identity;
 - Android push registration is `registered`;
-- Runtime reports `workerEnabled=true`, `notifier=fcm`, `fcmConfigured=true`, and a device `hasPushAddress=true`;
+- Runtime reports `workerEnabled=true`, `notifier=fcm`, `fcmConfigured=true`, `fcmCredentialsReadable=true`, and a device `hasPushAddress=true`;
 - notifier-only proactive candidate reaches the backgrounded phone exactly once;
 - a real Wake + Brain decision reaches the phone exactly once;
 - notification tap reaches the agreed conversation destination;
