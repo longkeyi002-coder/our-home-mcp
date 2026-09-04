@@ -110,6 +110,21 @@ class UsageTimelineTracker {
     }
 }
 
+/**
+ * Conservative fallback for OEMs that do not leave a usable active UsageEvents
+ * session. Only a very recent last-used package can be treated as current-ish.
+ */
+fun chooseRecentPackage(
+    candidates: List<Pair<String, Long>>,
+    now: Long,
+    maxAgeMs: Long = 2 * 60 * 1000L,
+): String? = candidates.asSequence()
+    .filter { (packageName, lastUsedAt) ->
+        packageName.isNotBlank() && lastUsedAt > 0L && lastUsedAt <= now && now - lastUsedAt <= maxAgeMs
+    }
+    .maxByOrNull { it.second }
+    ?.first
+
 object UsageTimelineReader {
     fun read(context: Context, now: Long = System.currentTimeMillis()): UsageTimelineSummary? {
         if (!hasUsageAccess(context)) return null
@@ -126,7 +141,15 @@ object UsageTimelineReader {
                 UsageEvents.Event.ACTIVITY_PAUSED, UsageEvents.Event.ACTIVITY_STOPPED -> tracker.onBackground(event.packageName, event.timeStamp)
             }
         }
-        return tracker.summary(now, dayStart)
+        val summary = tracker.summary(now, dayStart)
+        if (summary.currentPackageName != null) return summary
+
+        val recentStart = maxOf(dayStart, now - 5 * 60 * 1000L)
+        val candidates = manager.queryUsageStats(UsageStatsManager.INTERVAL_DAILY, recentStart, now)
+            .orEmpty()
+            .map { it.packageName to it.lastTimeUsed }
+        val fallback = chooseRecentPackage(candidates, now) ?: return summary
+        return summary.copy(currentPackageName = fallback, currentDurationMs = 0L)
     }
 
     private fun hasUsageAccess(context: Context): Boolean {
