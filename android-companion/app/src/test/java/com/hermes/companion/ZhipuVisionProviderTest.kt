@@ -54,7 +54,7 @@ class ZhipuVisionProviderTest {
     @Test
     fun responseIsReducedToBoundedStructuredContext() {
         val body = """{
-          "choices": [{"message": {"content": "```json\n{\\"activity\\":\\"gaming\\",\\"content\\":\\"generic battle scene\\",\\"confidence\\":0.91}\n```"}}]
+          "choices": [{"message": {"content": "```json\n{\"activity\":\"gaming\",\"content\":\"generic battle scene\",\"confidence\":0.91}\n```"}}]
         }"""
         val result = ZhipuVisionProvider.parseResponse(body, "glm-4.6v-flash")
         assertEquals("gaming", result.activity)
@@ -65,7 +65,7 @@ class ZhipuVisionProviderTest {
 
     @Test
     fun unknownActivityFailsClosedToUnknown() {
-        val body = """{"choices":[{"message":{"content":"{\\"activity\\":\\"identity_theft\\",\\"content\\":\\"x\\",\\"confidence\\":7}"}}]}"""
+        val body = """{"choices":[{"message":{"content":"{\"activity\":\"identity_theft\",\"content\":\"x\",\"confidence\":7}"}}]}"""
         val result = ZhipuVisionProvider.parseResponse(body, "glm-4.6v-flash")
         assertEquals("unknown", result.activity)
         assertEquals(1.0, result.confidence)
