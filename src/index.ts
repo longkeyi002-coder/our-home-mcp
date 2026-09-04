@@ -262,9 +262,10 @@ async function handlePhoneRegister(
     response.writeHead(503, { "content-type": "application/json" }).end(JSON.stringify({ error: "Phone registration is not configured" }));
     return;
   }
+  const enrollmentToken = process.env.OUR_HOME_ENROLLMENT_TOKEN;
   try {
     const body = await readJsonBody(request, 16_000);
-    const result = await registerPhone(store, ingestToken, request.headers.authorization, body);
+    const result = await registerPhone(store, ingestToken, request.headers.authorization, body, enrollmentToken);
     response.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify(result));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Phone registration failed";
