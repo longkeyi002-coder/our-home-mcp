@@ -7,7 +7,13 @@ import type { ProactiveNotifier } from "./worker.js";
 export interface FcmSendInput {
   token: string;
   notification: { title: string; body: string };
-  data: { candidateId: string; wakeEventId: string; reason: string; source: "AGENT_LIFE" };
+  data: {
+    candidateId: string;
+    wakeEventId: string;
+    reason: string;
+    source: "AGENT_LIFE";
+    destination: "/chat";
+  };
 }
 
 export interface FcmSender {
@@ -91,6 +97,7 @@ export class FcmNotifier implements ProactiveNotifier {
         wakeEventId: candidate.wakeEventId ?? "",
         reason: candidate.reason,
         source: "AGENT_LIFE",
+        destination: "/chat",
       },
     });
   }
