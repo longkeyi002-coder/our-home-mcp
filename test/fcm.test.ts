@@ -62,7 +62,7 @@ test("push addresses are absent from life and Hermes wake context", async () => 
   assert.equal(serialized.includes("private-token"), false);
 });
 
-test("FCM sends one minimal payload and success marks candidate delivered", async () => {
+test("FCM sends one minimal payload, routes it to chat, and success marks candidate delivered", async () => {
   const store = await freshStore();
   await store.registerPhoneDevice({ deviceId: "android-main", pushToken: "target-token" });
   const candidate = await due(store);
@@ -73,7 +73,13 @@ test("FCM sends one minimal payload and success marks candidate delivered", asyn
   assert.deepEqual(sent[0], {
     token: "target-token",
     notification: { title: candidate.title, body: candidate.message },
-    data: { candidateId: candidate.id, wakeEventId: "wake-1", reason: candidate.reason, source: "AGENT_LIFE" },
+    data: {
+      candidateId: candidate.id,
+      wakeEventId: "wake-1",
+      reason: candidate.reason,
+      source: "AGENT_LIFE",
+      destination: "/chat",
+    },
   });
   assert.equal(store.snapshot().proactiveQueue[0]?.status, "delivered");
 });
