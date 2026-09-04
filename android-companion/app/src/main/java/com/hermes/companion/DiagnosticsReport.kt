@@ -23,6 +23,10 @@ data class DiagnosticsReport(
     val detectedForegroundPackage: String?,
     val usageCurrentPackage: String?,
     val lastApiError: String,
+    val pushRegistrationState: String = "never",
+    val lastPushRegistrationAttempt: Long = 0,
+    val lastPushRegistrationSuccess: Long = 0,
+    val lastPushRegistrationError: String = "",
 ) {
     fun asText(): String = buildString {
         appendLine("Our Home Android diagnostics")
@@ -39,6 +43,10 @@ data class DiagnosticsReport(
         appendLine("Last successful upload: ${formatTime(lastSuccessfulUpload)}")
         appendLine("Last manual heartbeat attempt: ${formatTime(lastManualHeartbeat)}")
         appendLine("Pending events: $pendingEvents")
+        appendLine("Push registration: $pushRegistrationState")
+        appendLine("Last push registration attempt: ${formatTime(lastPushRegistrationAttempt)}")
+        appendLine("Last push registration success: ${formatTime(lastPushRegistrationSuccess)}")
+        appendLine("Last push registration error: ${lastPushRegistrationError.ifBlank { "none" }}")
         appendLine("Usage summary available: ${yesNo(usageSummaryAvailable)}")
         appendLine("Usage Access: ${if (usageAccessGranted) "granted" else "required"}")
         appendLine("Detected foreground package: ${detectedForegroundPackage ?: "none"}")
