@@ -10,6 +10,12 @@ object TelemetryPolicy {
     fun isConfigured(serverUrl: String, bootstrapToken: String?, deviceToken: String?): Boolean =
         serverUrl.isNotBlank() && (!bootstrapToken.isNullOrBlank() || !deviceToken.isNullOrBlank())
 
+    fun shouldInvalidateDeviceToken(previousServerUrl: String, nextServerUrl: String): Boolean {
+        val previous = previousServerUrl.trim().trimEnd('/')
+        val next = nextServerUrl.trim().trimEnd('/')
+        return previous.isNotBlank() && next.isNotBlank() && previous != next
+    }
+
     fun periodicHeartbeatEventId(deviceId: String, observedAtMs: Long): String {
         val bucket = observedAtMs / HEARTBEAT_BUCKET_MS
         return "periodic-heartbeat:$deviceId:$bucket"
