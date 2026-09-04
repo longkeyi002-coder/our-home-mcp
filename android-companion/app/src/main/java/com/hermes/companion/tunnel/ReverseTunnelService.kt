@@ -12,8 +12,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.hermes.companion.data.SettingsRepository
 import com.hermes.companion.push.HermesNotifications
-import java.net.URLEncoder
 import java.util.concurrent.TimeUnit
+import okhttp3.ByteString
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -44,7 +45,14 @@ class ReverseTunnelService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        startAsForeground()
+        stopping = false
+        try {
+            startAsForeground()
+        } catch (error: Throwable) {
+            settings.recordTunnelState("start_failed", error.message ?: error::class.simpleName.orEmpty())
+            stopSelf()
+            return START_NOT_STICKY
+        }
         if (socket == null) connect()
         return START_STICKY
     }
@@ -72,11 +80,16 @@ class ReverseTunnelService : Service() {
             stopSelf()
             return
         }
+        val relayWithToken = buildRelayWebSocketUrl(relayUrl, token)
+        if (relayWithToken == null) {
+            settings.recordTunnelState("configuration_error", "Tunnel relay URL must be a valid wss:// URL")
+            stopSelf()
+            return
+        }
         settings.recordTunnelState("connecting")
-        val separator = if (relayUrl.contains("?")) "&" else "?"
-        val relayWithToken = relayUrl + separator + "token=" + URLEncoder.encode(token, Charsets.UTF_8.name())
         val request = Request.Builder().url(relayWithToken).build()
-        socket = http.newWebSocket(request, object : WebSocketListener() {
+        socket = runCatching {
+            http.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 if (socket !== webSocket) {
                     webSocket.close(1000, "superseded")
@@ -87,10 +100,11 @@ class ReverseTunnelService : Service() {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                if (socket !== webSocket || text.toByteArray(Charsets.UTF_8).size > MAX_FRAME_BYTES) return
-                val request = RelayProtocol.parseRequest(text) ?: return
-                val result = handler.handleMcp(request.body)
-                webSocket.send(RelayProtocol.response(request.id, result.status, result.body))
+                handleFrame(webSocket, text)
+            }
+
+            override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
+                handleFrame(webSocket, bytes.utf8())
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
@@ -105,11 +119,23 @@ class ReverseTunnelService : Service() {
                 scheduleReconnect("WebSocket closed: $code ${reason.take(120)}")
             }
         })
+        }.getOrElse { error ->
+            settings.recordTunnelState("reconnecting", error.message ?: error::class.simpleName.orEmpty())
+            scheduleReconnect(error.message ?: "WebSocket start failed")
+            null
+        }
+    }
+
+    private fun handleFrame(webSocket: WebSocket, frame: String) {
+        if (socket !== webSocket || frame.toByteArray(Charsets.UTF_8).size > MAX_FRAME_BYTES) return
+        val request = RelayProtocol.parseRequest(frame) ?: return
+        val result = runCatching { handler.handleMcp(request.body) }.getOrElse { return }
+        webSocket.send(RelayProtocol.response(request.id, result.status, result.body))
     }
 
     private fun scheduleReconnect(message: String) {
         if (stopping || !settings.tunnelEnabled()) return
-        val delay = (1_000L shl reconnectAttempt.coerceAtMost(6)).coerceAtMost(MAX_RECONNECT_MS)
+        val delay = (1_000L shl reconnectAttempt.coerceAtMost(5)).coerceAtMost(MAX_RECONNECT_MS)
         reconnectAttempt += 1
         settings.recordTunnelState("reconnecting", message)
         mainHandler.removeCallbacksAndMessages(null)
@@ -136,7 +162,17 @@ class ReverseTunnelService : Service() {
     companion object {
         private const val FOREGROUND_ID = 8788
         private const val MAX_FRAME_BYTES = 64 * 1024
-        private const val MAX_RECONNECT_MS = 60_000L
+        private const val MAX_RECONNECT_MS = 30_000L
+
+        internal fun buildRelayWebSocketUrl(rawUrl: String, token: String): String? {
+            val parsed = rawUrl.trim().toHttpUrlOrNull() ?: return null
+            if (parsed.scheme != "wss" || token.isBlank()) return null
+            return parsed.newBuilder()
+                .removeAllQueryParameters("token")
+                .addQueryParameter("token", token.trim())
+                .build()
+                .toString()
+        }
 
         fun start(context: Context): Boolean {
             val app = context.applicationContext
