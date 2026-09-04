@@ -15,8 +15,11 @@ import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
+import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ExecutorService
-import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.ThreadPoolExecutor
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
@@ -28,6 +31,7 @@ object LocalMcpServer {
     private const val MAX_BODY_BYTES = 64 * 1024
     private const val READ_TIMEOUT_MS = 10_000
     private const val MAX_CLIENTS = 4
+    private const val MAX_QUEUED_CLIENTS = 8
     private val running = AtomicBoolean(false)
     @Volatile private var startedAt = 0L
     @Volatile private var socket: ServerSocket? = null
@@ -45,9 +49,15 @@ object LocalMcpServer {
             val server = ServerSocket()
             server.reuseAddress = true
             server.bind(InetSocketAddress(InetAddress.getByName(HOST), PORT))
-            val executor = Executors.newFixedThreadPool(MAX_CLIENTS) { runnable ->
-                Thread(runnable, "hermes-local-mcp-client").apply { isDaemon = true }
-            }
+            val executor = ThreadPoolExecutor(
+                MAX_CLIENTS,
+                MAX_CLIENTS,
+                0L,
+                TimeUnit.MILLISECONDS,
+                ArrayBlockingQueue(MAX_QUEUED_CLIENTS),
+                { runnable -> Thread(runnable, "hermes-local-mcp-client").apply { isDaemon = true } },
+                ThreadPoolExecutor.AbortPolicy(),
+            )
             socket = server
             clients = executor
             startedAt = System.currentTimeMillis()
@@ -66,13 +76,18 @@ object LocalMcpServer {
                         runCatching { client.close() }
                         continue
                     }
-                    pool.execute {
-                        client.use {
-                            it.soTimeout = READ_TIMEOUT_MS
-                            runCatching { handle(app, it) }.onFailure { error ->
-                                settings.recordLocalMcpError(error.message ?: error::class.simpleName.orEmpty())
+                    try {
+                        pool.execute {
+                            client.use {
+                                it.soTimeout = READ_TIMEOUT_MS
+                                runCatching { handle(app, it) }.onFailure { error ->
+                                    settings.recordLocalMcpError(error.message ?: error::class.simpleName.orEmpty())
+                                }
                             }
                         }
+                    } catch (_: RejectedExecutionException) {
+                        // The bounded executor is saturated; do not let one client starve the server.
+                        runCatching { client.close() }
                     }
                 }
             }, "hermes-local-mcp-accept").apply { isDaemon = true }.start()
