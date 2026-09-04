@@ -1,4 +1,4 @@
-# Our Home — 产品与技术总设计 v3
+# Our Home — 产品与技术总设计 v3.1
 
 > **本文件是 `rebuild/ai-life-runtime-v01` 的唯一设计真相来源（Design Constitution）。**
 >
@@ -387,6 +387,129 @@ AI 不能因为用户没回复而责怪或施压。
 
 ---
 
+## OH-43｜Presence 与情境理解
+
+Our Home 可以在用户授权后持续维护低成本的手机 Presence，但“感知到设备状态”不等于“理解用户正在做什么”。
+
+Presence 至少可以包含：
+
+- screen on / off；
+- lock / unlock；
+- foreground App transition；
+- 当前 App 起始时间与 dwell time；
+- 最近活跃 / 长时间无活动。
+
+Context Understanding 必须融合并区分：
+
+- `observed` 设备事实；
+- `user_declared` 用户主动说明；
+- `inferred` 系统推断；
+- 经明确授权产生的 visual observation。
+
+用户主动说明会降低系统为了理解情境而主动观察的必要性，但**不能被解释为永久禁止再次观察**。长时间持续、理解过期或明显冲突仍可重新产生观察理由。
+
+屏幕关闭、锁屏、App 离开等事件必须及时结束或暂停已经过时的活动判断，不能继续把旧状态当成当前现实。
+
+---
+
+## OH-44｜Curiosity 与视觉观察
+
+视觉不是固定周期截图任务。Our Home 应先由低成本规则判断“是否值得看一眼”，再按需触发一次视觉观察。
+
+Curiosity 可以考虑：
+
+- 当前情境是否 UNKNOWN / PARTIAL / STALE / CONFLICT；
+- 同一 App 已持续多久；
+- 距离上次视觉观察多久；
+- 用户是否已经主动说明；
+- 最近是否刚观察过；
+- screen 是否可用；
+- 当前隐私规则；
+- visual cooldown / budget；
+- 后续 AI World 中 AI 当前忙闲状态。
+
+强约束：
+
+1. 不因每次 App transition 调用 Vision 或 Brain。
+2. 不用固定 15/30 分钟高频截图 cron 模拟“关心”。
+3. 同一 App 长时间持续时，即使 App 没切换，也允许 Curiosity 再次增长并偶尔观察。
+4. “看了一眼”与“给用户发消息”必须是两个独立决策；视觉观察可以不产生任何消息。
+5. Curiosity / Soul / Brain 都必须服从 OH-45 Sensitive Guard。
+
+---
+
+## OH-45｜视觉隐私与 Sensitive App Guard
+
+视觉权限属于用户自定义隐私偏好，但安全底线由系统强制执行。
+
+### 默认策略层级
+
+1. **普通 App**：用户授权视觉后，可按 Curiosity 规则偶尔观察。
+2. **私人 App**：相机、相册、摄影、文件、云盘、聊天等默认采用可配置谨慎策略；用户可设为“允许自动观察 / 仅我允许时 / 永远不看”。
+3. **高度敏感 App / 场景**：银行、支付、密码管理、身份认证、支付确认、密码、验证码等默认禁止自动视觉。
+
+### 不可绕过的规则
+
+- Guard 必须在原始截图离开设备前生效。
+- Brain、Soul、Curiosity 和远程 Provider 无权关闭或绕过 Guard。
+- 用户的“永远不看”规则优先于所有自动行为。
+- 系统 Secure Window / `FLAG_SECURE` 必须尊重；不得尝试规避系统截图保护。
+- 不采集键盘输入、密码字段、验证码文本或 Accessibility 原始 UI Tree。
+- 用户明确提出“这次可以看”时，高敏感 App 只建立**一次性或限时临时授权**；切换 App、锁屏、超时或会话结束后自动失效，不得静默转成永久授权。
+- 可以记录“请求观察 / 被 Guard 拦截 / 用户临时授权 / 观察完成”的审计事件，但被禁止页面的内容不得进入日志。
+
+---
+
+## OH-46｜权限与设置体验
+
+Android 权限复杂度不得直接转嫁给用户。
+
+产品应提供引导式授权：
+
+```text
+用户点击允许某项感知
+→ 尽可能直接打开对应系统授权页
+→ 用户完成系统开关
+→ 返回 Our Home
+→ 自动检测授权状态
+→ 成功后进入下一项
+```
+
+要求：
+
+- 能在 App 内直接申请的权限直接申请；
+- 需要 Special App Access / Accessibility 的能力提供一键跳转；
+- 对 OPPO / OnePlus / ColorOS 等侧载 APK 可能出现的“允许受限制的设置”等系统步骤提供设备相关的最短引导；
+- 不能程序化绕过系统确认、锁屏验证或 OEM 安全限制；
+- 权限被系统撤销后，首页只显示简洁“需要修复”，并可一键回到对应设置；
+- Runtime URL、token、worker、pending queue 等工程信息默认下沉到 Advanced / Diagnostics。
+
+Android Companion 的产品定位是 **Our Home 在手机上的感知入口**，不是 Runtime 工程控制台。
+
+---
+
+## OH-47｜主动通知与返回 Our Home
+
+主动消息标准链路：
+
+```text
+Runtime / Brain Decision
+→ FCM
+→ Android system notification
+→ user tap
+→ corresponding Our Home Chat / message destination
+```
+
+要求：
+
+- WSS 断开不影响通知；
+- App 不在前台时可产生系统通知；
+- 通知点击必须携带可追溯 destination / message id，不能只打开诊断首页；
+- 通知内容预览应允许用户选择完整内容、仅显示有新消息、或在锁屏隐藏；
+- “感知到了什么”与“是否发通知”继续服从 OH-40 cooldown / dedupe / quiet hours。
+
+---
+
 # 第六部分｜自主能力与审批
 
 ## OH-50｜自主浏览
@@ -604,6 +727,47 @@ Runtime
 
 ---
 
+## OH-68｜Android 实时 Presence 通道
+
+OH-P1 的 WorkManager / UsageEvents 继续作为低频事实记录和 reconciliation；实时 Presence 采用独立的本地事件通道。
+
+Android 端可以在用户明确授权后使用 AccessibilityService 获取前台窗口/package transition，但必须满足：
+
+- `canRetrieveWindowContent=false`；
+- 不读取 Accessibility 节点文本；
+- 本地 debounce / dedupe 后只上报有意义的状态变化；
+- screen on/off、lock/unlock 独立维护；
+- 网络断开时本地排队；
+- UsageEvents 继续用于补偿、重建和校验；
+- Presence 事件本身不得触发每事件一次 Brain 调用。
+
+---
+
+## OH-69｜视觉数据生命周期
+
+一次视觉观察必须经过：
+
+```text
+Curiosity candidate
+→ local Sensitive Guard
+→ permission/capability check
+→ one screenshot
+→ Vision Provider
+→ structured summary
+→ raw image disposal
+```
+
+要求：
+
+- 原始截图默认不长期持久化；
+- 不把原图写入普通 debug log / diagnostics；
+- 长期数据优先保存结构化摘要、时间、source、confidence、policy decision 和 evidence reference；
+- Vision Provider 与 Brain Provider 解耦；
+- provider/网络失败时不得反复高频重拍；
+- 所有视觉观察都有 cooldown / budget / audit。
+
+---
+
 # 第八部分｜开发顺序
 
 ## OH-P0｜Clean Foundation
@@ -642,6 +806,38 @@ Runtime
 
 ---
 
+## OH-P1.5｜Presence + Visual Observation
+
+```text
+Android realtime presence
+→ Context Understanding
+→ Curiosity
+→ Sensitive Guard
+→ optional Visual Observation
+→ structured context
+```
+
+目标：让哥哥能低成本持续知道手机是否活跃、用户在哪个 App、持续多久；在缺少理解、持续过久或理解过期时偶尔观察，而不是固定周期机械截图。
+
+必须实现：
+
+- foreground transition；
+- screen on/off + lock/unlock；
+- dwell session；
+- local debounce/dedupe/offline queue；
+- UsageEvents reconciliation；
+- per-App visual policy；
+- Sensitive Guard + temporary grant；
+- Android 11+ 可选 screenshot capability；
+- structured visual summary；
+- permission onboarding / repair；
+- diagnostics / audit；
+- raw screenshot 最小生命周期。
+
+详见 `docs/OH_PRESENCE_VISUAL_PLAN.md`。
+
+---
+
 ## OH-P2｜Wake + 主动消息最小闭环
 
 ```text
@@ -655,6 +851,8 @@ Earth change
 ```
 
 先用 Mock Brain 证明 Runtime 独立，再接 Hermes。
+
+OH-P2 还必须验证 notification payload 可以把用户带回对应 Our Home Chat / message destination，而不是只打开 Companion 诊断首页。
 
 ---
 
@@ -836,8 +1034,10 @@ PR 必须说明：
 - OH-30 / OH-32 → EARTH 查询不能返回 AI_WORLD 事实；
 - OH-32 → inferred 不得被查询为 observed；
 - OH-40 → 相同事件不能产生 wake/message storm；
+- OH-45 → Sensitive Guard 不能被 Curiosity / Brain 绕过；
 - OH-60 → Runtime Core 不依赖 Hermes 类型；
 - OH-63 → WSS 断开时 FCM 链路仍成立；
+- OH-69 → raw screenshot 不进入普通长期日志；
 - OH-51 → 未审批 Skill / MCP proposal 不得执行安装；
 - OH-67 → Brain 不可用时 AI World deterministic state 仍可推进。
 
