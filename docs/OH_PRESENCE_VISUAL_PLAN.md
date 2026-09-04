@@ -1,6 +1,6 @@
 # Our Home — Presence / Visual / Privacy / Notification 实施计划
 
-Status: PLANNED — coding must not begin until the Design Constitution is amended.
+Status: IN PROGRESS — Design Constitution 已完成本阶段前置修订，后续代码必须继续遵守对应 Design IDs 与测试门槛。
 
 Canonical design: `docs/OUR_HOME_DESIGN.md`
 
@@ -187,6 +187,7 @@ Android Companion 定位：Our Home 在手机上的“感知入口”，不是 R
 3. transition debounce/dedupe + Room queue。
 4. diagnostics 增加 Presence health 与 last transition。
 5. 继续保留 UsageEvents reconciliation。
+6. sparse dwell milestones：本地低成本检查，只有有意义时长节点才上报，不按分钟制造事件。
 
 ### Stage 2 — Privacy Policy V0.1
 
