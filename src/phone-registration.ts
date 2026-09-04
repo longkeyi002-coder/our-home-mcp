@@ -20,9 +20,36 @@ export function constantTimeTokenEqual(actual: string | undefined, expected: str
   return actualBuffer.length === expectedBuffer.length && timingSafeEqual(actualBuffer, expectedBuffer);
 }
 
+export function normalizeEnrollmentToken(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized ? normalized : undefined;
+}
+
+export function assertPhoneTokenSeparation(
+  ingestToken: string | undefined,
+  enrollmentToken: string | undefined,
+): void {
+  const normalizedIngest = ingestToken?.trim();
+  const normalizedEnrollment = normalizeEnrollmentToken(enrollmentToken);
+  if (
+    normalizedIngest
+    && normalizedEnrollment
+    && constantTimeTokenEqual(normalizedEnrollment, normalizedIngest)
+  ) {
+    throw new Error("OUR_HOME_ENROLLMENT_TOKEN must differ from OUR_HOME_INGEST_TOKEN");
+  }
+}
+
+// OH-P1/OH-42: fail closed at process startup if the register-only credential
+// is accidentally configured to the same value as the high-privilege ingest secret.
+assertPhoneTokenSeparation(
+  process.env.OUR_HOME_INGEST_TOKEN,
+  process.env.OUR_HOME_ENROLLMENT_TOKEN,
+);
+
 /** Check if presented token matches any of the valid tokens */
 function matchesAnyToken(presentedToken: string | undefined, validTokens: string[]): boolean {
-  return validTokens.some(token => constantTimeTokenEqual(presentedToken, token));
+  return validTokens.some((token) => constantTimeTokenEqual(presentedToken, token));
 }
 
 export async function registerPhone(
@@ -35,11 +62,16 @@ export async function registerPhone(
   const presentedToken = authorization?.startsWith("Bearer ")
     ? authorization.slice("Bearer ".length)
     : undefined;
-  
-  // Accept enrollment token (for APK auto-registration) OR ingest token
-  const validTokens = enrollmentToken ? [ingestToken, enrollmentToken] : [ingestToken];
+  const normalizedEnrollmentToken = normalizeEnrollmentToken(enrollmentToken);
+
+  // Accept the register-only enrollment token OR the existing ingest token.
+  // Whitespace around the enrollment token is ignored so deployment env-file
+  // formatting cannot cause a misleading registration 401.
+  const validTokens = normalizedEnrollmentToken
+    ? [ingestToken, normalizedEnrollmentToken]
+    : [ingestToken];
   if (!matchesAnyToken(presentedToken, validTokens)) throw new Error("Unauthorized");
-  
+
   const input = phoneRegisterSchema.parse(body);
   await store.registerPhoneDevice(input);
   return {
