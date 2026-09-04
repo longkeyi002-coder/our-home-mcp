@@ -10,6 +10,9 @@ if (file("google-services.json").exists()) {
     pluginManager.apply("com.google.gms.google-services")
 }
 
+fun configuredValue(name: String): String = providers.gradleProperty(name).orNull ?: System.getenv(name).orEmpty()
+fun buildConfigString(value: String): String = "\"${value.replace("\\", "\\\\").replace("\"", "\\\"")}\""
+
 android {
     namespace = "com.hermes.companion"
     compileSdk = 35
@@ -20,6 +23,11 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "0.1.0"
+
+        // OH-P1.11: private builds may inject a default Runtime and register-only
+        // enrollment credential. Values are intentionally empty in source control.
+        buildConfigField("String", "DEFAULT_RUNTIME_URL", buildConfigString(configuredValue("OUR_HOME_DEFAULT_RUNTIME_URL")))
+        buildConfigField("String", "ENROLLMENT_TOKEN", buildConfigString(configuredValue("OUR_HOME_ENROLLMENT_TOKEN")))
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
