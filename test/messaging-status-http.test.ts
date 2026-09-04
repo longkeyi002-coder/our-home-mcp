@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -42,8 +42,10 @@ async function stopChild(child: ChildProcess): Promise<void> {
   if (child.exitCode === null) child.kill("SIGKILL");
 }
 
-test("compiled phone status exposes P2 capability categories without secrets", { timeout: 15_000 }, async (t) => {
+test("compiled phone status exposes P2 capability categories without configuration values", { timeout: 15_000 }, async (t) => {
   const dir = await mkdtemp(join(tmpdir(), "our-home-messaging-status-"));
+  const credentialFile = join(dir, "firebase-test.json");
+  await writeFile(credentialFile, "{}", "utf8");
   const port = await reserveFreePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const child = spawn(process.execPath, ["dist/index.js"], {
@@ -55,12 +57,12 @@ test("compiled phone status exposes P2 capability categories without secrets", {
       OUR_HOME_MCP_PORT: String(port),
       OUR_HOME_DATA_FILE: join(dir, "data.json"),
       OUR_HOME_SEED: "false",
-      OUR_HOME_MCP_TOKEN: "admin-secret",
+      OUR_HOME_MCP_TOKEN: "test-admin-value",
       OUR_HOME_RUN_WORKER: "false",
-      OUR_HOME_FIREBASE_PROJECT_ID: "private-project-id",
-      GOOGLE_APPLICATION_CREDENTIALS: "/private/service-account.json",
-      OUR_HOME_HERMES_API_URL: "https://private-hermes.example",
-      OUR_HOME_HERMES_API_KEY: "private-hermes-key",
+      OUR_HOME_FIREBASE_PROJECT_ID: "project-id-placeholder",
+      GOOGLE_APPLICATION_CREDENTIALS: credentialFile,
+      OUR_HOME_HERMES_API_URL: "https://example.invalid/hermes",
+      OUR_HOME_HERMES_API_KEY: "api-key-placeholder",
     },
     stdio: "ignore",
   });
@@ -68,7 +70,7 @@ test("compiled phone status exposes P2 capability categories without secrets", {
   await waitForHealth(baseUrl, child);
 
   const response = await fetch(`${baseUrl}/v1/phone/status`, {
-    headers: { authorization: "Bearer admin-secret" },
+    headers: { authorization: "Bearer test-admin-value" },
   });
   assert.equal(response.status, 200);
   const text = await response.text();
@@ -78,16 +80,17 @@ test("compiled phone status exposes P2 capability categories without secrets", {
     notifier: "fcm",
     brain: "hermes",
     fcmConfigured: true,
+    fcmCredentialsReadable: true,
   });
   assert.deepEqual(body.devices, []);
 
-  for (const secret of [
-    "admin-secret",
-    "private-project-id",
-    "/private/service-account.json",
-    "private-hermes.example",
-    "private-hermes-key",
+  for (const value of [
+    "test-admin-value",
+    "project-id-placeholder",
+    credentialFile,
+    "example.invalid/hermes",
+    "api-key-placeholder",
   ]) {
-    assert.equal(text.includes(secret), false);
+    assert.equal(text.includes(value), false);
   }
 });
