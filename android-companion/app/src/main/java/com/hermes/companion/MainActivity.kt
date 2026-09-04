@@ -470,6 +470,8 @@ private fun PrivacyPage(state: CompanionUiState, model: CompanionViewModel, onBa
         }
     }
 
+    VisualAppPermissionsSection(state)
+
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("视觉观察", style = MaterialTheme.typography.titleMedium)
