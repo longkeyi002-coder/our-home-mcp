@@ -18,6 +18,13 @@ class TelemetryPolicyTest {
     }
 
     @Test
+    fun `OH-66 device credential is invalidated when Runtime endpoint changes`() {
+        assertFalse(TelemetryPolicy.shouldInvalidateDeviceToken("", "https://runtime-a.example"))
+        assertFalse(TelemetryPolicy.shouldInvalidateDeviceToken("https://runtime-a.example", "https://runtime-a.example/"))
+        assertTrue(TelemetryPolicy.shouldInvalidateDeviceToken("https://runtime-a.example", "https://runtime-b.example"))
+    }
+
+    @Test
     fun `OH-40 periodic heartbeat id is stable inside one bucket`() {
         val bucket = TelemetryPolicy.HEARTBEAT_BUCKET_MS
         val first = TelemetryPolicy.periodicHeartbeatEventId("android-test", bucket * 42 + 1)
