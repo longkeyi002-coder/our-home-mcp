@@ -17,8 +17,9 @@ class AppSensitivityClassifierTest {
     }
 
     @Test
-    fun `OH-45 ordinary app remains normal`() {
-        assertEquals(SensitivityClass.NORMAL, AppSensitivityClassifier.classify("com.example.game"))
+    fun `OH-45 unrecognized ordinary-looking app fails closed`() {
+        assertEquals(SensitivityClass.PRIVATE, AppSensitivityClassifier.classify("com.example.game"))
+        assertEquals(SensitivityClass.PRIVATE, AppSensitivityClassifier.classify("tv.danmaku.bili"))
     }
 
     @Test
