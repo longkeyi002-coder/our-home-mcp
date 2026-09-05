@@ -25,6 +25,14 @@ function matchingVisualSummary(
   );
 }
 
+function requestIsFresh(request: VisualRequestRecord, asOfMs: number): boolean {
+  if (request.status !== "observed" || !request.observedAt) return false;
+  const observedAtMs = Date.parse(request.observedAt);
+  return Number.isFinite(observedAtMs)
+    && observedAtMs <= asOfMs
+    && asOfMs - observedAtMs < VISUAL_RESULT_WAKE_TTL_MS;
+}
+
 export function visualResultWakeExpired(wakeEvent: WakeEvent, asOf: string): boolean {
   if (wakeEvent.type !== "visual_result") return false;
   const observedAtMs = Date.parse(wakeEvent.observedAt);
@@ -45,18 +53,21 @@ export async function enqueueVisualResultWakeEvents(
   const asOfMs = Date.parse(asOf);
   if (!Number.isFinite(asOfMs)) return [];
 
+  // Fast read-only preflight: the worker runs frequently, so the normal no-result path must not
+  // rewrite the JSON store every cycle. The mutation below revalidates everything atomically.
+  const snapshot = store.snapshot();
+  const hasCandidate = (snapshot.visualRequests ?? []).some((request) => {
+    if (!requestIsFresh(request, asOfMs)) return false;
+    const dedupeKey = `visual_result:${request.requestId}`;
+    return !snapshot.wakeEvents.some((item) => item.dedupeKey === dedupeKey)
+      && Boolean(matchingVisualSummary(snapshot.observations, request));
+  });
+  if (!hasCandidate) return [];
+
   const created: WakeEvent[] = [];
   await store.update((data) => {
     for (const request of data.visualRequests ?? []) {
-      if (request.status !== "observed" || !request.observedAt) continue;
-      const observedAtMs = Date.parse(request.observedAt);
-      if (
-        !Number.isFinite(observedAtMs)
-        || observedAtMs > asOfMs
-        || asOfMs - observedAtMs >= VISUAL_RESULT_WAKE_TTL_MS
-      ) {
-        continue;
-      }
+      if (!requestIsFresh(request, asOfMs)) continue;
 
       const dedupeKey = `visual_result:${request.requestId}`;
       if (data.wakeEvents.some((item) => item.dedupeKey === dedupeKey)) continue;
