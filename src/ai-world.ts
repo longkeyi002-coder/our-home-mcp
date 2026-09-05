@@ -2,6 +2,9 @@ import type {
   AiWorldActivity,
   AiWorldData,
   AiWorldHistoryEvent,
+  AiWorldItemKind,
+  AiWorldItemProvenance,
+  AiWorldItemStatus,
   AiWorldRoom,
   AiWorldSnapshot,
   AiWorldState,
@@ -153,7 +156,7 @@ export function createAiWorldData(asOf: string, timezone: string): AiWorldData {
     lastTransitionAt: asOf,
     updatedAt: asOf,
   };
-  return { state, history: [initialHistory(state)] };
+  return { state, history: [initialHistory(state)], items: [] };
 }
 
 export function assertValidAiWorldData(data: AiWorldData): void {
@@ -193,6 +196,23 @@ export function assertValidAiWorldData(data: AiWorldData): void {
       throw new Error("AI World history has an invalid event kind");
     }
     assertTimestamp(event.occurredAt);
+  }
+
+  if (data.items !== undefined) {
+    if (!Array.isArray(data.items)) throw new Error("AI World items must be an array");
+    const kinds = new Set<AiWorldItemKind>(["task", "waiting", "plan", "hobby", "interest", "collection"]);
+    const statuses = new Set<AiWorldItemStatus>(["active", "completed", "archived"]);
+    const provenances = new Set<AiWorldItemProvenance>(["inferred", "simulated", "authored", "model_generated"]);
+    for (const item of data.items) {
+      if (item.world !== "AI_WORLD" || item.source !== "AGENT_LIFE" || !provenances.has(item.provenance)) {
+        throw new Error("AI World item has an invalid world boundary");
+      }
+      if (!kinds.has(item.kind) || !statuses.has(item.status) || !item.id || !item.title.trim()) {
+        throw new Error("AI World item has invalid structured fields");
+      }
+      assertTimestamp(item.createdAt);
+      assertTimestamp(item.updatedAt);
+    }
   }
 }
 
@@ -238,6 +258,7 @@ export function advanceAiWorldData(
     data: {
       state,
       history: [event, ...current.history].slice(0, MAX_HISTORY),
+      items: current.items ?? [],
     },
   };
 }
