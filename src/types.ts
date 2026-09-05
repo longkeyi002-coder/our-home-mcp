@@ -35,6 +35,10 @@ export type WakeEventType = "became_active" | "became_idle" | "device_offline" |
 export type WakeEventStatus = "pending" | "handled" | "dismissed";
 export type WakeEventPriority = "low" | "normal" | "high";
 export type VisualRequestStatus = "pending" | "observed";
+export type AiWorldWeather = "clear" | "cloudy" | "rain";
+export type AiWorldWorkState = "resting" | "preparing" | "working" | "off_duty";
+export type AiWorldActivity = "sleeping" | "morning_routine" | "focused_work" | "midday_break" | "free_time" | "winding_down";
+export type AiWorldRoom = "bedroom" | "study" | "living_room" | "kitchen";
 
 export interface DiaryEntry {
   id: string;
@@ -193,6 +197,44 @@ export interface RoutineWindow {
   updatedAt: string;
 }
 
+export interface AiWorldState {
+  world: "AI_WORLD";
+  provenance: "simulated";
+  timezone: string;
+  home: "our_home";
+  room: AiWorldRoom;
+  weather: AiWorldWeather;
+  workState: AiWorldWorkState;
+  currentActivity: AiWorldActivity;
+  /** Stable local-date/daypart key used for deterministic idempotency. */
+  phaseKey: string;
+  lastTransitionAt: string;
+  updatedAt: string;
+}
+
+export interface AiWorldHistoryEvent {
+  id: string;
+  world: "AI_WORLD";
+  provenance: "simulated";
+  kind: "initialized" | "state_transition";
+  occurredAt: string;
+  fromPhaseKey?: string;
+  toPhaseKey: string;
+  changes: Partial<Record<"room" | "weather" | "workState" | "currentActivity", string>>;
+}
+
+export interface AiWorldData {
+  state: AiWorldState;
+  history: AiWorldHistoryEvent[];
+}
+
+export interface AiWorldSnapshot {
+  /** Computed current absolute clock; reading it does not require a persistence write. */
+  clockAt: string;
+  state: AiWorldState;
+  recentHistory: AiWorldHistoryEvent[];
+}
+
 export interface HeartbeatRecord {
   id: string;
   occurredAt: string;
@@ -269,6 +311,8 @@ export interface OurHomeData {
   phoneDeviceRegistrations: PhoneDeviceRegistration[];
   /** Runtime-issued requests awaiting or having completed one Android-local guarded capture. */
   visualRequests?: VisualRequestRecord[];
+  /** Canonical P3 AI World state/history; intentionally separate from legacy HomeState. */
+  aiWorld?: AiWorldData;
 }
 
 export interface DataStatus {
