@@ -20,6 +20,9 @@ export type RelationshipReplyProposalClass =
   | "suggestions_less"
   | "correction";
 
+export type RelationshipReplyDirectionalClass = Exclude<RelationshipReplyProposalClass, "correction">;
+export type RelationshipReplyProposalStatus = "pending" | "confirmed" | "corrected" | "dismissed";
+
 export interface RelationshipReplyContentRecord {
   id: string;
   world: "EARTH";
@@ -47,8 +50,12 @@ export interface RelationshipReplyInterpretationProposal {
   proposalClass: RelationshipReplyProposalClass;
   summary: string;
   basisKey: string;
-  status: "pending";
+  status: RelationshipReplyProposalStatus;
   createdAt: string;
+  /** P6.3 terminal user-review metadata. Original inference fields remain immutable. */
+  reviewedAt?: string;
+  reviewRecordId?: string;
+  resolvedClass?: RelationshipReplyDirectionalClass;
 }
 
 export interface RelationshipReplyReviewInput {
@@ -130,6 +137,13 @@ const reviewDecisionSchema = z.discriminatedUnion("action", [
   }).strict(),
 ]);
 
+const DIRECTIONAL_CLASSES = new Set<RelationshipReplyDirectionalClass>([
+  "proactive_messages_more",
+  "proactive_messages_less",
+  "suggestions_more",
+  "suggestions_less",
+]);
+
 function timestamp(value: string, label: string): number {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) throw new Error(`Invalid ${label}: ${value}`);
@@ -207,8 +221,34 @@ function assertProposal(record: RelationshipReplyInterpretationProposal): void {
   }).success) {
     throw new Error("Relationship reply proposal payload is invalid");
   }
-  if (record.status !== "pending") throw new Error("Relationship reply proposal has invalid status");
-  timestamp(record.createdAt, "relationship reply proposal createdAt");
+  if (!["pending", "confirmed", "corrected", "dismissed"].includes(record.status)) {
+    throw new Error("Relationship reply proposal has invalid status");
+  }
+  const createdAt = timestamp(record.createdAt, "relationship reply proposal createdAt");
+  if (record.status === "pending") {
+    if (record.reviewedAt || record.reviewRecordId || record.resolvedClass) {
+      throw new Error("Pending relationship reply proposal cannot carry terminal review metadata");
+    }
+    return;
+  }
+  if (!record.reviewedAt || !record.reviewRecordId) {
+    throw new Error("Terminal relationship reply proposal requires user-review metadata");
+  }
+  if (timestamp(record.reviewedAt, "relationship reply proposal reviewedAt") < createdAt) {
+    throw new Error("Relationship reply proposal cannot be reviewed before creation");
+  }
+  if (record.status === "dismissed") {
+    if (record.resolvedClass) throw new Error("Dismissed relationship reply proposal cannot carry resolvedClass");
+    return;
+  }
+  if (!record.resolvedClass || !DIRECTIONAL_CLASSES.has(record.resolvedClass)) {
+    throw new Error("Confirmed/corrected relationship reply proposal requires directional resolvedClass");
+  }
+  if (record.status === "confirmed") {
+    if (record.proposalClass === "correction" || record.resolvedClass !== record.proposalClass) {
+      throw new Error("Confirmed proposal must preserve its original directional class");
+    }
+  }
 }
 
 function replyContentRecords(snapshot: OurHomeData): RelationshipReplyContentRecord[] {
