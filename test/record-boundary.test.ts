@@ -90,10 +90,23 @@ test("OH-30: legacy internal callers without a boundary fail closed into FICTION
   assert.equal(store.snapshot().activities.every((item) => item.world === "FICTION"), true);
 });
 
-test("OH-30/OH-31/OH-32: MCP requires explicit boundaries and validates illegal pairs", async () => {
+test("OH-30/OH-31/OH-32: MCP preserves explicit boundaries, rejects illegal pairs, and quarantines legacy calls", async () => {
   const store = await createStore();
   const { client, server } = await connectedClient(store);
   try {
+    const legacyDiary = await client.callTool({
+      name: "home.write_diary",
+      arguments: {
+        title: "旧 MCP 调用",
+        body: "没有提供边界时必须进入隔离区。",
+        author: "agent",
+        visibility: "shared",
+      },
+    });
+    assert.equal(legacyDiary.isError, undefined);
+    const legacyEntry = (legacyDiary.structuredContent as { entry: { world: string; provenance: string } }).entry;
+    assert.deepEqual([legacyEntry.world, legacyEntry.provenance], ["FICTION", "authored"]);
+
     const validDiary = await client.callTool({
       name: "home.write_diary",
       arguments: {
