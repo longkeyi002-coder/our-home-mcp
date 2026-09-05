@@ -1,5 +1,7 @@
 package com.hermes.companion.vision
 
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -21,6 +23,16 @@ import com.hermes.companion.MainActivity
  * visual observation fails closed rather than becoming invisible surveillance.
  */
 object VisualObservationIndicator {
+    private val activeRequests = mutableSetOf<String>()
+    private val _active = MutableStateFlow(false)
+    val active = _active.asStateFlow()
+
+    @Synchronized
+    private fun markActive(requestId: String, active: Boolean) {
+        if (active) activeRequests.add(requestId) else activeRequests.remove(requestId)
+        _active.value = activeRequests.isNotEmpty()
+    }
+
     private const val CHANNEL_ID = "our_home_visual_active"
     private const val CHANNEL_NAME = "屏幕观察"
     private const val NOTIFICATION_SALT = 0x4f480000
@@ -52,6 +64,7 @@ object VisualObservationIndicator {
 
         return try {
             NotificationManagerCompat.from(appContext).notify(notificationId(request.requestId), notification)
+            markActive(request.requestId, true)
             true
         } catch (_: SecurityException) {
             false
@@ -59,7 +72,11 @@ object VisualObservationIndicator {
     }
 
     fun stop(context: Context, request: VisualCaptureRequest) {
-        NotificationManagerCompat.from(context.applicationContext).cancel(notificationId(request.requestId))
+        try {
+            NotificationManagerCompat.from(context.applicationContext).cancel(notificationId(request.requestId))
+        } finally {
+            markActive(request.requestId, false)
+        }
     }
 
     private fun createChannel(context: Context) {
@@ -80,3 +97,4 @@ object VisualObservationIndicator {
 
     private fun notificationId(requestId: String): Int = NOTIFICATION_SALT xor requestId.hashCode()
 }
+
