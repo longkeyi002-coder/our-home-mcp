@@ -26,10 +26,12 @@ import type {
   WakeDecision,
   ObservationProvenance,
   ObservationWorld,
+  VisualRequestRecord,
 } from "./types.js";
 import { deriveLifeState } from "./life-state.js";
 import { deriveWakeEventDrafts } from "./wake-engine.js";
 import { assertValidObservationBoundary, resolveObservationBoundary } from "./world-boundary.js";
+import { VISUAL_REQUEST_TTL_MS, type VisualOpportunity } from "./visual-request.js";
 
 const now = () => new Date().toISOString();
 export interface StoreFileSystem { writeFile: typeof writeFile }
@@ -96,6 +98,7 @@ function emptyData(): OurHomeData {
     wakeEvents: [],
     wakeEngineState: emptyWakeEngineState(),
     phoneDeviceRegistrations: [],
+    visualRequests: [],
   };
 }
 
@@ -155,6 +158,7 @@ function seedData(): OurHomeData {
     wakeEvents: [],
     wakeEngineState: emptyWakeEngineState(),
     phoneDeviceRegistrations: [],
+    visualRequests: [],
   };
 }
 
@@ -188,6 +192,7 @@ function migrateData(value: unknown): OurHomeData {
     wakeEvents?: OurHomeData["wakeEvents"];
     wakeEngineState?: OurHomeData["wakeEngineState"];
     phoneDeviceRegistrations?: OurHomeData["phoneDeviceRegistrations"];
+    visualRequests?: OurHomeData["visualRequests"];
   };
   const hasBaseShape =
     Array.isArray(candidate.diaries) &&
@@ -210,6 +215,7 @@ function migrateData(value: unknown): OurHomeData {
       wakeEvents: [],
       wakeEngineState: emptyWakeEngineState(),
       phoneDeviceRegistrations: [],
+      visualRequests: [],
     };
   }
   if (
@@ -239,6 +245,8 @@ function migrateData(value: unknown): OurHomeData {
       ? { ...entry, status: "dismissed" as const, processingAt: undefined } : entry),
     wakeEngineState: candidate.schemaVersion === 2 ? emptyWakeEngineState() : candidate.wakeEngineState ?? emptyWakeEngineState(),
     phoneDeviceRegistrations: candidate.phoneDeviceRegistrations ?? [],
+    // This is a new empty runtime queue, not a migration of historical observations.
+    visualRequests: candidate.visualRequests ?? [],
   };
 }
 
@@ -330,6 +338,67 @@ export class JsonStore {
     return structuredClone(events);
   }
 
+  /**
+   * Converts a deterministic Curiosity eligibility result into one short-lived Brain wake.
+   * It deliberately does not create a capture request; only applyWakeDecision(request_visual)
+   * can do that. At most one unresolved opportunity is kept for the same foreground session.
+   */
+  async enqueueVisualOpportunity(opportunity: VisualOpportunity): Promise<WakeEvent> {
+    const current = deriveLifeState(this.data.observations, opportunity.observedAt);
+    const previous = this.data.wakeEngineState.lastLifeState ?? current;
+    let result: WakeEvent | undefined;
+    await this.update((data) => {
+      const existing = data.wakeEvents.find((item) =>
+        item.type === "visual_opportunity"
+        && item.status === "pending"
+        && item.visualContext?.sessionId === opportunity.sessionId,
+      );
+      if (existing) {
+        result = existing;
+        return;
+      }
+      const event: WakeEvent = {
+        id: randomUUID(),
+        type: "visual_opportunity",
+        status: "pending",
+        priority: "low",
+        createdAt: opportunity.observedAt,
+        observedAt: opportunity.observedAt,
+        reason: `Curiosity eligibility gate passed: ${opportunity.curiosityReason}`,
+        dedupeKey: `visual_opportunity:${opportunity.sessionId}:${opportunity.observedAt}:${opportunity.curiosityReason}`,
+        lifeState: structuredClone(current),
+        previousLifeState: structuredClone(previous),
+        visualContext: {
+          deviceId: opportunity.deviceId,
+          packageName: opportunity.packageName,
+          sessionId: opportunity.sessionId,
+          curiosityReason: opportunity.curiosityReason,
+          expiresAt: opportunity.expiresAt,
+        },
+      };
+      data.wakeEvents.unshift(event);
+      data.wakeEvents = data.wakeEvents.slice(0, 200);
+      result = event;
+    });
+    if (!result) throw new Error("Visual opportunity was not queued");
+    return structuredClone(result);
+  }
+
+  hasPendingVisualDecision(deviceId: string, asOf = now()): boolean {
+    return this.snapshot().wakeEvents.some((item) =>
+      item.type === "visual_opportunity"
+      && item.status === "pending"
+      && item.visualContext?.deviceId === deviceId
+      && item.visualContext.expiresAt > asOf,
+    );
+  }
+
+  getPendingVisualRequest(deviceId: string, asOf = now()): VisualRequestRecord | undefined {
+    return (this.snapshot().visualRequests ?? [])
+      .filter((item) => item.status === "pending" && item.deviceId === deviceId && item.expiresAt > asOf)
+      .sort((left, right) => right.issuedAt.localeCompare(left.issuedAt))[0];
+  }
+
   async resolveWakeEvent(id: string, status: Exclude<WakeEventStatus, "pending">): Promise<WakeEvent> {
     let result: WakeEvent | undefined;
     await this.update((data) => {
@@ -352,6 +421,45 @@ export class JsonStore {
       if (!result) throw new Error(`Wake event not found: ${id}`);
       if (result.status === "handled") return;
       if (result.status !== "pending") throw new Error(`Pending wake event not found: ${id}`);
+
+      if (result.type === "visual_opportunity" && decision.action === "proactive_message") {
+        throw new Error("Visual opportunity cannot directly create a proactive message");
+      }
+      if (result.type !== "visual_opportunity" && decision.action === "request_visual") {
+        throw new Error("Only a visual opportunity may request visual observation");
+      }
+
+      if (decision.action === "request_visual") {
+        const visual = result.visualContext;
+        if (!visual || visual.expiresAt <= observedAt) {
+          result.status = "dismissed";
+          return;
+        }
+        data.visualRequests ??= [];
+        const existing = data.visualRequests.find((item) => item.wakeEventId === id);
+        if (!existing) {
+          const issuedAtMs = Date.parse(observedAt);
+          const opportunityExpiresAtMs = Date.parse(visual.expiresAt);
+          const requestExpiresAtMs = Math.min(opportunityExpiresAtMs, issuedAtMs + VISUAL_REQUEST_TTL_MS);
+          if (!Number.isFinite(issuedAtMs) || !Number.isFinite(opportunityExpiresAtMs) || requestExpiresAtMs <= issuedAtMs) {
+            result.status = "dismissed";
+            return;
+          }
+          data.visualRequests.unshift({
+            requestId: `visual-brain:${id}`,
+            deviceId: visual.deviceId,
+            packageName: visual.packageName,
+            sessionId: visual.sessionId,
+            reason: decision.reason,
+            issuedAt: new Date(issuedAtMs).toISOString(),
+            expiresAt: new Date(requestExpiresAtMs).toISOString(),
+            status: "pending",
+            wakeEventId: id,
+          });
+          data.visualRequests = data.visualRequests.slice(0, 200);
+        }
+      }
+
       if (decision.action === "proactive_message") {
         const existing = data.proactiveQueue.find((item) => item.wakeEventId === id);
         if (!existing) {
@@ -499,6 +607,14 @@ export class JsonStore {
       };
       data.observations.unshift(observation);
       compactUsageSummaryObservations(data);
+      if (observation.kind === "visual_observation_summary") {
+        const requestId = typeof observation.metadata?.requestId === "string" ? observation.metadata.requestId : undefined;
+        const request = requestId ? (data.visualRequests ?? []).find((item) => item.requestId === requestId) : undefined;
+        if (request && request.status === "pending") {
+          request.status = "observed";
+          request.observedAt = observation.observedAt;
+        }
+      }
       appendActivity(data, {
         kind: "observation_recorded",
         title: "记录一条生活观察",
@@ -746,4 +862,3 @@ export function parseBoolean(value: string | undefined, fallback: boolean): bool
   if (value === undefined) return fallback;
   return value.toLowerCase() !== "false";
 }
-
