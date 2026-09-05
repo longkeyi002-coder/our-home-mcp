@@ -25,57 +25,88 @@ class VisualObservationCoordinatorTest {
     @Test
     fun disabledVisionNeverAttemptsCapture() = runTest {
         var captureCalled = false
+        var indicatorCalled = false
         val coordinator = VisualObservationCoordinator(
             isEnabledAndConfigured = { false },
             capture = { _, _ -> captureCalled = true; true },
             provider = FakeProvider(),
+            beginIndicator = { indicatorCalled = true; true },
         )
 
         val outcome = coordinator.observe(request)
         assertIs<VisualObservationOutcome.Blocked>(outcome)
         assertEquals("visual_not_enabled_or_configured", outcome.reason)
         assertFalse(captureCalled)
+        assertFalse(indicatorCalled)
     }
 
     @Test
-    fun unavailableAccessibilityFailsWithoutProviderCall() = runTest {
+    fun unavailableIndicatorFailsClosedBeforeCapture() = runTest {
+        var captureCalled = false
+        val coordinator = VisualObservationCoordinator(
+            isEnabledAndConfigured = { true },
+            capture = { _, _ -> captureCalled = true; true },
+            provider = FakeProvider(),
+            beginIndicator = { false },
+        )
+
+        val outcome = coordinator.observe(request)
+        assertIs<VisualObservationOutcome.Blocked>(outcome)
+        assertEquals("visual_indicator_unavailable", outcome.reason)
+        assertFalse(captureCalled)
+    }
+
+    @Test
+    fun unavailableAccessibilityFailsWithoutProviderCallAndEndsIndicator() = runTest {
         val provider = FakeProvider()
+        var endCount = 0
         val coordinator = VisualObservationCoordinator(
             isEnabledAndConfigured = { true },
             capture = { _, _ -> false },
             provider = provider,
+            beginIndicator = { true },
+            endIndicator = { endCount += 1 },
         )
 
         val outcome = coordinator.observe(request)
         assertIs<VisualObservationOutcome.Failed>(outcome)
         assertEquals("accessibility_service_unavailable", outcome.reason)
         assertFalse(provider.called)
+        assertEquals(1, endCount)
     }
 
     @Test
-    fun localGuardBlockNeverCallsProvider() = runTest {
+    fun localGuardBlockNeverCallsProviderAndEndsIndicator() = runTest {
         val provider = FakeProvider()
+        var endCount = 0
         val coordinator = VisualObservationCoordinator(
             isEnabledAndConfigured = { true },
             capture = { _, callback -> callback(VisualCaptureOutcome.Blocked("PROTECTED_REQUIRES_TEMPORARY_GRANT")); true },
             provider = provider,
+            beginIndicator = { true },
+            endIndicator = { endCount += 1 },
         )
 
         val outcome = coordinator.observe(request)
         assertIs<VisualObservationOutcome.Blocked>(outcome)
         assertEquals("PROTECTED_REQUIRES_TEMPORARY_GRANT", outcome.reason)
         assertFalse(provider.called)
+        assertEquals(1, endCount)
     }
 
     @Test
-    fun allowedCaptureIsAnalyzedExactlyOnceAndFrameIsClosed() = runTest {
+    fun allowedCaptureIsAnalyzedExactlyOnceFrameIsClosedAndIndicatorEnds() = runTest {
         val bytes = byteArrayOf(1, 2, 3)
         val frame = EphemeralVisualFrame.jpeg("request-1", "com.example.game", bytes)
         val provider = FakeProvider()
+        var beginCount = 0
+        var endCount = 0
         val coordinator = VisualObservationCoordinator(
             isEnabledAndConfigured = { true },
             capture = { _, callback -> callback(VisualCaptureOutcome.Captured(frame)); true },
             provider = provider,
+            beginIndicator = { beginCount += 1; true },
+            endIndicator = { endCount += 1 },
         )
 
         val outcome = coordinator.observe(request)
@@ -84,6 +115,8 @@ class VisualObservationCoordinatorTest {
         assertTrue(provider.called)
         assertTrue(frame.isClosed)
         assertTrue(bytes.all { it == 0.toByte() })
+        assertEquals(1, beginCount)
+        assertEquals(1, endCount)
     }
 
     private class FakeProvider : VisionProvider {
