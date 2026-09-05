@@ -13,27 +13,27 @@
 
 | Design | Requirement | Protection | Status |
 |---|---|---|---|
-| OH-30 / OH-32 | Earth / AI World / Fiction records cannot leak across factual queries | `world-boundary.test.ts` protects strict observation evidence; `record-boundary.test.ts` protects diary/action/relationship/activity boundaries, approval inheritance and world-filtered reads; `LONG_LIVED_RECORD_BOUNDARY_CLASSIFICATION.md` excludes Runtime control state from canonical memory; P4 preference/Soul corruption is rejected by generic AI World validation; P4.4 reflection input is AI World-only; P4.5 keeps Earth feedback separate from derived AI World evidence; P5 exploration/reflection/maybe-share remain AI World-only and cannot write Earth observations or delivery queues | COVERED |
-| OH-31 | Long-lived semantic records preserve world/provenance/source/time | Observation schema + `record-boundary.test.ts` + `routine-boundary.test.ts`; diary/action/relationship/activity carry explicit boundaries and RoutineWindow is fixed to `EARTH/user_declared`; P4 continuity/preference/Soul records carry explicit AI World boundaries, timestamps and evidence traces; reflection output binds exact source review evidence; feedback Bridge keeps explicit Earth and AI World records; P5 Experience/Collection/share-intent records preserve exact topic/public-Web/reflection bases | COVERED |
-| OH-40 | Repeated events do not produce wake/message storms | Wake cooldown/dedupe tests + `TelemetryPolicyTest` stable heartbeat bucket ID + Room unique dedupe key instrumentation coverage; P5 exploration memory and maybe-share intents use deterministic basis dedupe and a five-pending cap | COVERED |
-| OH-41 | User can correct/delete/revoke/pause and control per-App sensing | Configuration gate + explicit manual fallback + diagnostics copy without credential values; `PresencePrivacyRulesTest` protects per-App identity allow/hide semantics; P4.5 supports bounded corrective feedback; broader pause/delete/revoke controls still pending | PARTIAL |
+| OH-30 / OH-32 | Earth / AI World / Fiction records cannot leak across factual queries | `world-boundary.test.ts` protects strict observation evidence; `record-boundary.test.ts` protects diary/action/relationship/activity boundaries, approval inheritance and world-filtered reads; `LONG_LIVED_RECORD_BOUNDARY_CLASSIFICATION.md` excludes Runtime control state from canonical memory; P4 preference/Soul corruption is rejected by generic AI World validation; P4.4 reflection input is AI World-only; P4.5 keeps Earth feedback separate from derived AI World evidence; P5 exploration/reflection/maybe-share remain AI World-only and cannot write Earth observations or delivery queues; P6.1 keeps relationship signals as explicit Earth records and uses P4.5 as the only Bridge to AI World preference evidence | COVERED |
+| OH-31 | Long-lived semantic records preserve world/provenance/source/time | Observation schema + `record-boundary.test.ts` + `routine-boundary.test.ts`; diary/action/relationship/activity carry explicit boundaries and RoutineWindow is fixed to `EARTH/user_declared`; P4 continuity/preference/Soul records carry explicit AI World boundaries, timestamps and evidence traces; reflection output binds exact source review evidence; feedback Bridge keeps explicit Earth and AI World records; P5 Experience/Collection/share-intent records preserve exact topic/public-Web/reflection bases; P6.1 relationship signals bind an exact delivered proactive candidate, provenance and event time | COVERED |
+| OH-40 | Repeated events do not produce wake/message storms | Wake cooldown/dedupe tests + `TelemetryPolicyTest` stable heartbeat bucket ID + Room unique dedupe key instrumentation coverage; P5 exploration memory and maybe-share intents use deterministic basis dedupe and a five-pending cap; P6.1 stable `signalKey` replay is idempotent and cannot reinforce the same product signal twice | COVERED |
+| OH-41 | User can correct/delete/revoke/pause and control per-App sensing | Configuration gate + explicit manual fallback + diagnostics copy without credential values; `PresencePrivacyRulesTest` protects per-App identity allow/hide semantics; P4.5 supports bounded corrective feedback; P6.1 records explicit delivered-message relationship feedback but learned-strategy review/revocation UI is still pending | PARTIAL |
 | OH-42 | Sensitive sensing/credentials are minimized before data leaves Android | `TelemetryPolicyTest`; `PresencePrivacyRulesTest`; `UsagePrivacyFilterTest` covers current App/session/totals/category redaction; register-only enrollment token cannot ingest directly (`phone-enrollment.test.ts`); diagnostics URL query/secret redaction test; Usage Access manual acceptance | PARTIAL / MANUAL |
 | OH-43 | Presence distinguishes observed/user-declared/inferred context; stale sessions end on screen/app changes | Presence state/session tests + Runtime Context Understanding tests | TODO / MANUAL |
 | OH-44 | Visual observation is curiosity-driven, not fixed high-frequency cron; looking and messaging are separate decisions | Curiosity cooldown/budget/state tests + no-per-transition Brain/Vision regression test | TODO |
 | OH-45 | Sensitive Guard blocks protected apps/scenes before upload and cannot be bypassed by Brain/Curiosity; Presence-hidden apps cannot be observed visually; temporary grants expire | Local privacy-policy unit tests + `PresencePrivacyRulesTest` + `VisualCaptureBridge` local Presence gate + secure-window/manual device acceptance + temporary-grant lifecycle tests | TODO / MANUAL |
 | OH-46 | Permission onboarding detects current state and routes users to the shortest supported system setting without bypassing OS security; App privacy UI remains simple | Android permission-state/navigation tests + searchable launcher-App list manual acceptance + OPPO/OnePlus real-device manual acceptance | TODO / MANUAL |
-| OH-47 | FCM notification opens the intended Our Home Chat/message destination and obeys preview policy | Notification payload/deep-link tests + foreground/background real-device acceptance; P5 explicitly stops at internal `maybe_share` and does not bypass this delivery boundary | TODO / MANUAL |
+| OH-47 | FCM notification opens the intended Our Home Chat/message destination and obeys preview policy | Notification payload/deep-link tests + foreground/background real-device acceptance; P5 explicitly stops at internal `maybe_share` and does not bypass this delivery boundary; P6.1 accepts feedback only after the proactive candidate is actually delivered | TODO / MANUAL |
 | OH-50 | Autonomous browsing cannot silently perform external side effects | P5.1–P5.5 tests protect public-Web-only/no-auth/no-side-effect capability, GET-only concrete provider, rejected redirects, bounded output/bytes, traceable AI World persistence, single-Life-Loop integration, internal maybe-share only, and no direct `proactiveQueue`/FCM/Android mutation | COVERED |
 | OH-51 | Skill/MCP proposal cannot install without approval | Proposal/approval state-machine tests | TODO |
-| OH-52 | Risk Level 2/3 actions require confirmation and remain independent from observation permissions | Action policy tests; P3 Level-0 AI World MCP is side-effect isolated; P5 exploration/share-intent contracts have no external-action surface; Level 2/3 confirmation policy remains future work | TODO |
+| OH-52 | Risk Level 2/3 actions require confirmation and remain independent from observation permissions | Action policy tests; P3 Level-0 AI World MCP is side-effect isolated; P5 exploration/share-intent contracts have no external-action surface; P6.1 feedback capture has no device/external action surface; Level 2/3 confirmation policy remains future work | TODO |
 | OH-60 | Runtime Core is provider-neutral | `BrainAdapter` compile boundary + mock brain tests; P4.4 adds provider-neutral `AiWorldReflectionAdapter`; P5 adds provider-neutral `AiWorldExplorationAdapter` with concrete gateway adapter behind it; add import-boundary guard | PARTIAL |
 | OH-61 | Daily telemetry survives without control WSS | Android HTTPS queue/upload + auto-config planning tests + compiled Runtime ingest/device auth + register-only enrollment test; real-device validation remains | PARTIAL / MANUAL |
 | OH-62 | Remote live read uses separate control path | Relay/Local MCP integration test when migrated | TODO |
 | OH-63 | FCM delivery does not depend on WSS | Notifier tests + future disconnected-WSS integration test | PARTIAL |
-| OH-64 | Runtime remains event-driven; no high-frequency LLM life loop | WorkManager 15-minute approximate schedule, immediate worker, wake scheduling tests, queue retry/backoff; P4 review maturity/preference/Soul maintenance is deterministic; P4.4 reflection is due/budget gated; P5 exploration is default-off/free-time/topic gated with one call/cycle, six-hour success cooldown, one-hour failure backoff and two attempts/UTC-day; P5 runs inside the same single-owner Life Loop with no second scheduler | COVERED |
-| OH-65 | Model calls are bounded to cognition-worthy work | P4 deterministic maturity/preference/Soul/feedback work is zero-model-cost; P4 reflection has persisted cooldown/backoff/daily budget; P5 disabled/no-topic/non-free-time paths make zero provider calls, exploration has persisted cooldown/backoff/daily limits, and reflection→maybe-share adds no model call | COVERED |
+| OH-64 | Runtime remains event-driven; no high-frequency LLM life loop | WorkManager 15-minute approximate schedule, immediate worker, wake scheduling tests, queue retry/backoff; P4 review maturity/preference/Soul maintenance is deterministic; P4.4 reflection is due/budget gated; P5 exploration is default-off/free-time/topic gated with one call/cycle, six-hour success cooldown, one-hour failure backoff and two attempts/UTC-day; P5 runs inside the same single-owner Life Loop with no second scheduler; P6.1 feedback capture is event-driven and zero-model-cost | COVERED |
+| OH-65 | Model calls are bounded to cognition-worthy work | P4 deterministic maturity/preference/Soul/feedback work is zero-model-cost; P4 reflection has persisted cooldown/backoff/daily budget; P5 disabled/no-topic/non-free-time paths make zero provider calls, exploration has persisted cooldown/backoff/daily limits, and reflection→maybe-share adds no model call; P6.1 product feedback capture and P4.5 mapping add no model call | COVERED |
 | OH-66 | Runtime/Android state is diagnosable without secret leakage | compiled `/v1/phone/status` tests; staged Android API-error tests; `DiagnosticsReportTest`; periodic/immediate worker state exposed | PARTIAL / MANUAL |
-| OH-67 | Provider/tool failures degrade gracefully | FCM/Hermes retry tests + Android Room retry + staged auth errors + production start scripts; AI World deterministic progression is isolated from provider failure; P4 reflection and identity maintenance are failure-isolated; P5 provider/contract/persistence/share-cap failures back off or fail closed without blocking Earth heartbeat/Wake/Care/Delivery | COVERED |
+| OH-67 | Provider/tool failures degrade gracefully | FCM/Hermes retry tests + Android Room retry + staged auth errors + production start scripts; AI World deterministic progression is isolated from provider failure; P4 reflection and identity maintenance are failure-isolated; P5 provider/contract/persistence/share-cap failures back off or fail closed without blocking Earth heartbeat/Wake/Care/Delivery; P6.1 malformed/undelivered/colliding feedback fails closed without delivery or external side effects | COVERED |
 | OH-68 | Realtime Presence uses event-driven package/screen events, local dedupe/queue, per-App identity redaction before upload, no Accessibility tree retrieval, while UsageEvents remains reconciliation | Accessibility config/service tests + transition dedupe tests + `PresencePrivacyRulesTest` + `UsagePrivacyFilterTest` + Android/Runtime observation-kind contract test + queue tests + real-device verification | TODO / MANUAL |
 | OH-69 | Raw screenshot is ephemeral, guarded before provider upload, never placed in ordinary diagnostics/logs, and retries are bounded | Visual pipeline lifecycle/redaction tests + Presence-hidden visual gate + visual-audit package redaction + manual provider failure test | TODO / MANUAL |
 | OH-P1 | Real Android observation reaches persisted Life State | Runtime integration tests, Android telemetry/usage/auto-config tests, diagnostics tests and `OH_P1_ACCEPTANCE.md`; actual phone evidence still required | PARTIAL / MANUAL |
@@ -42,7 +42,7 @@
 | OH-P3 | AI World persists while model sleeps | `ai-world*.test.ts` coverage proves deterministic state/history, restart/catch-up, explicit location, complete structured continuity kinds, provider-independent worker progression, bounded MCP access and Earth isolation; acceptance recorded in `OH_P3_ACCEPTANCE.md` | COVERED |
 | OH-P4 | Continuity + Soul evolve slowly and traceably | P4.1 continuity tests protect reusable public continuity/no hidden CoT; P4.2 preference tests protect evidence bounds/dedupe/decay; P4.3 Soul tests protect reviewed multi-evidence slow change/audit; P4.4 reflection tests protect sparse model cognition, exact source binding, AI World-only input, strict output, resource bounds and Worker isolation; P4.5 feedback tests protect Earth→AI World evidence translation and no direct Soul overwrite; final worker test proves zero-model-cost review/Soul catch-up; acceptance recorded in `OH_P4_ACCEPTANCE.md` | COVERED |
 | OH-P5 | Autonomous exploration produces traceable experience/share intent | P5.1 gate tests protect default-off/current-free-time/topic eligibility and budget; P5.2 tests protect concrete GET-only public-Web gateway plus traceable Experience/Collection persistence and retry dedupe; P5.3 worker tests protect single-Life-Loop integration and 12h review maturity; P5.4 tests protect strict internal maybe-share basis/dedupe/cap/no-delivery boundary; P5.5 worker tests protect autonomous reflection→maybe-share handoff and failure isolation; acceptance recorded in `OH_P5_ACCEPTANCE.md` | COVERED |
-| OH-P6 | User feedback affects future strategy without direct overwrite | P4.5 feedback substrate and Feedback→Preference→review→Soul tests protect the learning boundary; automatic product-signal capture/strategy adaptation remains P6 | PARTIAL |
+| OH-P6 | User feedback affects future strategy without direct overwrite | P4.5 protects Feedback→Preference→review→Soul bounds; P6.1 `relationship-feedback.test.ts` protects delivered-message binding, explicit-vs-ambiguous signal semantics, fixed strategy mappings, idempotency and no direct Soul/delivery/Android mutation; reply-content interpretation, learned-strategy review/revocation and final P6 review remain pending | PARTIAL |
 | OH-P7 | Remote read and controlled actions are auditable | relay/action policy tests | TODO |
 
 ## OH-P1 evidence split
@@ -158,7 +158,7 @@ P4.2 automated:
 
 - interest evidence is explicit `AI_WORLD` memory with stable evidence keys and optional evidence refs;
 - one evidence item is hard-capped to a `0.05` score effect;
-- duplicate `(interestKey, evidenceKey)` input is idempotent and cannot reinforce twice;
+- duplicate `(interestKey,evidenceKey)` input is idempotent and cannot reinforce twice;
 - reducer output is independent of evidence write order;
 - score remains bounded in `[-1,1]`;
 - non-neutral preference decays toward zero by a deterministic `0.005` per 24 hours;
@@ -301,6 +301,25 @@ Acceptance: `docs/OH_P5_ACCEPTANCE.md`.
 
 P5 deliberately stops at internal `maybe_share`. A future Bridge/Care policy must independently decide whether any intent becomes an Earth proactive message.
 
+## OH-P6 evidence split
+
+P6.1 automated:
+
+- relationship signals bind one exact existing delivered proactive candidate;
+- feedback timestamps cannot precede `deliveredAt` or occur after capture time;
+- explicit `like`/`dislike`/`accept_suggestion`/`reject_suggestion` actions persist as `EARTH/user_declared/RELATIONSHIP`;
+- ambiguous `reply`/`ignore` persist as `EARTH/observed/RELATIONSHIP` and do not automatically create Preference evidence;
+- explicit product signals map to fixed strategy interests and fixed P4.5 feedback signals; callers cannot inject arbitrary interest keys or learning strength;
+- exact `signalKey` replay is idempotent and conflicting reuse fails closed;
+- the referenced proactive message is not rewritten by feedback capture;
+- capture adds no model call, notification, Android action, observation mutation or direct Soul write;
+- restart preserves relationship-signal records and dedupe behavior.
+
+Test: `test/relationship-feedback.test.ts`.
+Implementation note: `docs/P6_RELATIONSHIP_FEEDBACK_V01.md`.
+
+P6 remains partial: reply-content semantics, learned-strategy review/correction/revocation and final P6 Phase Review are still pending. Mere absence of interaction must not be automatically treated as dislike.
+
 ## Rule for adding features
 
 When an Issue adds a new design capability:
@@ -312,7 +331,7 @@ When an Issue adds a new design capability:
 
 ## Rule for bugs
 
-A bug fix should identify which design requirement was violated. The regression test should reference that requirement in its test name or nearby comment when practical.
+A bug fix should identify which design requirement was violated. The regression test should reference the requirement in its test name or nearby comment when practical.
 
 ## Observation and long-lived-record boundary integration review
 
