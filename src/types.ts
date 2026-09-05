@@ -38,6 +38,8 @@ export type VisualRequestStatus = "pending" | "observed";
 
 export interface DiaryEntry {
   id: string;
+  world: ObservationWorld;
+  provenance: ObservationProvenance;
   title: string;
   body: string;
   author: Actor;
@@ -62,6 +64,8 @@ export interface RelationshipEvent {
 
 export interface ActionItem {
   id: string;
+  world: ObservationWorld;
+  provenance: ObservationProvenance;
   title: string;
   description?: string;
   status: ActionStatus;
@@ -73,6 +77,8 @@ export interface ActionItem {
 
 export interface AgentActivity {
   id: string;
+  world: ObservationWorld;
+  provenance: ObservationProvenance;
   kind: string;
   title: string;
   summary?: string;
