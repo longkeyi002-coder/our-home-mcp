@@ -107,6 +107,12 @@ function assertPreference(record: AiWorldPreferenceState): void {
   if (timestamp(record.updatedAt, "preference updatedAt") < createdAt) {
     throw new Error("Preference state updatedAt cannot precede creation");
   }
+  if (record.lastReviewedAt !== undefined) {
+    const reviewedAt = timestamp(record.lastReviewedAt, "preference lastReviewedAt");
+    if (reviewedAt < createdAt || reviewedAt > evaluatedAt) {
+      throw new Error("Preference lastReviewedAt is outside the evaluated lifecycle");
+    }
+  }
   if (record.nextReviewAt !== undefined && timestamp(record.nextReviewAt, "preference nextReviewAt") < evaluatedAt) {
     throw new Error("Preference nextReviewAt cannot precede last evaluation");
   }
@@ -211,6 +217,7 @@ function derivePreferenceState(
     evidenceIds: sorted.slice(-MAX_PREFERENCE_EVIDENCE_IDS).map((item) => item.id),
     lastEvidenceAt: sorted[sorted.length - 1]!.occurredAt,
     lastEvaluatedAt: asOf,
+    ...(existing?.lastReviewedAt ? { lastReviewedAt: existing.lastReviewedAt } : {}),
     ...(nextReviewAt(asOf, score) ? { nextReviewAt: nextReviewAt(asOf, score) } : {}),
     createdAt: existing?.createdAt ?? asOf,
     updatedAt: asOf,
@@ -336,6 +343,7 @@ export async function reviewDueAiWorldPreferences(
       const current = memory.preferences[index]!;
       if (!current.nextReviewAt || timestamp(current.nextReviewAt, "preference nextReviewAt") > asOfMs) continue;
       const next = derivePreferenceState(memory.evidence, key, asOf, current);
+      next.lastReviewedAt = asOf;
       memory.preferences[index] = next;
       updated.push(next);
     }
