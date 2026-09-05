@@ -5,18 +5,27 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -43,6 +52,7 @@ internal fun VisualAppPermissionsSection(state: CompanionUiState) {
     val settings = remember(context) { SettingsRepository(context.applicationContext) }
     var revision by remember { mutableIntStateOf(0) }
     var notificationMode by remember { mutableStateOf(settings.notificationPrivacyMode()) }
+    var showAppPermissions by remember { mutableStateOf(false) }
     val now = System.currentTimeMillis()
     privacy.pruneExpiredGrant(now)
 
@@ -86,38 +96,142 @@ internal fun VisualAppPermissionsSection(state: CompanionUiState) {
             )
     }
 
+    AppObservationSummaryCard(
+        entries = entries,
+        onManage = { showAppPermissions = true },
+    )
+
+    if (showAppPermissions) {
+        AppObservationDialog(
+            entries = entries,
+            onDismiss = { showAppPermissions = false },
+            onPolicy = { entry, policy ->
+                privacy.setPolicy(entry.packageName, policy)
+                if (policy == VisualAppPolicy.NEVER) {
+                    if (privacy.armedGrant()?.packageName == entry.packageName) privacy.clearArmedGrant()
+                    if (privacy.temporaryGrant()?.packageName == entry.packageName) privacy.clearTemporaryGrant()
+                }
+                revision += 1
+            },
+        )
+    }
+}
+
+@Composable
+private fun AppObservationSummaryCard(
+    entries: List<VisualAppEntry>,
+    onManage: () -> Unit,
+) {
+    val automaticCount = entries.count { it.policy == VisualAppPolicy.AUTO }
+    val protectedCount = entries.count { it.sensitivity == SensitivityClass.PROTECTED }
+
     Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Text("App 视觉权限", style = MaterialTheme.typography.titleMedium)
-            Text("未知 App 默认不会自动截图。你可以逐个决定；高度敏感 App 永远不能永久设为自动观察。")
-            if (entries.isEmpty()) {
-                Text("还没有可管理的 App。开启实时 App 感知或使用情况访问后，这里会出现当前和近期使用过的 App。")
-            } else {
-                entries.forEach { entry ->
-                    VisualAppPermissionCard(
-                        entry = entry,
-                        armedPackage = privacy.armedGrant()?.takeIf { now < it.expiresAtMs }?.packageName,
-                        visionReady = state.visionEnabled && state.visionHasApiKey,
-                        onPolicy = { policy ->
-                            privacy.setPolicy(entry.packageName, policy)
-                            if (policy == VisualAppPolicy.NEVER) {
-                                if (privacy.armedGrant()?.packageName == entry.packageName) privacy.clearArmedGrant()
-                                if (privacy.temporaryGrant()?.packageName == entry.packageName) privacy.clearTemporaryGrant()
-                            }
-                            revision += 1
-                        },
-                        onAllowOnce = {
-                            privacy.armOneTimeGrant(
-                                packageName = entry.packageName,
-                                nowMs = System.currentTimeMillis(),
-                                ttlMs = VisualPrivacyStore.MAX_TEMPORARY_GRANT_MS,
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                Text("应用观察权限", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    when {
+                        entries.isEmpty() -> "还没有发现近期使用的 App"
+                        protectedCount > 0 -> "自动观察 $automaticCount 个 · 受保护 $protectedCount 个"
+                        else -> "自动观察 $automaticCount 个"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+            OutlinedButton(onClick = onManage) { Text("管理") }
+        }
+    }
+}
+
+@Composable
+private fun AppObservationDialog(
+    entries: List<VisualAppEntry>,
+    onDismiss: () -> Unit,
+    onPolicy: (VisualAppEntry, VisualAppPolicy) -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("应用观察") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "开关控制是否允许自动观察；敏感 App 会保持询问或受保护。",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                if (entries.isEmpty()) {
+                    Text("使用几个 App 后再回来，这里会自动出现。")
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 460.dp),
+                    ) {
+                        items(entries, key = { it.packageName }) { entry ->
+                            AppObservationRow(
+                                entry = entry,
+                                onAutomaticChange = { enabled ->
+                                    if (entry.sensitivity != SensitivityClass.PROTECTED) {
+                                        onPolicy(
+                                            entry,
+                                            if (enabled) VisualAppPolicy.AUTO else VisualAppPolicy.ASK_ONLY,
+                                        )
+                                    }
+                                },
                             )
-                            revision += 1
-                        },
-                    )
+                            HorizontalDivider()
+                        }
+                    }
                 }
             }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text("完成") }
+        },
+    )
+}
+
+@Composable
+private fun AppObservationRow(
+    entry: VisualAppEntry,
+    onAutomaticChange: (Boolean) -> Unit,
+) {
+    val effective = entry.policy ?: VisualAppPolicy.ASK_ONLY
+    val protected = entry.sensitivity == SensitivityClass.PROTECTED
+    val automatic = effective == VisualAppPolicy.AUTO && !protected
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                if (entry.isCurrent) "${entry.label} · 当前" else entry.label,
+                style = MaterialTheme.typography.bodyLarge,
+            )
+            Text(
+                when {
+                    protected -> "受保护"
+                    automatic -> "可自动观察"
+                    effective == VisualAppPolicy.NEVER -> "永不看"
+                    else -> "每次询问"
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
+        Switch(
+            checked = automatic,
+            onCheckedChange = onAutomaticChange,
+            enabled = !protected,
+        )
     }
 }
 
@@ -165,63 +279,6 @@ private fun NotificationPrivacyOption(
         OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) { Text(label) }
     }
     Text(description, style = MaterialTheme.typography.bodySmall)
-}
-
-@Composable
-private fun VisualAppPermissionCard(
-    entry: VisualAppEntry,
-    armedPackage: String?,
-    visionReady: Boolean,
-    onPolicy: (VisualAppPolicy) -> Unit,
-    onAllowOnce: () -> Unit,
-) {
-    val effective = entry.policy ?: VisualAppPolicy.ASK_ONLY
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(
-                if (entry.isCurrent) "${entry.label} · 当前" else entry.label,
-                style = MaterialTheme.typography.titleSmall,
-            )
-            Text(entry.packageName, style = MaterialTheme.typography.bodySmall)
-            Text(
-                when (entry.sensitivity) {
-                    SensitivityClass.PROTECTED -> "高度敏感：只允许一次性授权"
-                    SensitivityClass.PRIVATE -> "默认谨慎：未明确允许时不会自动观察"
-                    SensitivityClass.NORMAL -> "普通 App"
-                },
-                style = MaterialTheme.typography.bodySmall,
-            )
-
-            PolicyButton("永不看", effective == VisualAppPolicy.NEVER) { onPolicy(VisualAppPolicy.NEVER) }
-            PolicyButton("每次询问", effective == VisualAppPolicy.ASK_ONLY) { onPolicy(VisualAppPolicy.ASK_ONLY) }
-            if (entry.sensitivity != SensitivityClass.PROTECTED) {
-                PolicyButton("可自动观察", effective == VisualAppPolicy.AUTO) { onPolicy(VisualAppPolicy.AUTO) }
-            }
-
-            if (effective != VisualAppPolicy.NEVER) {
-                if (armedPackage == entry.packageName) {
-                    Text("已允许一次：10 分钟内返回这个 App 后，下一次符合条件的观察可使用一次。")
-                } else {
-                    OutlinedButton(
-                        onClick = onAllowOnce,
-                        enabled = visionReady,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(if (visionReady) "仅这一次允许" else "先开启视觉观察")
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun PolicyButton(label: String, selected: Boolean, onClick: () -> Unit) {
-    if (selected) {
-        Button(onClick = onClick, modifier = Modifier.fillMaxWidth()) { Text(label) }
-    } else {
-        OutlinedButton(onClick = onClick, modifier = Modifier.fillMaxWidth()) { Text(label) }
-    }
 }
 
 private fun appLabel(packageManager: PackageManager, packageName: String): String = runCatching {
