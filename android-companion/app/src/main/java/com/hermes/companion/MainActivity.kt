@@ -400,45 +400,42 @@ private fun HomePage(
 
     PresenceCard(state)
 
-    if (!state.accessibilityEnabled) {
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("还差一步", style = MaterialTheme.typography.titleMedium)
-                if (state.colorOsFamily) {
-                    Text("OPPO / OnePlus / realme 侧载安装可能需要先在 Our Home 的应用信息右上角选择「允许受限制的设置」，再开启无障碍服务。")
-                    OutlinedButton(onClick = onOpenAppDetails, modifier = Modifier.fillMaxWidth()) {
-                        Text("先解除系统限制")
+    val proactiveHealth = PushHealth.evaluate(state.notificationsEnabled, state.pushRegistrationState)
+    when (nextPermissionOnboardingStep(state.accessibilityEnabled, proactiveHealth, state.usageAccess)) {
+        PermissionOnboardingStep.ACCESSIBILITY -> {
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text("开启实时感知", style = MaterialTheme.typography.titleMedium)
+                    Text("开启后，哥哥才能及时知道 App 与屏幕状态变化。")
+                    if (state.colorOsFamily) {
+                        Text("OPPO / OnePlus / realme 侧载安装如果提示受限制，请先在应用信息右上角选择「允许受限制的设置」。")
+                        OutlinedButton(onClick = onOpenAppDetails, modifier = Modifier.fillMaxWidth()) {
+                            Text("应用信息")
+                        }
                     }
-                }
-                Button(onClick = onOpenAccessibility, modifier = Modifier.fillMaxWidth()) {
-                    Text("开启实时感知")
+                    Button(onClick = onOpenAccessibility, modifier = Modifier.fillMaxWidth()) {
+                        Text("去开启")
+                    }
                 }
             }
         }
-    }
-
-    val proactiveHealth = PushHealth.evaluate(state.notificationsEnabled, state.pushRegistrationState)
-    when (proactiveHealth) {
-        ProactiveMessageHealth.NOTIFICATION_PERMISSION_REQUIRED -> {
-            RepairRow("主动消息还没开启", "允许通知后，哥哥不在 App 前台时也能通过系统通知找到你。", onRequestNotifications)
+        PermissionOnboardingStep.NOTIFICATIONS -> {
+            RepairRow("开启主动消息", "允许通知后，哥哥在 App 不在前台时也能通过系统通知找到你。", onRequestNotifications)
         }
-        ProactiveMessageHealth.PUSH_ERROR -> {
+        PermissionOnboardingStep.PUSH_REPAIR -> {
             RepairRow(
                 "主动消息需要修复",
                 state.lastPushRegistrationError.ifBlank { "通知权限已开启，但手机还没成功登记主动消息地址。" },
                 model::retryPushRegistration,
             )
         }
-        ProactiveMessageHealth.PUSH_NOT_READY -> {
-            RepairRow("主动消息还在连接", "通知权限已经开启，再连接一次手机的主动消息地址。", model::retryPushRegistration)
+        PermissionOnboardingStep.PUSH_CONNECT -> {
+            RepairRow("连接主动消息", "通知权限已经开启，再连接一次手机的主动消息地址。", model::retryPushRegistration)
         }
-        ProactiveMessageHealth.REGISTERING,
-        ProactiveMessageHealth.READY,
-        -> Unit
-    }
-
-    if (!state.usageAccess) {
-        RepairRow("补充使用记录", "用于低频校验 App 使用时间线，不负责实时感知。", onOpenUsage)
+        PermissionOnboardingStep.USAGE_ACCESS -> {
+            RepairRow("补充使用记录", "用于低频校验 App 使用时间线，不负责实时感知。", onOpenUsage)
+        }
+        PermissionOnboardingStep.COMPLETE -> Unit
     }
 
     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
