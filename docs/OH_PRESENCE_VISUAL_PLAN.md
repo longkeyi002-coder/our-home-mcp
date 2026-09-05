@@ -12,10 +12,12 @@ Canonical design: `docs/OUR_HOME_DESIGN.md`
 
 ```text
 屏幕亮/灭、解锁/锁屏、前台 App 变化
+→ Local Presence Privacy Guard
 → Presence State
 → 持续时间 / 用户主动声明 / 最近视觉理解
 → Context Understanding
 → Curiosity：是否值得看一眼？
+→ Visual Privacy Guard
 → 可选 Visual Observation
 → Care：是否值得联系用户？
 → Wake / Brain / FCM
@@ -34,7 +36,31 @@ Canonical design: `docs/OUR_HOME_DESIGN.md`
 
 ## 3. 模块拆分
 
-### A. Presence Sensor（Android，本地、低成本）
+### A. Local App Inventory（Android，仅本地权限管理）
+
+负责提供用户能理解、能搜索的 App 权限清单。
+
+- 枚举正常用户可启动 App，而不是只列近期 UsageStats；
+- 最近使用记录只用于排序和状态提示，不决定 App 是否出现在权限列表；
+- 不设置固定 12 个之类的可见数量上限；
+- 已保存策略的 App 即使近期没有使用也必须继续可管理；
+- 新安装、尚未使用的正常可启动 App 也必须能够提前设置策略；
+- 完整已安装 App 清单默认只保留在 Android 本地，不作为 Earth observation 整表上传给 Runtime / Brain；
+- 系统组件与无 Launcher 入口的内部 package 默认不作为普通用户设置项展示；
+- Android package visibility 限制必须通过最小必要的系统查询能力实现，不以无差别收集所有 package 为目标。
+
+### B. Presence Privacy Guard（Android，本地优先）
+
+回答的是：**AI 是否可以知道用户正在使用哪个 App。**
+
+- 每个 App 至少支持 `ALLOW_PRESENCE` / `HIDE_IDENTITY` 两种用户可理解的结果；
+- Guard 必须在 package/app identity 离开手机之前执行；
+- 被隐藏 App 不得把具体 packageName、app label、类别或由其可反推出身份的字段上传给 Runtime / Brain；
+- 如产品确有状态连续性需要，可只发送不暴露具体 App 身份的通用状态，例如 `private_app_active`，并保持数据最小化；
+- 用户关闭某 App 的 Presence 后，Visual Observation 不得绕过该决定泄露该 App 身份或内容；
+- AI / Soul / Curiosity / Care 无权自行修改此策略。
+
+### C. Presence Sensor（Android，本地、低成本）
 
 负责：
 
@@ -50,13 +76,14 @@ Canonical design: `docs/OUR_HOME_DESIGN.md`
 - AccessibilityService 只用于窗口/package 变化与 Android 11+ 的显式授权截图能力；
 - `canRetrieveWindowContent=false`，不采集 Accessibility 原始 UI Tree；
 - 屏幕状态使用系统事件维护；
-- UsageStats / UsageEvents 继续作为约 15 分钟 reconciliation/fallback。
+- UsageStats / UsageEvents 继续作为约 15 分钟 reconciliation/fallback；
+- 对外事件必须经过 Presence Privacy Guard 后再进入上传队列。
 
-### B. Context Understanding（Runtime）
+### D. Context Understanding（Runtime）
 
 融合：
 
-- `observed`：App、screen、dwell；
+- `observed`：允许暴露的 App、screen、dwell；
 - `user_declared`：用户主动说“我在打游戏”等；
 - 最近一次 visual summary；
 - freshness / conflict / confidence。
@@ -69,7 +96,7 @@ Canonical design: `docs/OUR_HOME_DESIGN.md`
 - CONFLICT：用户声明与设备事实明显冲突；
 - STALE：已有理解需要重新确认。
 
-### C. Curiosity Engine（Runtime，默认规则，不用 LLM）
+### E. Curiosity Engine（Runtime，默认规则，不用 LLM）
 
 决定“哥哥要不要看一眼”。因素包括：
 
@@ -85,7 +112,7 @@ Canonical design: `docs/OUR_HOME_DESIGN.md`
 
 用户主动说明只降低观察需求，不意味着永远不再观察。
 
-### D. Visual Observation（Android + Vision Provider）
+### F. Visual Observation（Android + Vision Provider）
 
 只有 Curiosity 通过安全策略后才触发一次观察。
 
@@ -97,9 +124,9 @@ Canonical design: `docs/OUR_HOME_DESIGN.md`
 - 长期主要保存结构化视觉摘要 + provenance + timestamp + confidence；
 - Vision Provider 与 Brain Provider 解耦。
 
-### E. Sensitive App Guard（Android 本地优先）
+### G. Visual Privacy Guard（Android 本地优先）
 
-安全策略必须在截图上传前生效。
+回答的是：**AI 是否可以看到当前 App 的屏幕内容。** 这与 Presence 权限独立，且更严格。
 
 默认类别：
 
@@ -114,9 +141,21 @@ Canonical design: `docs/OUR_HOME_DESIGN.md`
 - 高度敏感页面默认不截图、不上传；
 - 用户明确要求可看时，只建立一次性或限时临时授权；切 App、锁屏或超时自动失效；
 - 用户自定义“永远不看”优先于所有自动行为；
+- 新安装/未知 App 默认不得自动获得视觉观察权限；
+- Presence 为隐藏时，Visual 必须同时拒绝，不能通过截图间接泄露；
 - 记录允许/拒绝/被 Guard 拦截的审计事件，但不得记录被禁止页面内容。
 
-### F. Care Engine（Runtime）
+### H. Action Permission Boundary（独立于观察权限）
+
+“AI 能看到什么”和“AI 能替用户做什么”必须是两个权限域。
+
+- 支付、发送消息、修改日历、文件操作、未来工具调用等属于 Action Permission；
+- 允许或禁止 App Presence，不自动授予或撤销对应 Tool / Action 权限；
+- 允许视觉观察，也不等于允许执行现实操作；
+- 对支付等高影响动作，优先使用服务方正式提供的授权 / Agent / Tool 通道，不通过截图 + 模拟点击绕过权限模型；
+- Action Permission 应有独立授权、撤销和审计链。
+
+### I. Care Engine（Runtime）
 
 “看到了”与“发消息”必须分开。
 
@@ -135,7 +174,7 @@ Canonical design: `docs/OUR_HOME_DESIGN.md`
 
 示例：持续游戏较久 → 可观察一次 → 若仍持续且满足 Care policy → 提醒休息；若屏幕关闭/离开游戏 → 取消过时提醒。
 
-### G. Notification & Deep Link
+### J. Notification & Deep Link
 
 ```text
 Runtime → FCM → Android system notification
@@ -146,7 +185,7 @@ Runtime → FCM → Android system notification
 - 通知预览支持：完整内容 / 仅显示“哥哥给你发了一条消息” / 锁屏隐藏；
 - 保留 provider-neutral payload。
 
-### H. Android UI 收敛
+### K. Android UI 收敛
 
 Android Companion 定位：Our Home 在手机上的“感知入口”，不是 Runtime 工程控制台。
 
@@ -157,7 +196,17 @@ Android Companion 定位：Our Home 在手机上的“感知入口”，不是 R
 - Settings：通知、后台运行；
 - Diagnostics：下沉到 Advanced，仅用于开发/排错。
 
-不在主界面暴露 Runtime URL、token、worker、pending、WebSocket 等工程术语。
+App 权限 UI 必须保持简洁：
+
+```text
+应用列表
+→ 每个 App 一个主要开关：哥哥可以感知 / 不感知
+→ 点进单个 App 才显示“屏幕观察”高级策略
+```
+
+正常 UI 不向用户暴露 Presence Guard、Visual Guard、UsageStats、package visibility 等工程术语。
+
+Action Permission 单独归入“哥哥可以帮我做什么”或等价入口，不塞进 App 观察权限列表。
 
 权限 onboarding：
 
@@ -191,11 +240,14 @@ Android Companion 定位：Our Home 在手机上的“感知入口”，不是 R
 
 ### Stage 2 — Privacy Policy V0.1
 
-1. App privacy category / per-app policy 数据模型。
-2. Sensitive App Guard。
-3. temporary visual grant 生命周期。
-4. audit record。
-5. 本地单元测试 + 真机验证。
+1. Local App Inventory：完整用户可启动 App 清单 + 搜索 + 最近使用排序。
+2. Presence Privacy Guard：per-app 是否允许暴露正在使用的 App 身份。
+3. App privacy category / visual per-app policy 数据模型。
+4. Visual Privacy Guard / Sensitive App Guard。
+5. temporary visual grant 生命周期。
+6. Action Permission 与观察权限分离。
+7. audit record。
+8. 本地单元测试 + 真机验证。
 
 ### Stage 3 — Visual Observation V0.1
 
@@ -224,10 +276,12 @@ Android Companion 定位：Our Home 在手机上的“感知入口”，不是 R
 
 1. 首页收敛为 presence status。
 2. 隐私与感知页。
-3. per-app policy。
-4. permission health / repair flow。
-5. OPPO / OnePlus constrained-settings guidance。
-6. diagnostics 下沉 Advanced。
+3. 完整可搜索 App 列表 + 简洁的 per-app Presence 开关。
+4. 单 App 高级页维护 Visual policy。
+5. Action Permission 独立入口。
+6. permission health / repair flow。
+7. OPPO / OnePlus constrained-settings guidance。
+8. diagnostics 下沉 Advanced。
 
 ## 5. 第一批真机验收场景
 
@@ -243,22 +297,37 @@ Android Companion 定位：Our Home 在手机上的“感知入口”，不是 R
 ### Scenario B — 用户未声明游戏
 
 1. 进入游戏 App，未告诉哥哥。
-2. Presence 知道 package 与 dwell。
+2. Presence 在本地识别 package 与 dwell；该 App 的 Presence 策略允许时才把身份上传。
 3. UNKNOWN 持续后 Curiosity 上升。
 4. 安全策略允许时观察一次。
 5. 视觉摘要形成“正在打游戏”的 observed/inferred context。
 6. 系统可选择沉默，也可在 Care 条件成立时联系用户。
 
-### Scenario C — 敏感 App
+### Scenario C — Presence 隐藏 App
+
+1. 用户把某 App 设置为“不让哥哥感知”。
+2. Android 本地仍可为实现隐私过滤识别前台 package，但不得把具体身份上传。
+3. Runtime / Brain 不得收到该 App 的 packageName、label 或可反推身份的 visual summary。
+4. 如需保持设备状态连续性，只允许发送通用 `private_app_active` 或保持沉默。
+5. 切回允许 App 后恢复正常 Presence。
+
+### Scenario D — 敏感 App
 
 1. 打开银行/支付/密码类 App。
-2. Presence 可保留最小 package/category 事实。
-3. Visual Guard 在本地拦截截图。
+2. Presence 是否暴露 App 身份由用户的 Presence 策略决定。
+3. Visual Guard 在本地拦截默认截图。
 4. Curiosity/Care/Brain 无法越权。
-5. 用户明确“这次可以看”时才创建临时授权。
+5. 用户明确“这次可以看”时才创建临时视觉授权（仍不得绕过 secure window）。
 6. 切出 App / 锁屏 / 超时后临时授权自动失效。
 
-### Scenario D — 系统通知
+### Scenario E — 支付 / Tool Action
+
+1. 用户可独立授权某个正式支付/Tool 能力。
+2. 该授权不要求同时开放该 App 的 Presence 或屏幕观察权限。
+3. Action 执行仍按工具自身的授权、确认、审计规则完成。
+4. 不允许通过视觉权限推导出支付权限。
+
+### Scenario F — 系统通知
 
 1. Our Home 不在前台。
 2. Runtime 发送 proactive FCM。
@@ -278,16 +347,17 @@ Android Companion 定位：Our Home 在手机上的“感知入口”，不是 R
 - 每次 App 切换都调用 LLM；
 - 固定高频截图 cron；
 - 让 Brain 自己修改隐私规则；
+- 通过截图/模拟点击替代正式支付或高影响 Tool 授权；
 - 用 WSS 维持日常感知。
 
 ## 7. 成本与可靠性原则
 
 ```text
-Presence / dwell / screen / Guard / cooldown
+Local App Inventory / Presence / dwell / screen / privacy guards / cooldown
 → deterministic Runtime / Android logic
 
 只有真正需要理解或写消息
 → Vision / Brain
 ```
 
-所有事件必须可去重、可重试、可审计；网络断开时先本地排队；恢复后上传。截图类数据遵循最短生命周期和最小化持久化。
+所有事件必须可去重、可重试、可审计；网络断开时先本地排队；恢复后上传。截图类数据遵循最短生命周期和最小化持久化。隐私拒绝必须在数据离开 Android 设备之前生效。
