@@ -13,8 +13,8 @@
 
 | Design | Requirement | Protection | Status |
 |---|---|---|---|
-| OH-30 / OH-32 | Earth / AI World / Fiction records cannot leak across factual queries | `world-boundary.test.ts` validates legal pairs, v2 migration quarantine, and Life State rejection of AI World/Fiction evidence | COVERED |
-| OH-31 | Long-lived records preserve provenance/source/time | `LifeObservation` requires world/provenance; store migration and HTTP/MCP validation tests preserve boundary fields | COVERED |
+| OH-30 / OH-32 | Earth / AI World / Fiction records cannot leak across factual queries | `world-boundary.test.ts` protects strict observation evidence; `record-boundary.test.ts` protects diary/action/relationship/activity boundaries, approval inheritance and world-filtered reads; `LONG_LIVED_RECORD_BOUNDARY_CLASSIFICATION.md` excludes Runtime control state from canonical memory | COVERED |
+| OH-31 | Long-lived semantic records preserve world/provenance/source/time | Observation schema + `record-boundary.test.ts` + `routine-boundary.test.ts`; diary/action/relationship/activity carry explicit boundaries and RoutineWindow is fixed to `EARTH/user_declared` | COVERED |
 | OH-40 | Repeated events do not produce wake/message storms | Wake cooldown/dedupe tests + `TelemetryPolicyTest` stable heartbeat bucket ID + Room unique dedupe key instrumentation coverage | COVERED |
 | OH-41 | User can correct/delete/revoke/pause and control per-App sensing | Configuration gate + explicit manual fallback + diagnostics copy without credential values; `PresencePrivacyRulesTest` protects per-App identity allow/hide semantics; broader pause/delete/revoke controls still pending | PARTIAL |
 | OH-42 | Sensitive sensing/credentials are minimized before data leaves Android | `TelemetryPolicyTest`; `PresencePrivacyRulesTest`; `UsagePrivacyFilterTest` covers current App/session/totals/category redaction; register-only enrollment token cannot ingest directly (`phone-enrollment.test.ts`); diagnostics URL query/secret redaction test; Usage Access manual acceptance | PARTIAL / MANUAL |
@@ -39,7 +39,7 @@
 | OH-P1 | Real Android observation reaches persisted Life State | Runtime integration tests, Android telemetry/usage/auto-config tests, diagnostics tests and `OH_P1_ACCEPTANCE.md`; actual phone evidence still required | PARTIAL / MANUAL |
 | OH-P1.5 | Realtime Presence → local privacy guard → Context → Curiosity → visual guard → optional Visual summary works on a real phone | `OH_PRESENCE_VISUAL_PLAN.md` scenarios A-E + automated policy/session/privacy tests | TODO / MANUAL |
 | OH-P2 | Earth change → Wake → Brain → Decision → FCM → Android notification | End-to-end real-device acceptance including destination deep link | TODO / MANUAL |
-| OH-P3 | AI World persists while model sleeps | restart/persistence + deterministic simulation tests | TODO |
+| OH-P3 | AI World persists while model sleeps | World/provenance prerequisite is covered; P3 still needs its own new state/history model, restart persistence and deterministic simulation tests | TODO |
 | OH-P4 | Soul evolves slowly and traceably | preference reinforcement/decay/provenance tests | TODO |
 | OH-P5 | Autonomous exploration produces traceable experience/share intent | browser adapter + intent tests | TODO |
 | OH-P6 | User feedback affects future strategy without direct overwrite | feedback evidence/update tests | TODO |
@@ -129,12 +129,14 @@ When an Issue adds a new design capability:
 
 A bug fix should identify which design requirement was violated. The regression test should reference that requirement in its test name or nearby comment when practical.
 
-
-## Observation boundary integration review
+## Observation and long-lived-record boundary integration review
 
 Design Reference: OH-30/OH-31/OH-32, OH-43/OH-44, OH-66.
 
-- `test/world-boundary.test.ts`: v2 migration, unclassified legacy evidence, v3 validation, deduplication/compaction across worlds, bounded Earth context, pending legacy decisions.
-- `test/world-consumers.test.ts`: context understanding, visual budgets/requests, phone liveness and MCP world isolation.
+- `test/world-boundary.test.ts`: observation migration, unclassified legacy evidence, validation, deduplication/compaction across worlds, bounded Earth context and pending legacy decisions.
+- `test/world-consumers.test.ts`: context understanding, visual budgets/requests, phone liveness and MCP observation-world isolation.
+- `test/record-boundary.test.ts`: long-lived semantic record legality, fail-closed compatibility writes, relationship approval inheritance and world-filtered reads.
+- `test/routine-boundary.test.ts`: fixed Earth/user-declared routine semantics and deterministic normalization of older routine records.
 - `test/phone-http.test.ts`: compiled phone HTTP routes reject explicit fictional provenance.
-- Scope, validation and remaining long-lived-record gate: `docs/WORLD_BOUNDARY_PHASE_REVIEW.md`.
+- Canonical-memory vs Runtime-control classification: `docs/LONG_LIVED_RECORD_BOUNDARY_CLASSIFICATION.md`.
+- P3 prerequisite decision: `docs/WORLD_BOUNDARY_PHASE_REVIEW.md`.
