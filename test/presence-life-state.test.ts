@@ -13,6 +13,8 @@ function observed(
   return {
     id,
     kind,
+    world: "EARTH",
+    provenance: "observed",
     label: id,
     value,
     observedAt,
@@ -84,3 +86,4 @@ test("new app transition after screen on establishes foreground again", () => {
   assert.equal(state.foregroundPackage, "com.example.chat");
   assert.equal(state.currentActivity, "active_on_phone");
 });
+

@@ -1,3 +1,4 @@
+import { isEarthEvidence } from "./world-boundary.js";
 import type { LifeObservation, OurHomeData } from "./types.js";
 
 export interface PhoneTelemetryStatus {
@@ -23,16 +24,17 @@ function latestObservedAt(items: LifeObservation[]): string | null {
  * maintaining a second mutable source of truth. Credentials are never returned.
  */
 export function derivePhoneTelemetryStatus(data: OurHomeData): PhoneTelemetryStatus[] {
+  const evidence = data.observations.filter(isEarthEvidence);
   const deviceIds = new Set<string>();
   for (const registration of data.phoneDeviceRegistrations) deviceIds.add(registration.deviceId);
-  for (const observation of data.observations) {
+  for (const observation of evidence) {
     if (observation.deviceId) deviceIds.add(observation.deviceId);
   }
 
   return [...deviceIds]
     .map((deviceId) => {
       const registration = data.phoneDeviceRegistrations.find((item) => item.deviceId === deviceId);
-      const observations = data.observations.filter((item) => item.deviceId === deviceId && item.source === "phone");
+      const observations = evidence.filter((item) => item.deviceId === deviceId && item.source === "phone");
       const heartbeatObservations = observations.filter((item) => item.kind === "device_presence");
 
       return {
@@ -47,3 +49,4 @@ export function derivePhoneTelemetryStatus(data: OurHomeData): PhoneTelemetrySta
     })
     .sort((left, right) => (right.lastSeenAt ?? "").localeCompare(left.lastSeenAt ?? "") || left.deviceId.localeCompare(right.deviceId));
 }
+

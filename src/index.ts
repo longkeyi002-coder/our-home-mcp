@@ -40,6 +40,8 @@ const VISUAL_SUMMARY_ACTIVITIES = new Set([
 ]);
 
 const phoneObservationSchema = z.object({
+  world: z.literal("EARTH").optional(),
+  provenance: z.literal("observed").optional(),
   kind: z.enum([
     "manual_status",
     "device_presence",
@@ -103,6 +105,8 @@ const phoneObservationEnvelopeSchema = z.union([
 ]);
 
 const phoneHeartbeatSchema = z.object({
+  world: z.literal("EARTH").optional(),
+  provenance: z.literal("observed").optional(),
   deviceId: z.string().trim().min(1).max(200),
   status: z.enum(["online", "screen_on", "screen_off", "idle"]).default("online"),
   batteryPercent: z.number().min(0).max(100).optional(),
@@ -247,7 +251,7 @@ async function handlePhoneObservations(
     let visualRequest: ReturnType<typeof deriveVisualRequest> = null;
     for (const item of items) {
       const existing = item.clientEventId
-        ? store.snapshot().observations.find((observation) => observation.deviceId === item.deviceId && observation.metadata?.clientEventId === item.clientEventId)
+        ? store.snapshot().observations.find((observation) => observation.world === "EARTH" && observation.provenance === "observed" && observation.deviceId === item.deviceId && observation.metadata?.clientEventId === item.clientEventId)
         : undefined;
       if (existing) {
         observations.push(existing);
@@ -258,6 +262,8 @@ async function handlePhoneObservations(
         observedAt: item.observedAt ?? new Date().toISOString(),
         source: "phone",
         confidence: "observed",
+        world: "EARTH",
+        provenance: "observed",
         metadata: item.clientEventId ? { ...(item.metadata ?? {}), clientEventId: item.clientEventId } : item.metadata,
       });
       observations.push(observation);
@@ -295,11 +301,11 @@ async function handlePhoneHeartbeat(
     }
     const observedAt = parsed.data.observedAt ?? new Date().toISOString();
     const existing = parsed.data.clientEventId
-      ? store.snapshot().observations.find((item) => item.deviceId === parsed.data.deviceId && item.metadata?.clientEventId === parsed.data.clientEventId)
+      ? store.snapshot().observations.find((item) => item.world === "EARTH" && item.provenance === "observed" && item.deviceId === parsed.data.deviceId && item.metadata?.clientEventId === parsed.data.clientEventId)
       : undefined;
     if (existing) {
       const foregroundObservation = parsed.data.foregroundPackage
-        ? store.snapshot().observations.find((item) => item.kind === "screen_app" && item.deviceId === parsed.data.deviceId && item.observedAt === observedAt && item.value === parsed.data.foregroundPackage)
+        ? store.snapshot().observations.find((item) => item.world === "EARTH" && item.provenance === "observed" && item.kind === "screen_app" && item.deviceId === parsed.data.deviceId && item.observedAt === observedAt && item.value === parsed.data.foregroundPackage)
         : undefined;
       response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ observation: existing, foregroundObservation, dataSource: "phone-ingest" }));
       return;
@@ -318,6 +324,8 @@ async function handlePhoneHeartbeat(
       observedAt,
       source: "phone",
       confidence: "observed",
+      world: "EARTH",
+      provenance: "observed",
       deviceId: parsed.data.deviceId,
       metadata: Object.keys(metadata).length > 0 ? metadata : undefined,
     });
@@ -330,6 +338,8 @@ async function handlePhoneHeartbeat(
         observedAt,
         source: "phone",
         confidence: "observed",
+        world: "EARTH",
+        provenance: "observed",
         deviceId: parsed.data.deviceId,
         clientEventId: parsed.data.clientEventId ? `${parsed.data.clientEventId}:foreground` : undefined,
       });
@@ -392,3 +402,4 @@ async function readJsonBody(request: import("node:http").IncomingMessage, maxByt
   const raw = Buffer.concat(chunks).toString("utf8");
   return JSON.parse(raw);
 }
+

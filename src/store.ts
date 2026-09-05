@@ -24,9 +24,12 @@ import type {
   WakeEvent,
   WakeEventStatus,
   WakeDecision,
+  ObservationProvenance,
+  ObservationWorld,
 } from "./types.js";
 import { deriveLifeState } from "./life-state.js";
 import { deriveWakeEventDrafts } from "./wake-engine.js";
+import { assertValidObservationBoundary, resolveObservationBoundary } from "./world-boundary.js";
 
 const now = () => new Date().toISOString();
 export interface StoreFileSystem { writeFile: typeof writeFile }
@@ -65,7 +68,7 @@ function compactUsageSummaryObservations(data: OurHomeData, asOf = Date.now()): 
       : clientEventId?.startsWith("usage-summary:")
         ? clientEventParts?.[clientEventParts.length - 1] ?? ""
         : item.observedAt;
-    const key = (item.deviceId ?? "") + ":" + day + ":" + bucket;
+    const key = JSON.stringify([item.world, item.provenance, item.deviceId, day, bucket]);
     if (seenBuckets.has(key)) return false;
     seenBuckets.add(key);
     return true;
@@ -75,7 +78,7 @@ function compactUsageSummaryObservations(data: OurHomeData, asOf = Date.now()): 
 function emptyData(): OurHomeData {
   const timestamp = now();
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     diaries: [],
     relationshipEvents: [],
     actions: [],
@@ -103,7 +106,7 @@ function emptyWakeEngineState(): WakeEngineState {
 function seedData(): OurHomeData {
   const timestamp = now();
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     diaries: [
       {
         id: "diary_seed_welcome",
@@ -155,6 +158,17 @@ function seedData(): OurHomeData {
   };
 }
 
+function migratePersistedObservation(value: LifeObservation): LifeObservation {
+  const raw = value as LifeObservation & { world?: ObservationWorld; provenance?: ObservationProvenance };
+  const boundary = resolveObservationBoundary({
+    source: raw.source,
+    confidence: raw.confidence,
+    world: raw.world,
+    provenance: raw.provenance,
+  });
+  return { ...raw, ...boundary };
+}
+
 function migrateData(value: unknown): OurHomeData {
   if (!value || typeof value !== "object") {
     throw new Error("Our Home data file must contain a JSON object");
@@ -188,7 +202,7 @@ function migrateData(value: unknown): OurHomeData {
   if (candidate.schemaVersion === 1) {
     return {
       ...(candidate as Omit<OurHomeData, "schemaVersion" | "observations" | "routines" | "heartbeats" | "proactiveQueue">),
-      schemaVersion: 2,
+      schemaVersion: 3,
       observations: [],
       routines: [],
       heartbeats: [],
@@ -199,7 +213,7 @@ function migrateData(value: unknown): OurHomeData {
     };
   }
   if (
-    candidate.schemaVersion !== 2 ||
+    candidate.schemaVersion !== 2 && candidate.schemaVersion !== 3 ||
     !Array.isArray(candidate.observations) ||
     !Array.isArray(candidate.routines) ||
     !Array.isArray(candidate.heartbeats) ||
@@ -209,8 +223,21 @@ function migrateData(value: unknown): OurHomeData {
   }
   return {
     ...(candidate as OurHomeData),
-    wakeEvents: candidate.wakeEvents ?? [],
-    wakeEngineState: candidate.wakeEngineState ?? emptyWakeEngineState(),
+    schemaVersion: 3,
+    observations: candidate.observations.map((item) => {
+      if (candidate.schemaVersion === 3) {
+        assertValidObservationBoundary(item);
+        return item;
+      }
+      return migratePersistedObservation(item);
+    }),
+    // Legacy wake snapshots were derived before world filtering. Keep their history,
+    // but do not let queued decisions reuse unverified Earth evidence after migration.
+    wakeEvents: (candidate.wakeEvents ?? []).map((event) => candidate.schemaVersion === 2 && event.status === "pending"
+      ? { ...event, status: "dismissed" as const, processingAt: undefined } : event),
+    proactiveQueue: candidate.proactiveQueue.map((entry) => candidate.schemaVersion === 2 && entry.wakeEventId && entry.status === "pending"
+      ? { ...entry, status: "dismissed" as const, processingAt: undefined } : entry),
+    wakeEngineState: candidate.schemaVersion === 2 ? emptyWakeEngineState() : candidate.wakeEngineState ?? emptyWakeEngineState(),
     phoneDeviceRegistrations: candidate.phoneDeviceRegistrations ?? [],
   };
 }
@@ -247,7 +274,8 @@ export class JsonStore {
       observedAt,
       lifeState,
       observations: data.observations.filter(
-        (item) => !item.expiresAt || item.expiresAt >= observedAt,
+        (item) => item.world === "EARTH" && item.provenance !== "legacy_unclassified"
+          && (!item.expiresAt || item.expiresAt >= observedAt),
       ).slice(0, 50),
       routines: data.routines.filter((item) => item.enabled),
       recentHeartbeats: data.heartbeats.slice(0, 10),
@@ -445,23 +473,28 @@ export class JsonStore {
     expiresAt?: string;
     deviceId?: string;
     metadata?: Record<string, string | number | boolean>;
+    evidenceRefs?: string[];
+    world?: ObservationWorld;
+    provenance?: ObservationProvenance;
     clientEventId?: string;
   }): Promise<LifeObservation> {
+    const boundary = resolveObservationBoundary(input);
     let result: LifeObservation | undefined;
     await this.update((data) => {
       const clientEventId = input.clientEventId
         ?? (typeof input.metadata?.clientEventId === "string" ? input.metadata.clientEventId : undefined);
       const existing = clientEventId
-        ? data.observations.find((item) => item.deviceId === input.deviceId && item.metadata?.clientEventId === clientEventId)
+        ? data.observations.find((item) => item.world === boundary.world && item.provenance === boundary.provenance && item.deviceId === input.deviceId && item.metadata?.clientEventId === clientEventId)
         : undefined;
       if (existing) {
         result = existing;
         return;
       }
-      const { clientEventId: _ignoredClientEventId, ...observationInput } = input;
+      const { clientEventId: _ignoredClientEventId, world: _world, provenance: _provenance, ...observationInput } = input;
       const observation: LifeObservation = {
-        id: randomUUID(),
         ...observationInput,
+        id: randomUUID(),
+        ...boundary,
         metadata: clientEventId ? { ...(input.metadata ?? {}), clientEventId } : input.metadata,
       };
       data.observations.unshift(observation);
@@ -713,3 +746,4 @@ export function parseBoolean(value: string | undefined, fallback: boolean): bool
   if (value === undefined) return fallback;
   return value.toLowerCase() !== "false";
 }
+

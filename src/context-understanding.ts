@@ -1,3 +1,4 @@
+import { isEarthEvidence } from "./world-boundary.js";
 import type { LifeObservation } from "./types.js";
 
 export type ContextUnderstandingState = "UNKNOWN" | "PARTIAL" | "KNOWN" | "CONFLICT" | "STALE";
@@ -50,7 +51,8 @@ export function deriveContextUnderstanding(
   sessionId: string,
   asOfMs: number,
 ): ContextUnderstandingResult {
-  const latestVisual = observations
+  const evidence = observations.filter(isEarthEvidence);
+  const latestVisual = evidence
     .filter((item) => Boolean(deviceId) && item.deviceId === deviceId)
     .filter((item) => item.kind === "visual_observation_summary")
     .filter((item) => metadataString(item, "sessionId") === sessionId)
@@ -58,7 +60,7 @@ export function deriveContextUnderstanding(
     .filter((entry) => Number.isFinite(entry.at) && entry.at <= asOfMs)
     .sort((left, right) => right.at - left.at)[0];
 
-  const latestDeclaration = observations
+  const latestDeclaration = evidence
     .filter((item) => item.source === "user" && item.confidence === "declared")
     .filter((item) => item.kind === "manual_status" || item.kind === "note")
     .map((item) => ({ item, at: time(item.observedAt) }))
@@ -133,3 +135,4 @@ export function deriveContextUnderstanding(
     visualConfidence: null,
   };
 }
+

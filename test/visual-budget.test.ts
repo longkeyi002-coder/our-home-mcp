@@ -19,6 +19,8 @@ function capture(
   return {
     id,
     kind: "visual_policy_audit",
+    world: "EARTH",
+    provenance: "observed",
     label: action,
     value: allowed === true || allowed === "true" ? "CAPTURED_EPHEMERAL" : "BLOCKED",
     observedAt,
@@ -98,3 +100,4 @@ test("guard denials, capture failures, future events, and other devices do not c
   assert.equal(decision.usedInHour, 0);
   assert.equal(decision.usedInDay, 0);
 });
+

@@ -182,6 +182,7 @@ test("separate cycles and store restart reuse conversation without persisting se
   assert.equal(fake.requests.length, 2);
   assert.deepEqual(fake.requests.map((item) => item.body.conversation), ["our-home-stable", "our-home-stable"]);
   const persisted = await readFile(file, "utf8");
-  assert.equal(JSON.parse(persisted).schemaVersion, 2);
+  assert.equal(JSON.parse(persisted).schemaVersion, 3);
   assert.doesNotMatch(persisted, /never-persist-me|our-home-stable|resp_test/);
 });
+

@@ -1,3 +1,4 @@
+import { isEarthEvidence } from "./world-boundary.js";
 import type { LifeObservation } from "./types.js";
 
 export type VisualBudgetReason =
@@ -35,6 +36,7 @@ function successfulCaptureTimes(
 ): number[] {
   if (!deviceId) return [];
   return observations
+    .filter(isEarthEvidence)
     .filter((item) => item.deviceId === deviceId)
     .filter((item) => item.kind === "visual_policy_audit")
     .filter((item) => item.metadata?.action === "capture_succeeded")
@@ -85,3 +87,4 @@ export function decideVisualBudget(
     usedInDay: daily.length,
   };
 }
+

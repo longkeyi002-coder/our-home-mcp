@@ -133,7 +133,7 @@ test("restart preserves handled and pending Wake Events, linkage, and schema v2"
   await store.evaluateWakeEvents(at(7));
   const reopened = await JsonStore.open(filePath, false);
   const data = reopened.snapshot();
-  assert.equal(data.schemaVersion, 2);
+  assert.equal(data.schemaVersion, 3);
   assert.equal(data.wakeEvents.find((item) => item.id === first.id)?.status, "handled");
   assert.ok(data.wakeEvents.some((item) => item.status === "pending"));
   assert.equal(data.proactiveQueue.find((item) => item.wakeEventId === first.id)?.wakeEventId, first.id);
@@ -149,8 +149,9 @@ test("existing schema v2 records survive reading with new wake defaults", async 
   };
   await (await import("node:fs/promises")).writeFile(filePath, JSON.stringify(legacy), "utf8");
   const store = await JsonStore.open(filePath, false);
-  assert.equal(store.snapshot().schemaVersion, 2);
+  assert.equal(store.snapshot().schemaVersion, 3);
   assert.equal(store.snapshot().diaries[0]?.id, "legacy-diary");
   assert.equal(store.snapshot().actions[0]?.id, "legacy-action");
   assert.deepEqual(store.snapshot().wakeEvents, []);
 });
+

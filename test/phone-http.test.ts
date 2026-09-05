@@ -69,6 +69,17 @@ test("OH-P1 compiled HTTP runtime supports bootstrap ingest, device auth, status
 
   await waitForHealth(baseUrl, child, () => stderr);
 
+  // OH-30/OH-32: phone endpoints must not silently relabel a fictional payload.
+  for (const path of ["/v1/observations", "/v1/phone/heartbeat"]) {
+    const rejected = await fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: { authorization: "Bearer bootstrap-secret", "content-type": "application/json" },
+      body: JSON.stringify({ deviceId: "android-http", kind: "note", label: "story", world: "FICTION", provenance: "authored" }),
+    });
+    assert.equal(rejected.status, 400);
+  }
+
+
   const unauthorized = await fetch(`${baseUrl}/v1/phone/heartbeat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -229,3 +240,4 @@ test("OH-P1 compiled HTTP runtime supports bootstrap ingest, device auth, status
   assert.equal(bootstrapPhone.filter((item) => item.kind === "note").length, 1);
   assert.ok(bootstrapPhone.every((item) => item.source === "phone" && item.confidence === "observed"));
 });
+
