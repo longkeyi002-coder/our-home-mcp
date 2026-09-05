@@ -180,6 +180,8 @@ export interface WakeEngineState {
 
 export interface RoutineWindow {
   id: string;
+  world: "EARTH";
+  provenance: "user_declared";
   label: string;
   weekdays: number[];
   startLocal: string;
