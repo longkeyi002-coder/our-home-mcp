@@ -17,6 +17,14 @@ import {
   type AiWorldReflectionAdapter,
 } from "./ai-world-reflection.js";
 import { HermesReflectionEngine } from "./hermes-reflection.js";
+import {
+  runAiWorldExplorationCycle,
+  type AiWorldExplorationAdapter,
+} from "./ai-world-exploration.js";
+import {
+  aiWorldExplorationConfigFromEnv,
+  selectAiWorldExplorationAdapter,
+} from "./ai-world-exploration-runtime.js";
 import { enqueueVisualResultWakeEvents, visualResultWakeExpired } from "./visual-result-wake.js";
 import {
   claimDueProactiveMessages,
@@ -120,6 +128,7 @@ export async function runProactiveCycle(
   quietHoursPolicy: QuietHoursPolicy = quietHoursPolicyFromEnv({}),
   aiWorldTimezone = "UTC",
   reflectionEngine?: AiWorldReflectionAdapter,
+  explorationAdapter?: AiWorldExplorationAdapter,
 ): Promise<{ heartbeatId: string; wakeEventCount: number; dueCount: number; deliveredCount: number; failedCount: number }> {
   const observedAt = asOf.toISOString();
 
@@ -157,6 +166,21 @@ export async function runProactiveCycle(
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown AI World reflection error";
       process.stderr.write(`[our-home] ai-world reflection failed: ${message}\n`);
+    }
+  }
+
+  // OH-P5: autonomous exploration is an optional step inside the same single-owner Life Loop.
+  // The adapter only exists when explicitly enabled. P5.1 remains the authority for free-time,
+  // topic, cooldown/backoff and daily budget eligibility; failure cannot block Earth Care.
+  if (explorationAdapter) {
+    try {
+      const exploration = await runAiWorldExplorationCycle(store, explorationAdapter, observedAt, true);
+      if (exploration.attempted) {
+        process.stderr.write(`[our-home] ai-world exploration=${exploration.status} topic=${exploration.topic?.topicKey ?? "none"}\n`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown AI World exploration error";
+      process.stderr.write(`[our-home] ai-world exploration failed: ${message}\n`);
     }
   }
 
@@ -354,6 +378,10 @@ export function startRuntimeWorker(store: JsonStore): RuntimeWorkerHandle {
       : reflectionUrl
         ? new WebhookReflectionEngine(reflectionUrl, reflectionToken, externalTimeoutMs)
         : undefined;
+  const explorationAdapter = selectAiWorldExplorationAdapter(store, {
+    ...aiWorldExplorationConfigFromEnv(process.env),
+    timeoutMs: externalTimeoutMs,
+  });
 
   const controller = new AbortController();
   const done = (async () => {
@@ -368,6 +396,7 @@ export function startRuntimeWorker(store: JsonStore): RuntimeWorkerHandle {
           quietHoursPolicy,
           aiWorldTimezone,
           reflectionEngine,
+          explorationAdapter,
         );
         process.stderr.write(
           `[our-home] heartbeat=${result.heartbeatId} due=${result.dueCount} delivered=${result.deliveredCount} failed=${result.failedCount}\n`,
