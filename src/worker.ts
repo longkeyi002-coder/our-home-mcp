@@ -2,7 +2,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import type { BrainAdapter } from "./brain.js";
 import type { JsonStore } from "./store.js";
-import type { LifeContext, ProactiveCandidate, WakeDecision, WakeEvent } from "./types.js";
+import type { LifeContext, ProactiveCandidate, WakeEvent } from "./types.js";
 import { HermesDecisionEngine } from "./hermes-decision.js";
 import { FcmHttpV1Sender, FcmNotifier } from "./fcm.js";
 import { decideCareDelivery } from "./care-delivery.js";
@@ -25,6 +25,7 @@ export interface ProactiveNotifier {
 
 const decisionResponseSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("ignore") }),
+  z.object({ action: z.literal("request_visual"), reason: z.string().trim().min(1).max(1_000) }),
   z.object({ action: z.literal("proactive_message"), candidate: z.object({
     title: z.string().trim().min(1).max(200),
     message: z.string().trim().min(1).max(5_000),
@@ -54,6 +55,12 @@ export class WebhookDecisionEngine implements BrainAdapter {
     if (!response.ok) throw new Error(`Decision engine returned HTTP ${response.status}`);
     const parsed = decisionResponseSchema.safeParse(await response.json());
     if (!parsed.success) throw new Error("Decision engine returned an invalid candidate payload");
+    if (input.wakeEvent.type === "visual_opportunity" && parsed.data.action === "proactive_message") {
+      throw new Error("Visual opportunity cannot directly create a proactive message");
+    }
+    if (input.wakeEvent.type !== "visual_opportunity" && parsed.data.action === "request_visual") {
+      throw new Error("Only a visual opportunity may request visual observation");
+    }
     return parsed.data;
   }
 }
@@ -106,6 +113,14 @@ export async function runProactiveCycle(
   if (decisionEngine) {
     const claimedWakeEvents = await claimPendingWakeEvents(store, observedAt, 5);
     for (const wakeEvent of claimedWakeEvents) {
+      if (
+        wakeEvent.type === "visual_opportunity"
+        && (!wakeEvent.visualContext || wakeEvent.visualContext.expiresAt <= observedAt)
+      ) {
+        await store.resolveWakeEvent(wakeEvent.id, "dismissed");
+        await clearWakeEventClaim(store, wakeEvent.id);
+        continue;
+      }
       try {
         const decision = decisionResponseSchema.parse(await decisionEngine.evaluate({
           wakeEvent,
@@ -114,12 +129,16 @@ export async function runProactiveCycle(
         await store.applyWakeDecision(wakeEvent.id, decision, observedAt);
         await clearWakeEventClaim(store, wakeEvent.id);
       } catch (error) {
-        // Do not release the claim immediately. The persisted five-minute lease acts as
-        // the V0.1 Brain retry cooldown, so a failing Hermes/provider cannot be called
-        // again every worker cycle. The claim becomes eligible automatically after the
-        // lease expires; a clean Runtime restart also recovers orphaned claims.
         const message = error instanceof Error ? error.message : "Unknown decision engine error";
         process.stderr.write(`[our-home] wake decision failed: ${wakeEvent.id}: ${message}\n`);
+        if (wakeEvent.type === "visual_opportunity") {
+          // Visual opportunities are intentionally short-lived. A failed Brain call should not
+          // hold the phone in a polling state for the generic five-minute wake lease.
+          await store.resolveWakeEvent(wakeEvent.id, "dismissed");
+          await clearWakeEventClaim(store, wakeEvent.id);
+        }
+        // Ordinary Care wakes retain the persisted five-minute lease. That prevents a failing
+        // provider from being called again every worker cycle and preserves existing behavior.
       }
     }
   }
