@@ -5,6 +5,8 @@ import type { ActionStatus, Actor, DiaryVisibility } from "./types.js";
 
 const actorSchema = z.enum(["user", "agent"]);
 const dateSchema = z.string().datetime({ offset: true });
+const worldSchema = z.enum(["EARTH", "AI_WORLD", "FICTION"]);
+const recordProvenanceSchema = z.enum(["observed", "user_declared", "inferred", "simulated", "authored", "model_generated"]);
 
 function text(text: string) {
   return { content: [{ type: "text" as const, text }] };
@@ -27,7 +29,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     { name: "our-home", version: "0.1.0" },
     {
       instructions:
-        "Our Home is Hermes's structured life layer. Do not present local-mock data as REALITY. Keep AGENT_LIFE, RELATIONSHIP, HOME_STATE, and REALITY sources distinct. Major relationship events require approval from both user and agent before becoming approved.",
+        "Our Home is Hermes's structured life layer. Do not present local-mock data as REALITY. Keep AGENT_LIFE, RELATIONSHIP, HOME_STATE, and REALITY sources distinct. Long-lived records must preserve world/provenance boundaries. Major relationship events require approval from both user and agent before becoming approved.",
     },
   );
 
@@ -177,8 +179,8 @@ export function createOurHomeServer(store: JsonStore): McpServer {
         observedAt: dateSchema,
         source: z.enum(["user", "phone", "screen", "calendar", "system", "mock"]),
         confidence: z.enum(["observed", "declared", "inferred"]),
-        world: z.enum(["EARTH", "AI_WORLD", "FICTION"]).optional(),
-        provenance: z.enum(["observed", "user_declared", "inferred", "simulated", "authored", "model_generated"]).optional(),
+        world: worldSchema.optional(),
+        provenance: recordProvenanceSchema.optional(),
         evidenceRefs: z.array(z.string().trim().min(1).max(500)).max(20).optional(),
         expiresAt: dateSchema.optional(),
         deviceId: z.string().trim().max(200).optional(),
@@ -381,19 +383,21 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     "home.write_diary",
     {
       title: "Write a diary entry",
-      description: "Create a structured diary entry. Agent-authored content is AGENT_LIFE, not REALITY.",
+      description: "Create a structured diary entry with an explicit world/provenance boundary. Agent-authored content is AGENT_LIFE, not automatically REALITY.",
       inputSchema: {
         title: z.string().trim().min(1).max(200),
         body: z.string().trim().min(1).max(20_000),
         author: actorSchema,
         visibility: z.enum(["private", "shared"]),
+        world: worldSchema,
+        provenance: recordProvenanceSchema,
       },
       outputSchema: z.object({ entry: z.record(z.string(), z.unknown()), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ title, body, author, visibility }) => {
+    async ({ title, body, author, visibility, world, provenance }) => {
       try {
-        const entry = await store.addDiary({ title, body, author, visibility });
+        const entry = await store.addDiary({ title, body, author, visibility, world, provenance });
         return structured({ entry, dataSource: "local-mock" as const });
       } catch (error) {
         return toolError(error);
@@ -445,18 +449,20 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     "home.create_action",
     {
       title: "Create a home action",
-      description: "Create a new Our Home action item. This does not start an external task by itself.",
+      description: "Create a new Our Home action item with an explicit world/provenance boundary. This does not start an external task by itself.",
       inputSchema: {
         title: z.string().trim().min(1).max(200),
         description: z.string().trim().max(5_000).optional(),
         dueAt: dateSchema.optional(),
+        world: worldSchema,
+        provenance: recordProvenanceSchema,
       },
       outputSchema: z.object({ action: z.record(z.string(), z.unknown()), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ title, description, dueAt }) => {
+    async ({ title, description, dueAt, world, provenance }) => {
       try {
-        const action = await store.addAction({ title, description, dueAt });
+        const action = await store.addAction({ title, description, dueAt, world, provenance });
         return structured({ action, dataSource: "local-mock" as const });
       } catch (error) {
         return toolError(error);
@@ -571,7 +577,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     "home.list_activity",
     {
       title: "List home activity",
-      description: "List recorded activity with its source classification. Mock activity must not be presented as REALITY.",
+      description: "List recorded activity with its source and world/provenance classification. Mock activity must not be presented as REALITY.",
       inputSchema: { limit: z.number().int().min(1).max(100).default(50) },
       outputSchema: z.object({ activities: z.array(z.record(z.string(), z.unknown())), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
@@ -581,4 +587,3 @@ export function createOurHomeServer(store: JsonStore): McpServer {
 
   return server;
 }
-
