@@ -29,7 +29,7 @@ export type ProactiveCandidateStatus = "pending" | "delivered" | "dismissed";
 export type LifeActivity = "active_on_phone" | "probably_idle" | "charging" | "offline" | "unknown";
 export type DevicePresence = "online" | "screen_on" | "screen_off" | "idle" | "unknown";
 export type ConnectivityState = "online" | "offline" | "unknown";
-export type WakeEventType = "became_active" | "became_idle" | "device_offline" | "charging_started" | "battery_low";
+export type WakeEventType = "became_active" | "became_idle" | "device_offline" | "charging_started" | "battery_low" | "long_dwell";
 export type WakeEventStatus = "pending" | "handled" | "dismissed";
 export type WakeEventPriority = "low" | "normal" | "high";
 
@@ -110,6 +110,9 @@ export interface LifeState {
   lastPhoneActivityAt: string | null;
   devicePresence: DevicePresence;
   foregroundPackage: string | null;
+  /** Current foreground session timing when Presence/Usage evidence can establish it. */
+  foregroundSessionStartedAt?: string | null;
+  foregroundDwellMs?: number | null;
   batteryPercent: number | null;
   charging: boolean | null;
   connectivityState: ConnectivityState;

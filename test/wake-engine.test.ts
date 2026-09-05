@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { deriveWakeEventDrafts, WAKE_EVENT_COOLDOWN_MS } from "../src/wake-engine.js";
+import {
+  deriveWakeEventDrafts,
+  LONG_DWELL_CARE_COOLDOWN_MS,
+  LONG_DWELL_CARE_THRESHOLD_MS,
+  WAKE_EVENT_COOLDOWN_MS,
+} from "../src/wake-engine.js";
 import { JsonStore } from "../src/store.js";
 import type { LifeState } from "../src/types.js";
 import { runProactiveCycle } from "../src/worker.js";
@@ -89,6 +94,65 @@ test("cooldown suppresses a repeated transition type", () => {
   assert.deepEqual(deriveWakeEventDrafts(previous, current, "2026-09-03T12:02:00.000Z", { became_active: firstAt }), []);
   const afterCooldown = new Date(Date.parse(firstAt) + WAKE_EVENT_COOLDOWN_MS).toISOString();
   assert.equal(deriveWakeEventDrafts(previous, current, afterCooldown, { became_active: firstAt })[0]?.type, "became_active");
+});
+
+test("60 minute dwell creates a Care wake even without an App transition", () => {
+  const longDwell = state({
+    currentActivity: "active_on_phone",
+    foregroundPackage: "com.example.game",
+    foregroundSessionStartedAt: "2026-09-03T11:00:00.000Z",
+    foregroundDwellMs: LONG_DWELL_CARE_THRESHOLD_MS,
+    confidence: 0.9,
+  });
+  const drafts = deriveWakeEventDrafts(longDwell, longDwell, "2026-09-03T12:00:00.000Z");
+  assert.equal(drafts.length, 1);
+  assert.equal(drafts[0]?.type, "long_dwell");
+  assert.equal(drafts[0]?.priority, "normal");
+  assert.equal(drafts[0]?.dedupeKey, "long_dwell:com.example.game:2026-09-03T11:00:00.000Z");
+});
+
+test("long dwell Care requires a current session and at least 60 minutes", () => {
+  const short = state({
+    currentActivity: "active_on_phone",
+    foregroundPackage: "com.example.game",
+    foregroundSessionStartedAt: "2026-09-03T11:01:00.000Z",
+    foregroundDwellMs: LONG_DWELL_CARE_THRESHOLD_MS - 60_000,
+    confidence: 0.9,
+  });
+  assert.deepEqual(deriveWakeEventDrafts(short, short, "2026-09-03T12:00:00.000Z"), []);
+
+  const unknownSession = state({
+    currentActivity: "active_on_phone",
+    foregroundPackage: "com.example.game",
+    foregroundDwellMs: LONG_DWELL_CARE_THRESHOLD_MS,
+    confidence: 0.9,
+  });
+  assert.deepEqual(deriveWakeEventDrafts(unknownSession, unknownSession, "2026-09-03T12:00:00.000Z"), []);
+});
+
+test("long dwell Care has a one hour wake cooldown and stable session dedupe key", () => {
+  const firstAt = "2026-09-03T12:00:00.000Z";
+  const make = (dwellMs: number) => state({
+    currentActivity: "active_on_phone",
+    foregroundPackage: "com.example.game",
+    foregroundSessionStartedAt: "2026-09-03T11:00:00.000Z",
+    foregroundDwellMs: dwellMs,
+    confidence: 0.9,
+  });
+
+  const first = deriveWakeEventDrafts(make(LONG_DWELL_CARE_THRESHOLD_MS), make(LONG_DWELL_CARE_THRESHOLD_MS), firstAt);
+  assert.equal(first[0]?.type, "long_dwell");
+
+  const thirtyMinutesLater = new Date(Date.parse(firstAt) + 30 * 60_000).toISOString();
+  assert.deepEqual(
+    deriveWakeEventDrafts(make(90 * 60_000), make(90 * 60_000), thirtyMinutesLater, { long_dwell: firstAt }),
+    [],
+  );
+
+  const oneHourLater = new Date(Date.parse(firstAt) + LONG_DWELL_CARE_COOLDOWN_MS).toISOString();
+  const later = deriveWakeEventDrafts(make(120 * 60_000), make(120 * 60_000), oneHourLater, { long_dwell: firstAt });
+  assert.equal(later[0]?.type, "long_dwell");
+  assert.equal(later[0]?.dedupeKey, first[0]?.dedupeKey);
 });
 
 test("store persists wake events and migrates schema v2 files without wake fields", async () => {

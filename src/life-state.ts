@@ -96,6 +96,37 @@ function foregroundPackage(item: LifeObservation | undefined): string | null {
   return item.value?.trim() || null;
 }
 
+function sessionStartedAt(item: LifeObservation | undefined): string | null {
+  if (!item) return null;
+  if (item.kind === "presence_app_dwell") return metadataString(item, "startedAt");
+  if (item.kind === "presence_app_transition") return item.observedAt;
+  if (item.kind === "usage_summary") {
+    const durationMs = metadataNumber(item, "currentDurationMs");
+    const observedMs = timestamp(item.observedAt);
+    if (durationMs !== null && durationMs >= 0 && Number.isFinite(observedMs)) {
+      return new Date(observedMs - durationMs).toISOString();
+    }
+  }
+  return null;
+}
+
+function sessionDwellMs(item: LifeObservation | undefined, asOfMs: number): number | null {
+  if (!item) return null;
+  if (item.kind === "presence_app_dwell") {
+    const value = metadataNumber(item, "durationMs");
+    return value === null ? null : Math.max(0, value);
+  }
+  if (item.kind === "usage_summary") {
+    const value = metadataNumber(item, "currentDurationMs");
+    return value === null ? null : Math.max(0, value);
+  }
+  if (item.kind === "presence_app_transition") {
+    const startedMs = timestamp(item.observedAt);
+    return Number.isFinite(startedMs) ? Math.max(0, asOfMs - startedMs) : null;
+  }
+  return null;
+}
+
 function stateValue(state: LifeState, field: TransitionField): string {
   const value = state[field];
   return value === null ? "null" : String(value);
@@ -112,6 +143,11 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
   const latestScreenOff = newest(usable, isScreenOffObservation);
   const latestDeviceMetrics = newest(usable, (item) => item.kind === "device_presence");
   const latestForeground = newest(usable, isForegroundObservation);
+  const latestDwell = newest(usable, (item) => item.kind === "presence_app_dwell");
+  const latestSessionBoundary = newest(
+    usable,
+    (item) => item.kind === "presence_app_transition" || item.kind === "presence_app_session_end" || isScreenOffObservation(item),
+  );
   const latestConnectivity = newest(usable, (item) => item.metadata?.connectivityState !== undefined);
   const latestActivity = newest(historical, isPhoneActivity);
 
@@ -124,6 +160,15 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
   const foregroundInvalidatedByScreenOff = Boolean(latestScreenOff)
     && (!latestForeground || timestamp(latestScreenOff!.observedAt) >= timestamp(latestForeground.observedAt));
   const currentForegroundPackage = foregroundInvalidatedByScreenOff ? null : foregroundPackage(latestForeground);
+  const canReuseLatestDwell = Boolean(
+    currentForegroundPackage
+    && latestDwell
+    && foregroundPackage(latestDwell) === currentForegroundPackage
+    && (!latestSessionBoundary || timestamp(latestSessionBoundary.observedAt) <= timestamp(latestDwell.observedAt)),
+  );
+  const sessionEvidence = canReuseLatestDwell ? latestDwell : latestForeground;
+  const foregroundSessionStartedAt = currentForegroundPackage ? sessionStartedAt(sessionEvidence) : null;
+  const foregroundDwellMs = currentForegroundPackage ? sessionDwellMs(sessionEvidence, asOfMs) : null;
   const batteryPercent = metadataNumber(latestDeviceMetrics, "batteryPercent");
   const charging = metadataBoolean(latestDeviceMetrics, "charging");
   const connectivityState = asConnectivity(latestConnectivity?.metadata?.connectivityState);
@@ -179,6 +224,8 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
     lastPhoneActivityAt,
     devicePresence,
     foregroundPackage: currentForegroundPackage,
+    foregroundSessionStartedAt,
+    foregroundDwellMs,
     batteryPercent,
     charging,
     connectivityState,
@@ -200,6 +247,8 @@ export function deriveLifeStateTransition(previous: LifeState, current: LifeStat
     "lastPhoneActivityAt",
     "devicePresence",
     "foregroundPackage",
+    "foregroundSessionStartedAt",
+    "foregroundDwellMs",
     "batteryPercent",
     "charging",
     "connectivityState",

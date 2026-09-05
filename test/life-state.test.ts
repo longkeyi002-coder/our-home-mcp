@@ -44,8 +44,52 @@ test("periodic usage summary drives life state without a screen_app observation"
   ], asOf);
   assert.equal(state.currentActivity, "active_on_phone");
   assert.equal(state.foregroundPackage, "com.example.video");
+  assert.equal(state.foregroundDwellMs, 120000);
+  assert.equal(state.foregroundSessionStartedAt, "2026-09-03T11:57:30.000Z");
   assert.equal(state.batteryPercent, 63);
   assert.equal(state.connectivityState, "online");
+});
+
+test("realtime dwell exposes the current App session timing for Care", () => {
+  const state = deriveLifeState([
+    observation({ kind: "device_presence", observedAt: "2026-09-03T11:59:00.000Z", value: "screen_on", metadata: { connectivityState: "online" } }),
+    observation({
+      kind: "presence_app_dwell",
+      observedAt: asOf,
+      label: "com.example.game",
+      value: "60m",
+      metadata: {
+        packageName: "com.example.game",
+        startedAt: "2026-09-03T11:00:00.000Z",
+        durationMs: "3600000",
+        stage: "5",
+      },
+    }),
+  ], asOf);
+  assert.equal(state.currentActivity, "active_on_phone");
+  assert.equal(state.foregroundPackage, "com.example.game");
+  assert.equal(state.foregroundSessionStartedAt, "2026-09-03T11:00:00.000Z");
+  assert.equal(state.foregroundDwellMs, 3600000);
+});
+
+test("a newer App transition prevents reuse of old dwell timing from an earlier session", () => {
+  const state = deriveLifeState([
+    observation({
+      kind: "presence_app_dwell",
+      observedAt: "2026-09-03T11:55:00.000Z",
+      label: "com.example.game",
+      metadata: { packageName: "com.example.game", startedAt: "2026-09-03T10:55:00.000Z", durationMs: "3600000" },
+    }),
+    observation({
+      kind: "presence_app_transition",
+      observedAt: "2026-09-03T11:59:00.000Z",
+      value: "com.example.game",
+      metadata: { fromPackage: "com.example.other", toPackage: "com.example.game" },
+    }),
+  ], asOf);
+  assert.equal(state.foregroundPackage, "com.example.game");
+  assert.equal(state.foregroundSessionStartedAt, "2026-09-03T11:59:00.000Z");
+  assert.equal(state.foregroundDwellMs, 60000);
 });
 
 test("stale foreground app is not treated as current", () => {
@@ -55,6 +99,8 @@ test("stale foreground app is not treated as current", () => {
   ], asOf);
   assert.notEqual(state.currentActivity, "active_on_phone");
   assert.equal(state.foregroundPackage, null);
+  assert.equal(state.foregroundSessionStartedAt, null);
+  assert.equal(state.foregroundDwellMs, null);
   assert.equal(state.currentActivity, "unknown");
   assert.equal(state.batteryPercent, null);
   assert.equal(state.charging, null);
