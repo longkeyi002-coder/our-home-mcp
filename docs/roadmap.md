@@ -110,7 +110,7 @@ Required:
 
 ## P3 hard gate — world + provenance schema
 
-**AI World implementation must not begin until GitHub issue #26 is complete.**
+**Status: COMPLETE. GitHub issue #26 is closed.**
 
 Before OH-P3 starts, persisted long-lived factual records must mechanically represent the world boundary and provenance required by the Design Constitution:
 
@@ -121,11 +121,13 @@ Before OH-P3 starts, persisted long-lived factual records must mechanically repr
 - Earth-state derivation must reject AI World / Fiction evidence;
 - tests must prove AI World / Fiction records cannot modify Earth facts.
 
-This is a start gate, not merely an OH-P3 completion check. Earth Life / Presence / Wake work may continue before it, but no AI World persisted state may be added first and migrated later.
+This gate was completed before canonical AI World persisted state began. See `docs/WORLD_BOUNDARY_PHASE_REVIEW.md` and `docs/LONG_LIVED_RECORD_BOUNDARY_CLASSIFICATION.md`.
 
 ---
 
 ## OH-P3 — AI World V0.1
+
+**Status: COMPLETE. Acceptance: `docs/OH_P3_ACCEPTANCE.md`.**
 
 Minimum persistent state:
 
@@ -139,9 +141,11 @@ Minimum persistent state:
 - hobbies / interests;
 - collection.
 
-Deterministic state progression must not require a model call.
+Deterministic state progression does not require a model call. AI World state/history survives restart, Runtime Life Loop progression remains provider-independent, and continuity records are available through bounded Level-0 MCP tools.
 
-World/provenance separation tests are mandatory before Phase completion and are also required by the P3 start gate above.
+P3 deliberately stops at a stable world + structured continuity substrate. It does not generate subjective goals, personality evolution, Soul, or autonomous exploration; those begin in P4+.
+
+Validated Runtime code baseline: `93c61eaffa87737ccdf5afc4eb0518cacc5ea1f0` (`npm run check` passed in Runtime CI run `33961506239`).
 
 ---
 
