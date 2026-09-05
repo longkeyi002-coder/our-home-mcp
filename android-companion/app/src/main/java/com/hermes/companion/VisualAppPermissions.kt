@@ -281,6 +281,16 @@ private fun AppObservationSheet(
         return
     }
 
+    if (filteredEntries.isEmpty()) {
+        Text(
+            "没有匹配的应用。",
+            modifier = Modifier.padding(20.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        return
+    }
+
     LazyColumn(
         modifier = Modifier
             .fillMaxWidth()
@@ -397,7 +407,7 @@ private fun VisualPolicyEditor(
         )
         if (!presenceAllowed) {
             Text(
-                "此 App 已设为不感知，屏幕也不会被观察。",
+                "此 App 不会向哥哥透露身份，屏幕也不会被观察。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -436,7 +446,7 @@ private fun appPermissionSummary(
     protected: Boolean,
     visualPolicy: VisualAppPolicy,
 ): String {
-    if (!presenceAllowed) return "不感知 · 屏幕不观察"
+    if (!presenceAllowed) return "不透露此 App · 屏幕不观察"
     val visual = when {
         protected -> "屏幕受保护"
         visualPolicy == VisualAppPolicy.AUTO -> "屏幕可自动观察"
