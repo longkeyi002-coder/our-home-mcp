@@ -292,6 +292,8 @@ This path uses the existing bounded P4.2/P4.3 rules, supports absolute-time catc
 
 Validated final worker baseline: `77ba55d15150c5c3da86d918a858324d084639ea`; Runtime CI `33964882082` success; Android CI `33964882135` success.
 
+Final acceptance/roadmap/test-matrix head `fc35571e44e7509ddf22f61c105c8fb105cedb3a`: Runtime CI `33965848010` success.
+
 P4 is complete at the defined phase boundary. Automatic like/reply/ignore/accept-reject capture remains P6, and autonomous web exploration remains P5.
 
 ---
@@ -311,6 +313,8 @@ Implement:
 - resource budget and frequency limits.
 
 Do not automate logged-in mobile apps such as Xiaohongshu in this Phase.
+
+P5 must build on P4 Continuity/Soul rather than bypass it: exploration should produce traceable AI World records, not hidden context or direct Earth side effects.
 
 ---
 
