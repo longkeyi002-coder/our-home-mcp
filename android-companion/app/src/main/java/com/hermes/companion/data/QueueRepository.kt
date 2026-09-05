@@ -122,6 +122,7 @@ class QueueRepository private constructor(
 
         var uploaded = 0
         var firstError: String? = null
+        var visualDecisionPending = false
         for (event in dao.ready(now, 20)) {
             try {
                 val outcome = send(api, authorization, event)
@@ -129,7 +130,7 @@ class QueueRepository private constructor(
                 if (outcome.sent) {
                     uploaded += 1
                     settings.recordSuccessfulUpload(System.currentTimeMillis())
-                    enqueueVisualAck(outcome.ack)
+                    visualDecisionPending = enqueueVisualAck(outcome.ack) || visualDecisionPending
                 }
             } catch (error: Throwable) {
                 if (error is HttpException && error.code() == 401 && settings.hasDeviceToken()) {
@@ -148,7 +149,7 @@ class QueueRepository private constructor(
                         if (outcome.sent) {
                             uploaded += 1
                             settings.recordSuccessfulUpload(System.currentTimeMillis())
-                            enqueueVisualAck(outcome.ack)
+                            visualDecisionPending = enqueueVisualAck(outcome.ack) || visualDecisionPending
                         }
                     } catch (retryError: Throwable) {
                         val message = describeApiError("upload after re-registration", retryError)
@@ -162,6 +163,7 @@ class QueueRepository private constructor(
                 }
             }
         }
+        if (visualDecisionPending) runCatching { visualDecisionPoller() }
         return UploadResult(uploaded, firstError)
     }
 
@@ -210,16 +212,16 @@ class QueueRepository private constructor(
     }
 
     /**
-     * ACK handling stays enqueue-only. A pending Brain decision schedules a sparse follow-up
-     * heartbeat; capture/provider work still happens only in VisualObservationWorker.
+     * ACK handling stays enqueue-only. It returns whether one sparse follow-up heartbeat should
+     * be scheduled after this whole upload cycle, coalescing multiple pending ACKs into one poll.
      */
-    private fun enqueueVisualAck(ack: ApiAck) {
+    private fun enqueueVisualAck(ack: ApiAck): Boolean {
         val visualRequest = ack.visualRequest
         if (visualRequest != null) {
             runCatching { visualRequestEnqueuer(visualRequest) }
-            return
+            return false
         }
-        if (ack.visualDecisionPending) runCatching { visualDecisionPoller() }
+        return ack.visualDecisionPending
     }
 
     private suspend fun recordFailure(event: PendingEvent, now: Long, message: String) {
