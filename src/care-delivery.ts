@@ -1,5 +1,6 @@
 import { deriveLifeState } from "./life-state.js";
 import type { LifeObservation, ProactiveCandidate, WakeEvent } from "./types.js";
+import { VISUAL_RESULT_WAKE_TTL_MS } from "./visual-result-wake.js";
 
 export const CARE_MESSAGE_COOLDOWN_MS = 60 * 60_000;
 
@@ -7,6 +8,7 @@ export type CareDeliveryReason =
   | "not_long_dwell"
   | "current_session"
   | "stale_long_dwell"
+  | "stale_visual_result"
   | "care_message_cooldown";
 
 export interface CareDeliveryDecision {
@@ -42,9 +44,9 @@ function recentLongDwellDeliveryAt(
 }
 
 /**
- * OH-40/OH-47: final deterministic guard before a long-dwell Care message leaves the
- * Runtime. A delayed candidate is discarded if the user already left the App/session,
- * and long-dwell Care messages are rate-limited independently from urgent wake types.
+ * OH-40/OH-44/OH-47: final deterministic guard before a Care message leaves Runtime.
+ * Long-dwell messages are session-bound and rate-limited; visual-result messages are also
+ * freshness-bound so a failed notification cannot surface stale "I just saw..." context later.
  */
 export function decideCareDelivery(
   candidate: ProactiveCandidate,
@@ -52,6 +54,19 @@ export function decideCareDelivery(
   observedAt: string,
 ): CareDeliveryDecision {
   const wake = linkedWake(candidate, snapshot.wakeEvents);
+  if (wake?.type === "visual_result") {
+    const wakeObservedAt = Date.parse(wake.observedAt);
+    const asOfMs = Date.parse(observedAt);
+    if (
+      !Number.isFinite(wakeObservedAt)
+      || !Number.isFinite(asOfMs)
+      || asOfMs - wakeObservedAt >= VISUAL_RESULT_WAKE_TTL_MS
+    ) {
+      return { deliver: false, reason: "stale_visual_result" };
+    }
+    return { deliver: true, reason: "not_long_dwell" };
+  }
+
   if (!wake || wake.type !== "long_dwell") {
     return { deliver: true, reason: "not_long_dwell" };
   }
