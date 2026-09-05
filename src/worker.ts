@@ -7,6 +7,8 @@ import { HermesDecisionEngine } from "./hermes-decision.js";
 import { FcmHttpV1Sender, FcmNotifier } from "./fcm.js";
 import { decideCareDelivery } from "./care-delivery.js";
 import { quietHoursPolicyFromEnv, type QuietHoursPolicy } from "./quiet-hours.js";
+import { advancePersistedAiWorld } from "./ai-world-store.js";
+import { aiWorldTimezoneFromEnv } from "./ai-world.js";
 import { enqueueVisualResultWakeEvents, visualResultWakeExpired } from "./visual-result-wake.js";
 import {
   claimDueProactiveMessages,
@@ -108,8 +110,19 @@ export async function runProactiveCycle(
   asOf = new Date(),
   decisionEngine?: BrainAdapter,
   quietHoursPolicy: QuietHoursPolicy = quietHoursPolicyFromEnv({}),
+  aiWorldTimezone = "UTC",
 ): Promise<{ heartbeatId: string; wakeEventCount: number; dueCount: number; deliveredCount: number; failedCount: number }> {
   const observedAt = asOf.toISOString();
+
+  // OH-P3: deterministic AI World progression is independent from Brain availability.
+  // Failure is isolated so a corrupt/invalid AI World cannot block Earth Care/Delivery.
+  try {
+    await advancePersistedAiWorld(store, observedAt, aiWorldTimezone);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown AI World error";
+    process.stderr.write(`[our-home] ai-world advance failed: ${message}\n`);
+  }
+
   const heartbeat = await store.recordHeartbeat("独立 Life Loop 心跳：检查主动消息队列。");
   const wakeEvents = await store.evaluateWakeEvents(observedAt);
   let visualResultWakeCount = 0;
@@ -269,6 +282,7 @@ export function startRuntimeWorker(store: JsonStore): RuntimeWorkerHandle {
   }
 
   const quietHoursPolicy = quietHoursPolicyFromEnv(process.env);
+  const aiWorldTimezone = aiWorldTimezoneFromEnv(process.env);
   const notifier = selectNotifier(store, {
     firebaseProjectId,
     googleCredentials,
@@ -293,7 +307,14 @@ export function startRuntimeWorker(store: JsonStore): RuntimeWorkerHandle {
     await recoverInterruptedWorkerClaims(store);
     while (!controller.signal.aborted) {
       try {
-        const result = await runProactiveCycle(store, notifier, new Date(), decisionEngine, quietHoursPolicy);
+        const result = await runProactiveCycle(
+          store,
+          notifier,
+          new Date(),
+          decisionEngine,
+          quietHoursPolicy,
+          aiWorldTimezone,
+        );
         process.stderr.write(
           `[our-home] heartbeat=${result.heartbeatId} due=${result.dueCount} delivered=${result.deliveredCount} failed=${result.failedCount}\n`,
         );
