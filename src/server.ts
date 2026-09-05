@@ -1,7 +1,7 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { JsonStore } from "./store.js";
-import type { ActionStatus, Actor, DiaryVisibility } from "./types.js";
+import type { ActionStatus, Actor } from "./types.js";
 
 const actorSchema = z.enum(["user", "agent"]);
 const dateSchema = z.string().datetime({ offset: true });
@@ -119,10 +119,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     async () => {
       const timestamp = new Date().toISOString();
       const context = store.getLifeContext(timestamp);
-      return structured({
-        dataSource: "local-mock" as const,
-        ...context,
-      });
+      return structured({ dataSource: "local-mock" as const, ...context });
     },
   );
 
@@ -138,14 +135,10 @@ export function createOurHomeServer(store: JsonStore): McpServer {
       outputSchema: z.object({ wakeEvents: z.array(z.record(z.string(), z.unknown())), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ status, limit }) => {
-      const wakeEvents = store
-        .snapshot()
-        .wakeEvents
-        .filter((item) => !status || item.status === status)
-        .slice(0, limit);
-      return structured({ wakeEvents, dataSource: "local-mock" as const });
-    },
+    async ({ status, limit }) => structured({
+      wakeEvents: store.snapshot().wakeEvents.filter((item) => !status || item.status === status).slice(0, limit),
+      dataSource: "local-mock" as const,
+    }),
   );
 
   server.registerTool(
@@ -159,8 +152,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     },
     async ({ eventId }) => {
       try {
-        const wakeEvent = await store.resolveWakeEvent(eventId, "dismissed");
-        return structured({ wakeEvent, dataSource: "local-mock" as const });
+        return structured({ wakeEvent: await store.resolveWakeEvent(eventId, "dismissed"), dataSource: "local-mock" as const });
       } catch (error) {
         return toolError(error);
       }
@@ -216,9 +208,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     },
     async ({ kind, source, includeExpired, limit }) => {
       const timestamp = new Date().toISOString();
-      const observations = store
-        .snapshot()
-        .observations
+      const observations = store.snapshot().observations
         .filter((item) => !kind || item.kind === kind)
         .filter((item) => !source || item.source === source)
         .filter((item) => includeExpired || !item.expiresAt || item.expiresAt >= timestamp)
@@ -263,10 +253,10 @@ export function createOurHomeServer(store: JsonStore): McpServer {
       outputSchema: z.object({ routines: z.array(z.record(z.string(), z.unknown())), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ includeDisabled }) => {
-      const routines = store.snapshot().routines.filter((item) => includeDisabled || item.enabled);
-      return structured({ routines, dataSource: "local-mock" as const });
-    },
+    async ({ includeDisabled }) => structured({
+      routines: store.snapshot().routines.filter((item) => includeDisabled || item.enabled),
+      dataSource: "local-mock" as const,
+    }),
   );
 
   server.registerTool(
@@ -306,14 +296,10 @@ export function createOurHomeServer(store: JsonStore): McpServer {
       outputSchema: z.object({ candidates: z.array(z.record(z.string(), z.unknown())), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ status, limit }) => {
-      const candidates = store
-        .snapshot()
-        .proactiveQueue
-        .filter((item) => !status || item.status === status)
-        .slice(0, limit);
-      return structured({ candidates, dataSource: "local-mock" as const });
-    },
+    async ({ status, limit }) => structured({
+      candidates: store.snapshot().proactiveQueue.filter((item) => !status || item.status === status).slice(0, limit),
+      dataSource: "local-mock" as const,
+    }),
   );
 
   server.registerTool(
@@ -327,8 +313,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     },
     async ({ candidateId }) => {
       try {
-        const candidate = await store.resolveProactiveMessage(candidateId, "dismissed");
-        return structured({ candidate, dataSource: "local-mock" as const });
+        return structured({ candidate: await store.resolveProactiveMessage(candidateId, "dismissed"), dataSource: "local-mock" as const });
       } catch (error) {
         return toolError(error);
       }
@@ -339,20 +324,21 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     "home.list_diary",
     {
       title: "List diary entries",
-      description: "List diary entries. Without a visibility filter, return shared entries only; private entries require visibility=private.",
+      description: "List diary entries. Supply world for Earth/AI World/Fiction-isolated reads. Without a visibility filter, shared entries are returned.",
       inputSchema: {
         visibility: z.enum(["private", "shared"]).optional(),
         author: actorSchema.optional(),
+        world: worldSchema.optional(),
         limit: z.number().int().min(1).max(100).default(20),
       },
       outputSchema: z.object({ entries: z.array(z.record(z.string(), z.unknown())), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ visibility, author, limit }) => {
-      const data = store.snapshot();
-      const entries = data.diaries
+    async ({ visibility, author, world, limit }) => {
+      const entries = store.snapshot().diaries
         .filter((entry) => entry.visibility === (visibility ?? "shared"))
         .filter((entry) => !author || entry.author === author)
+        .filter((entry) => !world || entry.world === world)
         .slice(0, limit);
       return structured({ entries, dataSource: "local-mock" as const });
     },
@@ -370,13 +356,10 @@ export function createOurHomeServer(store: JsonStore): McpServer {
       outputSchema: z.object({ messages: z.array(z.record(z.string(), z.unknown())), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ includeRead, limit }) => {
-      const messages = store
-        .snapshot()
-        .proactiveMessages.filter((message) => includeRead || !message.readAt)
-        .slice(0, limit);
-      return structured({ messages, dataSource: "local-mock" as const });
-    },
+    async ({ includeRead, limit }) => structured({
+      messages: store.snapshot().proactiveMessages.filter((message) => includeRead || !message.readAt).slice(0, limit),
+      dataSource: "local-mock" as const,
+    }),
   );
 
   server.registerTool(
@@ -428,21 +411,22 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     "home.list_actions",
     {
       title: "List home actions",
-      description: "List Our Home action items and their current status.",
+      description: "List Our Home action items. Supply world for Earth/AI World/Fiction-isolated reads.",
       inputSchema: {
         status: z.enum(["todo", "in_progress", "done"]).optional(),
+        world: worldSchema.optional(),
         limit: z.number().int().min(1).max(100).default(50),
       },
       outputSchema: z.object({ actions: z.array(z.record(z.string(), z.unknown())), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ status, limit }) => {
-      const actions = store
-        .snapshot()
-        .actions.filter((item) => !status || item.status === status)
-        .slice(0, limit);
-      return structured({ actions, dataSource: "local-mock" as const });
-    },
+    async ({ status, world, limit }) => structured({
+      actions: store.snapshot().actions
+        .filter((item) => !status || item.status === status)
+        .filter((item) => !world || item.world === world)
+        .slice(0, limit),
+      dataSource: "local-mock" as const,
+    }),
   );
 
   server.registerTool(
@@ -481,8 +465,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     },
     async ({ actionId, status }) => {
       try {
-        const action = await store.setActionStatus(actionId, status as ActionStatus);
-        return structured({ action, dataSource: "local-mock" as const });
+        return structured({ action: await store.setActionStatus(actionId, status as ActionStatus), dataSource: "local-mock" as const });
       } catch (error) {
         return toolError(error);
       }
@@ -501,13 +484,10 @@ export function createOurHomeServer(store: JsonStore): McpServer {
       outputSchema: z.object({ events: z.array(z.record(z.string(), z.unknown())), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ status, limit }) => {
-      const events = store
-        .snapshot()
-        .relationshipEvents.filter((item) => !status || item.approvalStatus === status)
-        .slice(0, limit);
-      return structured({ events, dataSource: "local-mock" as const });
-    },
+    async ({ status, limit }) => structured({
+      events: store.snapshot().relationshipEvents.filter((item) => !status || item.approvalStatus === status).slice(0, limit),
+      dataSource: "local-mock" as const,
+    }),
   );
 
   server.registerTool(
@@ -546,8 +526,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     },
     async ({ eventId, approvedBy }) => {
       try {
-        const event = await store.approveRelationshipEvent(eventId, approvedBy as Actor);
-        return structured({ event, dataSource: "local-mock" as const });
+        return structured({ event: await store.approveRelationshipEvent(eventId, approvedBy as Actor), dataSource: "local-mock" as const });
       } catch (error) {
         return toolError(error);
       }
@@ -565,8 +544,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     },
     async ({ messageId }) => {
       try {
-        const message = await store.markMessageRead(messageId);
-        return structured({ message, dataSource: "local-mock" as const });
+        return structured({ message: await store.markMessageRead(messageId), dataSource: "local-mock" as const });
       } catch (error) {
         return toolError(error);
       }
@@ -577,12 +555,18 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     "home.list_activity",
     {
       title: "List home activity",
-      description: "List recorded activity with its source and world/provenance classification. Mock activity must not be presented as REALITY.",
-      inputSchema: { limit: z.number().int().min(1).max(100).default(50) },
+      description: "List recorded activity with source and world/provenance classification. Supply world for isolated Earth/AI World/Fiction reads.",
+      inputSchema: {
+        world: worldSchema.optional(),
+        limit: z.number().int().min(1).max(100).default(50),
+      },
       outputSchema: z.object({ activities: z.array(z.record(z.string(), z.unknown())), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ limit }) => structured({ activities: store.snapshot().activities.slice(0, limit), dataSource: "local-mock" as const }),
+    async ({ world, limit }) => structured({
+      activities: store.snapshot().activities.filter((item) => !world || item.world === world).slice(0, limit),
+      dataSource: "local-mock" as const,
+    }),
   );
 
   return server;
