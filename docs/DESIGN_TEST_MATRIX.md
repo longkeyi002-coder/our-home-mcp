@@ -25,7 +25,7 @@
 | OH-47 | FCM notification opens the intended Our Home Chat/message destination and obeys preview policy | Notification payload/deep-link tests + foreground/background real-device acceptance | TODO / MANUAL |
 | OH-50 | Autonomous browsing cannot silently perform external side effects | Capability policy tests | TODO |
 | OH-51 | Skill/MCP proposal cannot install without approval | Proposal/approval state-machine tests | TODO |
-| OH-52 | Risk Level 2/3 actions require confirmation and remain independent from observation permissions | Action policy tests; payment/tool authorization is explicitly not inferred from Presence or Visual grants | TODO |
+| OH-52 | Risk Level 2/3 actions require confirmation and remain independent from observation permissions | Action policy tests; P3 Level-0 AI World MCP is side-effect isolated, but Level 2/3 confirmation policy remains future work | TODO |
 | OH-60 | Runtime Core is provider-neutral | `BrainAdapter` compile boundary + mock brain tests; add import-boundary guard | PARTIAL |
 | OH-61 | Daily telemetry survives without control WSS | Android HTTPS queue/upload + auto-config planning tests + compiled Runtime ingest/device auth + register-only enrollment test; real-device validation remains | PARTIAL / MANUAL |
 | OH-62 | Remote live read uses separate control path | Relay/Local MCP integration test when migrated | TODO |
@@ -33,13 +33,13 @@
 | OH-64 | Runtime remains event-driven; no high-frequency LLM life loop | WorkManager 15-minute approximate schedule, immediate worker, wake scheduling tests, queue retry/backoff | PARTIAL |
 | OH-65 | Model calls are bounded to cognition-worthy work | Resource-budget tests when budget layer exists | TODO |
 | OH-66 | Runtime/Android state is diagnosable without secret leakage | compiled `/v1/phone/status` tests; staged Android API-error tests; `DiagnosticsReportTest`; periodic/immediate worker state exposed | PARTIAL / MANUAL |
-| OH-67 | Provider/tool failures degrade gracefully | FCM/Hermes retry tests + Android Room retry + staged auth errors + production start scripts rebuild current source before `dist`; AI World deterministic progression pending | PARTIAL |
+| OH-67 | Provider/tool failures degrade gracefully | FCM/Hermes retry tests + Android Room retry + staged auth errors + production start scripts; `ai-world-worker.test.ts` proves deterministic AI World progression is independent from Brain/provider availability and isolated from Earth delivery failure | PARTIAL |
 | OH-68 | Realtime Presence uses event-driven package/screen events, local dedupe/queue, per-App identity redaction before upload, no Accessibility tree retrieval, while UsageEvents remains reconciliation | Accessibility config/service tests + transition dedupe tests + `PresencePrivacyRulesTest` + `UsagePrivacyFilterTest` + Android/Runtime observation-kind contract test + queue tests + real-device verification | TODO / MANUAL |
 | OH-69 | Raw screenshot is ephemeral, guarded before provider upload, never placed in ordinary diagnostics/logs, and retries are bounded | Visual pipeline lifecycle/redaction tests + Presence-hidden visual gate + visual-audit package redaction + manual provider failure test | TODO / MANUAL |
 | OH-P1 | Real Android observation reaches persisted Life State | Runtime integration tests, Android telemetry/usage/auto-config tests, diagnostics tests and `OH_P1_ACCEPTANCE.md`; actual phone evidence still required | PARTIAL / MANUAL |
 | OH-P1.5 | Realtime Presence → local privacy guard → Context → Curiosity → visual guard → optional Visual summary works on a real phone | `OH_PRESENCE_VISUAL_PLAN.md` scenarios A-E + automated policy/session/privacy tests | TODO / MANUAL |
 | OH-P2 | Earth change → Wake → Brain → Decision → FCM → Android notification | End-to-end real-device acceptance including destination deep link | TODO / MANUAL |
-| OH-P3 | AI World persists while model sleeps | World/provenance prerequisite is covered; P3 still needs its own new state/history model, restart persistence and deterministic simulation tests | TODO |
+| OH-P3 | AI World persists while model sleeps | `ai-world*.test.ts` coverage proves deterministic state/history, restart/catch-up, explicit location, complete structured continuity kinds, provider-independent worker progression, bounded MCP access and Earth isolation; acceptance recorded in `OH_P3_ACCEPTANCE.md` | COVERED |
 | OH-P4 | Soul evolves slowly and traceably | preference reinforcement/decay/provenance tests | TODO |
 | OH-P5 | Autonomous exploration produces traceable experience/share intent | browser adapter + intent tests | TODO |
 | OH-P6 | User feedback affects future strategy without direct overwrite | feedback evidence/update tests | TODO |
@@ -115,6 +115,27 @@ Real-device/manual:
 - sensitive temporary grant expires correctly.
 
 Procedure and scenarios: `docs/OH_PRESENCE_VISUAL_PLAN.md`.
+
+## OH-P3 evidence split
+
+Automated:
+
+- explicit `AI_WORLD/simulated` state/history boundary;
+- synchronized read clock without per-minute persistence churn;
+- deterministic room/weather/work/activity phase progression from absolute time + IANA timezone;
+- explicit V0.1 virtual location independent from room;
+- same-phase idempotency;
+- phase/day transition history;
+- restart/catch-up equivalence;
+- Runtime worker progression with no Brain adapter;
+- AI World failure isolation from Earth Care/Delivery;
+- structured task/waiting/plan/idea/question/hobby/interest/collection persistence;
+- item boundary/kind/source immutability through lifecycle updates;
+- bounded MCP read/create/update tools;
+- first MCP write deterministic initialization when no worker has initialized the world;
+- AI World writes cannot alter Earth Life State, observations, actions, or notification queues.
+
+Acceptance: `docs/OH_P3_ACCEPTANCE.md`.
 
 ## Rule for adding features
 
