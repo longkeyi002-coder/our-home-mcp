@@ -43,6 +43,8 @@ export type AiWorldLocation = "our_home";
 export type AiWorldItemKind = "task" | "waiting" | "plan" | "idea" | "question" | "hobby" | "interest" | "collection";
 export type AiWorldItemStatus = "active" | "completed" | "archived";
 export type AiWorldItemProvenance = "inferred" | "simulated" | "authored" | "model_generated";
+export type AiWorldNoteKind = "note" | "journal";
+export type AiWorldThoughtThreadStatus = "active" | "resolved" | "archived";
 
 export interface DiaryEntry {
   id: string;
@@ -242,11 +244,68 @@ export interface AiWorldItem {
   updatedAt: string;
 }
 
+/** A reusable summary of something the AI experienced in its own world. */
+export interface AiWorldExperience {
+  id: string;
+  world: "AI_WORLD";
+  provenance: AiWorldItemProvenance;
+  source: "AGENT_LIFE";
+  summary: string;
+  occurredAt: string;
+  createdAt: string;
+  confidence?: number;
+  evidenceRefs?: string[];
+  nextReviewAt?: string;
+}
+
+/** Public-style note/journal content, not hidden reasoning. */
+export interface AiWorldNote {
+  id: string;
+  world: "AI_WORLD";
+  provenance: AiWorldItemProvenance;
+  source: "AGENT_LIFE";
+  kind: AiWorldNoteKind;
+  title: string;
+  body: string;
+  evidenceRefs?: string[];
+  nextReviewAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Structured thought continuity only. This intentionally stores no reasoning steps or hidden
+ * chain-of-thought: only a reusable topic/summary plus optional conclusion/open question.
+ */
+export interface AiWorldThoughtThread {
+  id: string;
+  world: "AI_WORLD";
+  provenance: AiWorldItemProvenance;
+  source: "AGENT_LIFE";
+  title: string;
+  summary: string;
+  conclusion?: string;
+  openQuestion?: string;
+  status: AiWorldThoughtThreadStatus;
+  evidenceRefs?: string[];
+  nextReviewAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AiWorldContinuityData {
+  experiences: AiWorldExperience[];
+  notes: AiWorldNote[];
+  thoughtThreads: AiWorldThoughtThread[];
+}
+
 export interface AiWorldData {
   state: AiWorldState;
   history: AiWorldHistoryEvent[];
   /** Structured P3 continuity collections. Missing means pre-P3.2 data and is treated as empty. */
   items?: AiWorldItem[];
+  /** P4 reusable continuity; missing means pre-P4.1 data and is treated as empty. */
+  continuity?: AiWorldContinuityData;
 }
 
 export interface AiWorldSnapshot {
@@ -332,7 +391,7 @@ export interface OurHomeData {
   phoneDeviceRegistrations: PhoneDeviceRegistration[];
   /** Runtime-issued requests awaiting or having completed one Android-local guarded capture. */
   visualRequests?: VisualRequestRecord[];
-  /** Canonical P3 AI World state/history; intentionally separate from legacy HomeState. */
+  /** Canonical AI World state/history + structured continuity, separate from legacy HomeState. */
   aiWorld?: AiWorldData;
 }
 
