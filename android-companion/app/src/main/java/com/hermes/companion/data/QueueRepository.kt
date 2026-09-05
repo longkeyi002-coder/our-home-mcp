@@ -287,24 +287,3 @@ class QueueRepository private constructor(
 }
 
 private fun Throwable.safeMessage(): String = message?.take(300) ?: this::class.simpleName.orEmpty()
-
-internal fun describeApiError(stage: String, error: Throwable): String {
-    val detail = when (error) {
-        is HttpException -> "HTTP ${error.code()} ${error.message()}"
-        else -> error.safeMessage()
-    }
-    return "$stage: $detail".take(400)
-}
-
-private suspend fun verifyRegistration(api: HermesApi, bootstrap: String, request: RegisterRequest): RegisterResponse {
-    // health is intentionally checked first so diagnostics can distinguish an unreachable
-    // endpoint from a reachable endpoint with invalid bootstrap credentials.
-    val health = api.health()
-    if (!health.ok) throw IllegalStateException("Runtime health check returned not-ok")
-    return api.register("Bearer $bootstrap", request)
-}
-
-private object UploadSingleFlight {
-    private val mutex = kotlinx.coroutines.sync.Mutex()
-    suspend fun <T> run(block: suspend () -> T): T = mutex.withLock { block() }
-}
