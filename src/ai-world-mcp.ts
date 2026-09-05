@@ -2,7 +2,8 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { JsonStore } from "./store.js";
 import { addAiWorldItem, listAiWorldItems, updateAiWorldItem } from "./ai-world-items.js";
-import { readPersistedAiWorld } from "./ai-world-store.js";
+import { advancePersistedAiWorld, readPersistedAiWorld } from "./ai-world-store.js";
+import { aiWorldTimezoneFromEnv } from "./ai-world.js";
 
 const kindSchema = z.enum(["task", "waiting", "plan", "idea", "question", "hobby", "interest", "collection"]);
 const statusSchema = z.enum(["active", "completed", "archived"]);
@@ -87,7 +88,7 @@ export function registerAiWorldTools(server: McpServer, store: JsonStore): void 
     "home.create_ai_world_item",
     {
       title: "Create AI World continuity item",
-      description: "Create one Level-0 structured item inside AI World. World/source are fixed locally and cannot be supplied by the caller. This tool has no Earth or external side effects.",
+      description: "Create one Level-0 structured item inside AI World. World/source are fixed locally and cannot be supplied by the caller. If the persistent world has not started yet, this first write initializes it deterministically. This tool has no Earth or external side effects.",
       inputSchema: {
         kind: kindSchema,
         title: z.string().trim().min(1).max(300),
@@ -102,7 +103,11 @@ export function registerAiWorldTools(server: McpServer, store: JsonStore): void 
     },
     async ({ kind, title, note, provenance }) => {
       try {
-        const item = await addAiWorldItem(store, { kind, title, note, provenance });
+        const asOf = new Date().toISOString();
+        if (!store.snapshot().aiWorld) {
+          await advancePersistedAiWorld(store, asOf, aiWorldTimezoneFromEnv());
+        }
+        const item = await addAiWorldItem(store, { kind, title, note, provenance }, asOf);
         return structured({ item: item as unknown as Record<string, unknown>, dataSource: "ai-world-runtime" as const });
       } catch (error) {
         return toolError(error);
