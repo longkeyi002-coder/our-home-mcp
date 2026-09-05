@@ -15,21 +15,21 @@ class HermesNotificationsTest {
         )
 
         assertEquals(HermesNotifications.CHAT_DESTINATION, value.destination)
-        assertEquals(NotificationDestinationScreen.CHAT_MESSAGE, HermesNotifications.destinationScreen(value.destination))
+        assertEquals(NotificationDestinationScreen.APP, HermesNotifications.destinationScreen(value.destination))
     }
 
     @Test
-    fun `chat destination opens message screen`() {
+    fun `chat destination returns to current app`() {
         assertEquals(
-            NotificationDestinationScreen.CHAT_MESSAGE,
+            NotificationDestinationScreen.APP,
             HermesNotifications.destinationScreen("/chat"),
         )
     }
 
     @Test
-    fun `unknown destination falls back to home`() {
+    fun `unknown destination also falls back to current app`() {
         assertEquals(
-            NotificationDestinationScreen.HOME,
+            NotificationDestinationScreen.APP,
             HermesNotifications.destinationScreen("/some-future-place"),
         )
     }

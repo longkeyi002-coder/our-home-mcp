@@ -21,8 +21,7 @@ data class HermesNotification(
 )
 
 enum class NotificationDestinationScreen {
-    CHAT_MESSAGE,
-    HOME,
+    APP,
 }
 
 object HermesNotifications {
@@ -32,6 +31,11 @@ object HermesNotifications {
     const val EXTRA_CANDIDATE_ID = "our_home_candidate_id"
     const val EXTRA_MESSAGE_TITLE = "our_home_message_title"
     const val EXTRA_MESSAGE_BODY = "our_home_message_body"
+
+    /**
+     * Logical destination carried by Runtime/FCM. In the current Android product, Chat is
+     * the Our Home app itself, so tapping any proactive notification returns to MainActivity.
+     */
     const val CHAT_DESTINATION = "/chat"
 
     fun fromPayload(data: Map<String, String>, notificationTitle: String?, notificationBody: String?) = HermesNotification(
@@ -41,9 +45,9 @@ object HermesNotifications {
         destination = data["destination"].takeUnless { it.isNullOrBlank() } ?: CHAT_DESTINATION,
     )
 
-    fun destinationScreen(destination: String): NotificationDestinationScreen =
-        if (destination.trim() == CHAT_DESTINATION) NotificationDestinationScreen.CHAT_MESSAGE
-        else NotificationDestinationScreen.HOME
+    /** All current proactive destinations land in the installed Our Home companion app. */
+    fun destinationScreen(@Suppress("UNUSED_PARAMETER") destination: String): NotificationDestinationScreen =
+        NotificationDestinationScreen.APP
 
     fun createChannel(context: Context) {
         context.getSystemService(NotificationManager::class.java).createNotificationChannel(
@@ -57,11 +61,7 @@ object HermesNotifications {
         privacyMode: NotificationPrivacyMode = NotificationPrivacyMode.HIDE_ON_LOCK_SCREEN,
     ): Boolean {
         if (!canPostNotifications(context)) return false
-        val activityClass = when (destinationScreen(value.destination)) {
-            NotificationDestinationScreen.CHAT_MESSAGE -> ChatMessageActivity::class.java
-            NotificationDestinationScreen.HOME -> MainActivity::class.java
-        }
-        val intent = Intent(context, activityClass)
+        val intent = Intent(context, MainActivity::class.java)
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(EXTRA_DESTINATION, value.destination)
             .putExtra(EXTRA_CANDIDATE_ID, value.candidateId)
