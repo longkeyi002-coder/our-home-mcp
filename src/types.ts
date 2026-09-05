@@ -190,6 +190,13 @@ export interface HeartbeatRecord {
   source: "system";
 }
 
+export interface ProactiveDeliveryPolicyTrace {
+  evaluatedAt: string;
+  outcome: "deferred" | "suppressed";
+  reason: string;
+  nextAvailableAt?: string;
+}
+
 export interface ProactiveCandidate {
   id: string;
   title: string;
@@ -206,6 +213,8 @@ export interface ProactiveCandidate {
   source: "AGENT_LIFE" | "HOME_STATE";
   dedupeKey?: string;
   wakeEventId?: string;
+  /** Last deterministic Runtime policy decision that prevented immediate delivery. */
+  lastDeliveryPolicy?: ProactiveDeliveryPolicyTrace;
   /** Durable single-worker lease marker; not a user-visible state. */
   processingAt?: string;
 }
