@@ -5,6 +5,7 @@ import type { JsonStore } from "./store.js";
 import type { LifeContext, ProactiveCandidate, WakeDecision, WakeEvent } from "./types.js";
 import { HermesDecisionEngine } from "./hermes-decision.js";
 import { FcmHttpV1Sender, FcmNotifier } from "./fcm.js";
+import { decideCareDelivery } from "./care-delivery.js";
 import {
   claimDueProactiveMessages,
   claimPendingWakeEvents,
@@ -128,6 +129,14 @@ export async function runProactiveCycle(
   let failedCount = 0;
 
   for (const candidate of due) {
+    const careDelivery = decideCareDelivery(candidate, store.snapshot(), observedAt);
+    if (!careDelivery.deliver) {
+      await store.resolveProactiveMessage(candidate.id, "dismissed");
+      await clearProactiveClaim(store, candidate.id);
+      process.stderr.write(`[our-home] proactive suppressed: ${candidate.id}: ${careDelivery.reason}\n`);
+      continue;
+    }
+
     try {
       await notifier.deliver(candidate);
       await store.recordProactiveAttempt(candidate.id);
