@@ -51,6 +51,13 @@ function decisionContract(wakeEvent: WakeEvent): string {
       'Return only {"action":"ignore"} or {"action":"request_visual","reason":"..."}.',
     ].join("\n");
   }
+  if (wakeEvent.type === "visual_result") {
+    return [
+      "A previously requested visual observation has completed and its structured summary is available in the bounded Life Context.",
+      "This is a separate Care decision: seeing something does not imply contacting the user, and this wake may not request another screenshot.",
+      'Return only {"action":"ignore"} or {"action":"proactive_message","candidate":{"title":"...","message":"...","reason":"...","dueAt":"optional ISO datetime","dedupeKey":"optional"}}.',
+    ].join("\n");
+  }
   return [
     "This wake event is a Care decision, not a visual-observation decision.",
     'Return only {"action":"ignore"} or {"action":"proactive_message","candidate":{"title":"...","message":"...","reason":"...","dueAt":"optional ISO datetime","dedupeKey":"optional"}}.',
