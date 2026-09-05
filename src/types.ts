@@ -45,6 +45,7 @@ export type AiWorldItemStatus = "active" | "completed" | "archived";
 export type AiWorldItemProvenance = "inferred" | "simulated" | "authored" | "model_generated";
 export type AiWorldNoteKind = "note" | "journal";
 export type AiWorldThoughtThreadStatus = "active" | "resolved" | "archived";
+export type AiWorldInterestEvidenceDirection = "support" | "counter";
 
 export interface DiaryEntry {
   id: string;
@@ -294,10 +295,46 @@ export interface AiWorldThoughtThread {
   updatedAt: string;
 }
 
+/** One bounded, explicit piece of evidence about an AI World interest. */
+export interface AiWorldInterestEvidence {
+  id: string;
+  world: "AI_WORLD";
+  provenance: AiWorldItemProvenance;
+  source: "AGENT_LIFE";
+  interestKey: string;
+  evidenceKey: string;
+  direction: AiWorldInterestEvidenceDirection;
+  strength: number;
+  reason: string;
+  occurredAt: string;
+  createdAt: string;
+  evidenceRefs?: string[];
+}
+
+/** Derived preference precursor. This is not Soul and is always inferred from evidence. */
+export interface AiWorldPreferenceState {
+  id: string;
+  world: "AI_WORLD";
+  provenance: "inferred";
+  source: "AGENT_LIFE";
+  interestKey: string;
+  score: number;
+  evidenceCount: number;
+  /** Bounded trace of the most recent evidence records used by the reducer. */
+  evidenceIds: string[];
+  lastEvidenceAt: string;
+  lastEvaluatedAt: string;
+  nextReviewAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AiWorldContinuityData {
   experiences: AiWorldExperience[];
   notes: AiWorldNote[];
   thoughtThreads: AiWorldThoughtThread[];
+  interestEvidence?: AiWorldInterestEvidence[];
+  preferences?: AiWorldPreferenceState[];
 }
 
 export interface AiWorldData {
