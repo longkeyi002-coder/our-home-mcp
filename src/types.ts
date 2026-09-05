@@ -255,6 +255,7 @@ export interface AiWorldExperience {
   createdAt: string;
   confidence?: number;
   evidenceRefs?: string[];
+  lastReviewedAt?: string;
   nextReviewAt?: string;
 }
 
