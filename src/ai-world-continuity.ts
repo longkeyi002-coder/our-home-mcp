@@ -50,17 +50,18 @@ function evidenceRefs(value: string[] | undefined): string[] | undefined {
   return normalized.length === 0 ? undefined : normalized;
 }
 
-function reviewAt(value: string | undefined, createdAt: string): string | undefined {
+/** nextReviewAt is always scheduled from the current lifecycle action, never into its past. */
+function reviewAt(value: string | undefined, notBefore: string): string | undefined {
   if (value === undefined) return undefined;
-  if (timestamp(value, "nextReviewAt") < timestamp(createdAt, "createdAt")) {
-    throw new Error("nextReviewAt cannot precede continuity record creation");
+  if (timestamp(value, "nextReviewAt") < timestamp(notBefore, "review baseline")) {
+    throw new Error("nextReviewAt cannot precede the current continuity lifecycle time");
   }
   return value;
 }
 
 function requireContinuity(store: JsonStore): AiWorldContinuityData {
   const aiWorld = store.snapshot().aiWorld;
-  if (!aiWorld) throw new Error("AI World must be initialized before writing continuity records");
+  if (!aiWorld) throw new Error("AI World must be initialized before reading continuity records");
   assertValidAiWorldData(aiWorld);
   return structuredClone(aiWorld.continuity ?? { experiences: [], notes: [], thoughtThreads: [] });
 }
@@ -95,7 +96,8 @@ export async function addAiWorldExperience(
   if (input.confidence !== undefined && (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1)) {
     throw new Error("AI World experience confidence must be between 0 and 1");
   }
-
+  const refs = evidenceRefs(input.evidenceRefs);
+  const nextReviewAt = reviewAt(input.nextReviewAt, asOf);
   const record: AiWorldExperience = {
     id: randomUUID(),
     world: "AI_WORLD",
@@ -105,14 +107,41 @@ export async function addAiWorldExperience(
     occurredAt: input.occurredAt,
     createdAt: asOf,
     ...(input.confidence === undefined ? {} : { confidence: input.confidence }),
-    ...(evidenceRefs(input.evidenceRefs) ? { evidenceRefs: evidenceRefs(input.evidenceRefs) } : {}),
-    ...(reviewAt(input.nextReviewAt, asOf) ? { nextReviewAt: reviewAt(input.nextReviewAt, asOf) } : {}),
+    ...(refs ? { evidenceRefs: refs } : {}),
+    ...(nextReviewAt ? { nextReviewAt } : {}),
   };
 
   await store.update((data) => {
     ensureContinuity(data).experiences.unshift(record);
   });
   return structuredClone(record);
+}
+
+/**
+ * Marks an immutable Experience as reviewed and either clears or schedules its next review.
+ * Experience content/provenance is deliberately not editable through this lifecycle action.
+ */
+export async function reviewAiWorldExperience(
+  store: JsonStore,
+  id: string,
+  nextReviewAt: string | null,
+  asOf = new Date().toISOString(),
+): Promise<AiWorldExperience> {
+  const asOfMs = timestamp(asOf, "experience review time");
+  const scheduled = nextReviewAt === null ? undefined : reviewAt(nextReviewAt, asOf);
+  let result: AiWorldExperience | undefined;
+  await store.update((data) => {
+    const experience = ensureContinuity(data).experiences.find((item) => item.id === id);
+    if (!experience) throw new Error(`AI World experience not found: ${id}`);
+    if (asOfMs < timestamp(experience.createdAt, "experience createdAt")) {
+      throw new Error("AI World experience review cannot precede creation");
+    }
+    experience.lastReviewedAt = asOf;
+    experience.nextReviewAt = scheduled;
+    result = experience;
+  });
+  if (!result) throw new Error(`AI World experience not found: ${id}`);
+  return structuredClone(result);
 }
 
 export async function addAiWorldNote(
@@ -175,7 +204,7 @@ export async function updateAiWorldNote(
     if (patch.body !== undefined) note.body = boundedText(patch.body, "AI World note body", 20_000);
     if (patch.evidenceRefs !== undefined) note.evidenceRefs = evidenceRefs(patch.evidenceRefs);
     if (patch.nextReviewAt === null) note.nextReviewAt = undefined;
-    else if (patch.nextReviewAt !== undefined) note.nextReviewAt = reviewAt(patch.nextReviewAt, note.createdAt);
+    else if (patch.nextReviewAt !== undefined) note.nextReviewAt = reviewAt(patch.nextReviewAt, asOf);
     note.updatedAt = asOf;
     result = note;
   });
@@ -259,7 +288,7 @@ export async function updateAiWorldThoughtThread(
     if (patch.status !== undefined) thread.status = patch.status;
     if (patch.evidenceRefs !== undefined) thread.evidenceRefs = evidenceRefs(patch.evidenceRefs);
     if (patch.nextReviewAt === null) thread.nextReviewAt = undefined;
-    else if (patch.nextReviewAt !== undefined) thread.nextReviewAt = reviewAt(patch.nextReviewAt, thread.createdAt);
+    else if (patch.nextReviewAt !== undefined) thread.nextReviewAt = reviewAt(patch.nextReviewAt, asOf);
     thread.updatedAt = asOf;
     result = thread;
   });
