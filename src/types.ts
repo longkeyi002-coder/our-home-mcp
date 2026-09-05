@@ -46,6 +46,7 @@ export type AiWorldItemProvenance = "inferred" | "simulated" | "authored" | "mod
 export type AiWorldNoteKind = "note" | "journal";
 export type AiWorldThoughtThreadStatus = "active" | "resolved" | "archived";
 export type AiWorldInterestEvidenceDirection = "support" | "counter";
+export type AiWorldSoulChangeReason = "preference_evidence" | "time_decay";
 
 export interface DiaryEntry {
   id: string;
@@ -324,9 +325,47 @@ export interface AiWorldPreferenceState {
   evidenceIds: string[];
   lastEvidenceAt: string;
   lastEvaluatedAt: string;
+  /** Set only by the explicit deterministic preference-review lifecycle. */
+  lastReviewedAt?: string;
   nextReviewAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/** Slow Soul tendency derived only from reviewed preference evidence. */
+export interface AiWorldSoulTendency {
+  id: string;
+  world: "AI_WORLD";
+  provenance: "inferred";
+  source: "AGENT_LIFE";
+  interestKey: string;
+  score: number;
+  /** Evidence represented by the latest accepted preference basis. */
+  evidenceCount: number;
+  evidenceIds: string[];
+  lastChangedAt: string;
+  lastReviewedAt?: string;
+  nextReviewAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Append-only audit of every accepted Soul reinforcement/correction or deterministic decay. */
+export interface AiWorldSoulChange {
+  id: string;
+  world: "AI_WORLD";
+  provenance: "inferred";
+  source: "AGENT_LIFE";
+  interestKey: string;
+  reason: AiWorldSoulChangeReason;
+  beforeScore: number;
+  afterScore: number;
+  delta: number;
+  occurredAt: string;
+  basisPreferenceId?: string;
+  /** Stable dedupe key for one canonical evidence set. */
+  basisKey?: string;
+  basisEvidenceIds?: string[];
 }
 
 export interface AiWorldContinuityData {
@@ -335,6 +374,8 @@ export interface AiWorldContinuityData {
   thoughtThreads: AiWorldThoughtThread[];
   interestEvidence?: AiWorldInterestEvidence[];
   preferences?: AiWorldPreferenceState[];
+  soulTendencies?: AiWorldSoulTendency[];
+  soulChanges?: AiWorldSoulChange[];
 }
 
 export interface AiWorldData {
