@@ -6,6 +6,13 @@ import java.util.UUID
 class VisualPrivacyStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    /** Saved policies remain manageable even without a launcher entry. */
+    fun configuredPackages(): Set<String> = prefs.all.keys
+        .filter { it.startsWith("policy:") }
+        .map { it.removePrefix("policy:") }
+        .filter { it.isNotBlank() }
+        .toSet()
+
     fun policyFor(packageName: String): VisualAppPolicy? {
         val stored = prefs.getString(policyKey(packageName), null)
             ?.let { runCatching { VisualAppPolicy.valueOf(it) }.getOrNull() }
@@ -158,3 +165,4 @@ class VisualPrivacyStore(context: Context) {
         private fun policyKey(packageName: String) = "policy:${packageName.trim()}"
     }
 }
+

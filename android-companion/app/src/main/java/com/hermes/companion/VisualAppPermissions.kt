@@ -22,6 +22,9 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -51,6 +54,7 @@ private data class VisualAppEntry(
     val presencePolicy: PresenceAppPolicy,
     val isCurrent: Boolean,
     val usageMs: Long,
+    val hasLauncher: Boolean,
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -70,8 +74,18 @@ internal fun VisualAppPermissionsSection(state: CompanionUiState) {
 
     val currentPackage = state.presence?.currentPackage
     val usageTotals = state.usage?.appTotalsMs.orEmpty()
-    val launchableApps = remember(state.presence, state.usage, revision) {
-        inventory.launchableApps()
+    var launchableApps by remember { mutableStateOf<List<LocalLaunchableApp>>(emptyList()) }
+    var inventoryLoading by remember { mutableStateOf(true) }
+    var inventoryError by remember { mutableStateOf(false) }
+    // Refresh when opening the controls; app transitions and policy toggles do not rescan packages.
+    LaunchedEffect(showAppPermissions) {
+        inventoryLoading = true
+        val result = withContext(Dispatchers.IO) {
+            runCatching { inventory.launchableApps(presencePrivacy.configuredPackages() + visualPrivacy.configuredPackages()) }
+        }
+        result.onSuccess { launchableApps = it }
+        inventoryError = result.isFailure
+        inventoryLoading = false
     }
 
     val entries = remember(launchableApps, state.presence, state.usage, revision) {
@@ -85,6 +99,7 @@ internal fun VisualAppPermissionsSection(state: CompanionUiState) {
                     presencePolicy = presencePrivacy.policyFor(app.packageName),
                     isCurrent = app.packageName == currentPackage,
                     usageMs = usageTotals[app.packageName] ?: 0L,
+                    hasLauncher = app.hasLauncher,
                 )
             }
             .sortedWith(
@@ -118,6 +133,8 @@ internal fun VisualAppPermissionsSection(state: CompanionUiState) {
         ModalBottomSheet(onDismissRequest = { showAppPermissions = false }) {
             AppObservationSheet(
                 entries = entries,
+                loading = inventoryLoading,
+                loadError = inventoryError,
                 onDone = { showAppPermissions = false },
                 onPresencePolicy = { entry, policy ->
                     presencePrivacy.setPolicy(entry.packageName, policy)
@@ -239,6 +256,8 @@ private fun NotificationPrivacyRow(
 @Composable
 private fun AppObservationSheet(
     entries: List<VisualAppEntry>,
+    loading: Boolean,
+    loadError: Boolean,
     onDone: () -> Unit,
     onPresencePolicy: (VisualAppEntry, PresenceAppPolicy) -> Unit,
     onVisualPolicy: (VisualAppEntry, VisualAppPolicy) -> Unit,
@@ -274,7 +293,11 @@ private fun AppObservationSheet(
 
     if (entries.isEmpty()) {
         Text(
-            "未找到可启动的 App。",
+            when {
+                loading -> "正在读取应用列表…"
+                loadError -> "读取失败，请关闭后重新打开应用列表。"
+                else -> "未找到可启动的 App。"
+            },
             modifier = Modifier.padding(20.dp),
             style = MaterialTheme.typography.bodyMedium,
         )
@@ -364,7 +387,8 @@ private fun AppObservationRow(
                     style = MaterialTheme.typography.bodyLarge,
                 )
                 Text(
-                    appPermissionSummary(presenceAllowed, protected, effectiveVisual),
+                    appPermissionSummary(presenceAllowed, protected, effectiveVisual) +
+                        if (entry.hasLauncher) "" else " · 已保存设置（无启动入口）",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -481,3 +505,4 @@ private fun notificationModeLabel(mode: NotificationPrivacyMode): String = when 
     NotificationPrivacyMode.GENERIC -> "仅提示"
     NotificationPrivacyMode.FULL -> "完整显示"
 }
+

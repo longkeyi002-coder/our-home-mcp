@@ -59,6 +59,7 @@ import com.hermes.companion.presence.PresenceStateStore
 import com.hermes.companion.push.ProactiveMessageHealth
 import com.hermes.companion.push.PushHealth
 import com.hermes.companion.push.PushRegistration
+import com.hermes.companion.vision.VisualObservationIndicator
 import com.hermes.companion.vision.VisionProviderSettingsStore
 import java.time.Instant
 import java.util.UUID
@@ -128,6 +129,11 @@ class CompanionViewModel(private val appContext: android.content.Context) : View
     init {
         refresh()
         attemptAutomaticRegistration()
+        viewModelScope.launch {
+            presenceStore.snapshots().collect { presence ->
+                _state.value = _state.value.copy(presence = presence)
+            }
+        }
     }
 
     private fun snapshotState(): CompanionUiState {
@@ -380,10 +386,11 @@ private fun HomePage(
     Text("Our Home", style = MaterialTheme.typography.headlineMedium)
     Spacer(Modifier.height(12.dp))
 
-    val fullyPresent = state.connected && state.accessibilityEnabled
+    val fullyPresent = state.connected && state.accessibilityEnabled && state.presence?.accessibilityConnected == true
     Text(
         when {
             fullyPresent -> "哥哥正在陪着你"
+            state.connected && state.accessibilityEnabled -> "等待感知服务连接"
             state.connected -> "还差一项感知权限"
             else -> "正在连接 Our Home"
         },
@@ -392,6 +399,7 @@ private fun HomePage(
     Text(
         when {
             fullyPresent -> "手机上的变化会安静地进入你们的生活。"
+            state.connected && state.accessibilityEnabled -> "权限已开启，正在等待手机感知服务就绪。"
             state.connected -> "开启实时感知后，哥哥才能及时知道 App 与屏幕状态变化。"
             else -> "连接完成后会自动开始基础感知。"
         },
@@ -449,20 +457,16 @@ private fun HomePage(
 
 @Composable
 private fun PresenceCard(state: CompanionUiState) {
+    val visualActive by VisualObservationIndicator.active.collectAsStateWithLifecycle()
     val presence = state.presence
     val proactiveHealth = PushHealth.evaluate(state.notificationsEnabled, state.pushRegistrationState)
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatusLine("App 感知", if (state.accessibilityEnabled) "已开启" else "需要开启")
-            StatusLine(
-                "屏幕状态",
-                when {
-                    !state.accessibilityEnabled -> "等待感知权限"
-                    presence?.screenInteractive == true -> "屏幕已开启"
-                    else -> "屏幕已关闭"
-                },
-            )
-            StatusLine("视觉观察", if (state.visionEnabled) "已开启" else "按需开启")
+            Text("当前感知状态", style = MaterialTheme.typography.titleMedium)
+            StatusLine("App 感知", presenceStatusLabel(state.accessibilityEnabled, presence))
+            StatusLine("屏幕状态", screenStatusLabel(state.accessibilityEnabled, presence))
+            StatusLine("此刻屏幕观察", if (visualActive) "正在观察" else "未在观察")
+            StatusLine("屏幕观察权限", if (state.visionEnabled) "已允许按需观察" else "已暂停")
             StatusLine("主动消息", PushHealth.userLabel(proactiveHealth))
         }
     }
@@ -499,7 +503,7 @@ private fun PrivacyPage(state: CompanionUiState, model: CompanionViewModel, onBa
 
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            StatusLine("实时 App 感知", "仅记录状态变化")
+            StatusLine("实时 App 感知", presenceStatusLabel(state.accessibilityEnabled, state.presence))
             StatusLine("敏感内容保护", "始终开启")
             StatusLine("视觉观察", if (state.visionEnabled) "已开启" else "已暂停")
         }
@@ -690,3 +694,4 @@ private fun Diagnostics(state: CompanionUiState, model: CompanionViewModel) {
 }
 
 private fun Long.asTime(): String = if (this == 0L) "never" else java.text.DateFormat.getDateTimeInstance().format(java.util.Date(this))
+

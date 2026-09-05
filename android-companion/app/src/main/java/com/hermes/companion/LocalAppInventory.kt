@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 internal data class LocalLaunchableApp(
     val packageName: String,
     val label: String,
+    val hasLauncher: Boolean = true,
 )
 
 /**
@@ -18,9 +19,9 @@ internal class LocalAppInventory(context: Context) {
     private val ownPackage = context.applicationContext.packageName
 
     @Suppress("DEPRECATION")
-    fun launchableApps(): List<LocalLaunchableApp> {
+    fun launchableApps(savedPackages: Set<String> = emptySet()): List<LocalLaunchableApp> {
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
-        return packageManager
+        val launchable = packageManager
             .queryIntentActivities(intent, PackageManager.MATCH_ALL)
             .asSequence()
             .mapNotNull { resolveInfo ->
@@ -35,5 +36,20 @@ internal class LocalAppInventory(context: Context) {
             .distinctBy { it.packageName }
             .sortedBy { it.label.lowercase() }
             .toList()
+        val saved = savedPackages.filter { it != ownPackage }.map { packageName ->
+            val label = runCatching {
+                packageManager.getApplicationLabel(packageManager.getApplicationInfo(packageName, 0)).toString()
+            }.getOrDefault(packageName)
+            LocalLaunchableApp(packageName, label, hasLauncher = false)
+        }
+        return mergeAppInventory(launchable, saved)
     }
 }
+
+
+internal fun mergeAppInventory(
+    launchable: List<LocalLaunchableApp>,
+    saved: List<LocalLaunchableApp>,
+): List<LocalLaunchableApp> = (launchable + saved)
+    .distinctBy { it.packageName }
+    .sortedBy { it.label.lowercase() }

@@ -1,6 +1,10 @@
 package com.hermes.companion.presence
 
 import android.content.Context
+import android.content.SharedPreferences
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlin.math.max
 
 data class PresenceSnapshot(
@@ -17,6 +21,13 @@ data class PresenceSnapshot(
 
 class PresenceStateStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+
+    fun snapshots() = callbackFlow {
+        val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> trySend(snapshot()); Unit }
+        prefs.registerOnSharedPreferenceChangeListener(listener)
+        trySend(snapshot())
+        awaitClose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
+    }.distinctUntilChanged()
 
     @Synchronized
     fun commitPackage(candidatePackage: String, nowMs: Long): AppTransition? {
@@ -91,3 +102,4 @@ class PresenceStateStore(context: Context) {
         private const val KEY_LAST_ACCESSIBILITY_EVENT_AT = "last_accessibility_event_at"
     }
 }
+
