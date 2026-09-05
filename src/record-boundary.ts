@@ -48,3 +48,22 @@ export function assertValidRecordBoundary(input: {
     throw new Error(`Illegal long-lived record boundary: ${input.world}/${input.provenance}`);
   }
 }
+
+/**
+ * Compatibility for internal pre-boundary callers only. Missing world+provenance together is
+ * quarantined as FICTION/authored rather than guessed into Earth. Public MCP write surfaces
+ * require both fields explicitly. Supplying only one boundary half is always an error.
+ */
+export function resolveRecordBoundary(input: {
+  world?: RecordWorld;
+  provenance?: RecordProvenance;
+}): { world: RecordWorld; provenance: RecordProvenance } {
+  if ((input.world === undefined) !== (input.provenance === undefined)) {
+    throw new Error("world and provenance must be provided together for long-lived records");
+  }
+  const boundary = input.world === undefined
+    ? { world: "FICTION" as const, provenance: "authored" as const }
+    : { world: input.world, provenance: input.provenance! };
+  assertValidRecordBoundary(boundary);
+  return boundary;
+}
