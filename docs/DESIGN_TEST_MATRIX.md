@@ -13,8 +13,8 @@
 
 | Design | Requirement | Protection | Status |
 |---|---|---|---|
-| OH-30 / OH-32 | Earth / AI World / Fiction records cannot leak across factual queries | `world-boundary.test.ts` protects strict observation evidence; `record-boundary.test.ts` protects diary/action/relationship/activity boundaries, approval inheritance and world-filtered reads; `LONG_LIVED_RECORD_BOUNDARY_CLASSIFICATION.md` excludes Runtime control state from canonical memory; P4 preference/Soul corruption is rejected by generic AI World validation | COVERED |
-| OH-31 | Long-lived semantic records preserve world/provenance/source/time | Observation schema + `record-boundary.test.ts` + `routine-boundary.test.ts`; diary/action/relationship/activity carry explicit boundaries and RoutineWindow is fixed to `EARTH/user_declared`; P4 continuity/preference/Soul records carry explicit AI World boundaries, timestamps and evidence traces | COVERED |
+| OH-30 / OH-32 | Earth / AI World / Fiction records cannot leak across factual queries | `world-boundary.test.ts` protects strict observation evidence; `record-boundary.test.ts` protects diary/action/relationship/activity boundaries, approval inheritance and world-filtered reads; `LONG_LIVED_RECORD_BOUNDARY_CLASSIFICATION.md` excludes Runtime control state from canonical memory; P4 preference/Soul corruption is rejected by generic AI World validation; P4.4 reflection input is AI World-only | COVERED |
+| OH-31 | Long-lived semantic records preserve world/provenance/source/time | Observation schema + `record-boundary.test.ts` + `routine-boundary.test.ts`; diary/action/relationship/activity carry explicit boundaries and RoutineWindow is fixed to `EARTH/user_declared`; P4 continuity/preference/Soul records carry explicit AI World boundaries, timestamps and evidence traces; reflection output binds exact source review evidence | COVERED |
 | OH-40 | Repeated events do not produce wake/message storms | Wake cooldown/dedupe tests + `TelemetryPolicyTest` stable heartbeat bucket ID + Room unique dedupe key instrumentation coverage | COVERED |
 | OH-41 | User can correct/delete/revoke/pause and control per-App sensing | Configuration gate + explicit manual fallback + diagnostics copy without credential values; `PresencePrivacyRulesTest` protects per-App identity allow/hide semantics; broader pause/delete/revoke controls still pending | PARTIAL |
 | OH-42 | Sensitive sensing/credentials are minimized before data leaves Android | `TelemetryPolicyTest`; `PresencePrivacyRulesTest`; `UsagePrivacyFilterTest` covers current App/session/totals/category redaction; register-only enrollment token cannot ingest directly (`phone-enrollment.test.ts`); diagnostics URL query/secret redaction test; Usage Access manual acceptance | PARTIAL / MANUAL |
@@ -26,21 +26,21 @@
 | OH-50 | Autonomous browsing cannot silently perform external side effects | Capability policy tests | TODO |
 | OH-51 | Skill/MCP proposal cannot install without approval | Proposal/approval state-machine tests | TODO |
 | OH-52 | Risk Level 2/3 actions require confirmation and remain independent from observation permissions | Action policy tests; P3 Level-0 AI World MCP is side-effect isolated, but Level 2/3 confirmation policy remains future work | TODO |
-| OH-60 | Runtime Core is provider-neutral | `BrainAdapter` compile boundary + mock brain tests; add import-boundary guard | PARTIAL |
+| OH-60 | Runtime Core is provider-neutral | `BrainAdapter` compile boundary + mock brain tests; P4.4 adds a separate provider-neutral `AiWorldReflectionAdapter`; add import-boundary guard | PARTIAL |
 | OH-61 | Daily telemetry survives without control WSS | Android HTTPS queue/upload + auto-config planning tests + compiled Runtime ingest/device auth + register-only enrollment test; real-device validation remains | PARTIAL / MANUAL |
 | OH-62 | Remote live read uses separate control path | Relay/Local MCP integration test when migrated | TODO |
 | OH-63 | FCM delivery does not depend on WSS | Notifier tests + future disconnected-WSS integration test | PARTIAL |
-| OH-64 | Runtime remains event-driven; no high-frequency LLM life loop | WorkManager 15-minute approximate schedule, immediate worker, wake scheduling tests, queue retry/backoff; P4 review maturity, preference decay and Soul decay are deterministic Runtime work and do not invoke Brain | PARTIAL |
-| OH-65 | Model calls are bounded to cognition-worthy work | P4 `nextReviewAt` maturity, bounded preference evidence/decay and slow Soul review/decay are zero-model-cost; broader resource-budget layer remains pending | PARTIAL |
+| OH-64 | Runtime remains event-driven; no high-frequency LLM life loop | WorkManager 15-minute approximate schedule, immediate worker, wake scheduling tests, queue retry/backoff; P4 review maturity/preference/Soul decay are deterministic; P4.4 reflection requires an explicit due record and is limited to one source/cycle, six-hour success cooldown, one-hour failure backoff and three attempts/UTC-day | PARTIAL |
+| OH-65 | Model calls are bounded to cognition-worthy work | P4 deterministic maturity/preference/Soul work is zero-model-cost; `ai-world-reflection*.test.ts` proves zero calls without due work plus persisted cooldown/backoff/daily budget; broader cross-capability resource budget remains pending | PARTIAL |
 | OH-66 | Runtime/Android state is diagnosable without secret leakage | compiled `/v1/phone/status` tests; staged Android API-error tests; `DiagnosticsReportTest`; periodic/immediate worker state exposed | PARTIAL / MANUAL |
-| OH-67 | Provider/tool failures degrade gracefully | FCM/Hermes retry tests + Android Room retry + staged auth errors + production start scripts; `ai-world-worker.test.ts` proves deterministic AI World progression is independent from Brain/provider availability and isolated from Earth delivery failure | PARTIAL |
+| OH-67 | Provider/tool failures degrade gracefully | FCM/Hermes retry tests + Android Room retry + staged auth errors + production start scripts; AI World deterministic progression is isolated from provider failure; P4.4 reflection provider/contract failure leaves the source due, backs off, and cannot block Earth Worker/Care | PARTIAL |
 | OH-68 | Realtime Presence uses event-driven package/screen events, local dedupe/queue, per-App identity redaction before upload, no Accessibility tree retrieval, while UsageEvents remains reconciliation | Accessibility config/service tests + transition dedupe tests + `PresencePrivacyRulesTest` + `UsagePrivacyFilterTest` + Android/Runtime observation-kind contract test + queue tests + real-device verification | TODO / MANUAL |
 | OH-69 | Raw screenshot is ephemeral, guarded before provider upload, never placed in ordinary diagnostics/logs, and retries are bounded | Visual pipeline lifecycle/redaction tests + Presence-hidden visual gate + visual-audit package redaction + manual provider failure test | TODO / MANUAL |
 | OH-P1 | Real Android observation reaches persisted Life State | Runtime integration tests, Android telemetry/usage/auto-config tests, diagnostics tests and `OH_P1_ACCEPTANCE.md`; actual phone evidence still required | PARTIAL / MANUAL |
 | OH-P1.5 | Realtime Presence → local privacy guard → Context → Curiosity → visual guard → optional Visual summary works on a real phone | `OH_PRESENCE_VISUAL_PLAN.md` scenarios A-E + automated policy/session/privacy tests | TODO / MANUAL |
 | OH-P2 | Earth change → Wake → Brain → Decision → FCM → Android notification | End-to-end real-device acceptance including destination deep link | TODO / MANUAL |
 | OH-P3 | AI World persists while model sleeps | `ai-world*.test.ts` coverage proves deterministic state/history, restart/catch-up, explicit location, complete structured continuity kinds, provider-independent worker progression, bounded MCP access and Earth isolation; acceptance recorded in `OH_P3_ACCEPTANCE.md` | COVERED |
-| OH-P4 | Continuity + Soul evolve slowly and traceably | P4.1 continuity tests protect Experience/Journal/Thought Thread/no hidden CoT; P4.2 preference tests protect evidence bounds/dedupe/decay; P4.3 Soul tests protect multi-evidence review gate, hard Soul delta, evidence-basis dedupe, counter correction, slow decay, audit trace and generic corruption rejection; user-feedback and cognition policy remain pending | PARTIAL |
+| OH-P4 | Continuity + Soul evolve slowly and traceably | P4.1 continuity tests protect reusable public continuity/no hidden CoT; P4.2 preference tests protect evidence bounds/dedupe/decay; P4.3 Soul tests protect reviewed multi-evidence slow change/audit; P4.4 reflection tests protect sparse model cognition, exact source binding, AI World-only input, strict output, resource bounds and Worker isolation; user-feedback learning/final phase review remain pending | PARTIAL |
 | OH-P5 | Autonomous exploration produces traceable experience/share intent | browser adapter + intent tests | TODO |
 | OH-P6 | User feedback affects future strategy without direct overwrite | feedback evidence/update tests | TODO |
 | OH-P7 | Remote read and controlled actions are auditable | relay/action policy tests | TODO |
@@ -191,10 +191,29 @@ P4.3 automated:
 Tests: `test/ai-world-soul.test.ts`, `test/ai-world-soul-validation.test.ts`.
 Implementation note: `docs/P4_SOUL_V01.md`.
 
+P4.4 automated:
+
+- no due Continuity record means zero reflection provider calls;
+- Runtime deterministically selects at most one due Experience/Note/Thought Thread per cycle;
+- source record and due timestamp are exact-bound before and after the provider call;
+- reflection input contains only the AI World source, current AI World state and bounded read-only Soul context;
+- Earth Life state/observations/proactive queue are not included in the reflection input;
+- only strict `ignore | record_reflection` output is accepted;
+- hidden reasoning, messaging actions, Soul-delta fields and arbitrary extras fail closed;
+- `record_reflection` persists a public model-generated Thought Thread with exact review-basis evidence reference;
+- `ignore` creates no content;
+- successful decisions enforce six-hour cooldown; failures enforce one-hour retry backoff; provider attempts are capped at three per UTC day;
+- persisted processing/budget state survives restart;
+- provider/contract failure leaves the source due and cannot block Earth heartbeat/Care/Delivery;
+- Worker performs reflection only when an explicit reflection adapter is supplied; deployment reflection remains disabled by default;
+- Hermes reflection uses the configured stable provider identity but Runtime revalidates its output independently.
+
+Tests: `test/ai-world-reflection.test.ts`, `test/ai-world-reflection-worker.test.ts`, `test/hermes-reflection.test.ts`.
+Implementation note: `docs/P4_REFLECTION_V01.md`.
+
 P4 remaining:
 
 - user feedback learning with bounded influence rather than direct Soul overwrite;
-- review/reflect cognition policy and resource budget;
 - final P4 phase review.
 
 ## Rule for adding features
