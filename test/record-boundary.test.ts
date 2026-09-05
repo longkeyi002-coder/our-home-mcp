@@ -149,3 +149,65 @@ test("OH-30/OH-31/OH-32: MCP preserves explicit boundaries, rejects illegal pair
     await server.close();
   }
 });
+
+test("OH-30/OH-32: MCP world filters keep diary, action and activity reads mechanically isolated", async () => {
+  const store = await createStore();
+  await store.addDiary({
+    title: "现实日记",
+    body: "现实世界记录。",
+    author: "agent",
+    visibility: "shared",
+    world: "EARTH",
+    provenance: "authored",
+  });
+  await store.addDiary({
+    title: "AI World 日记",
+    body: "AI World 记录。",
+    author: "agent",
+    visibility: "shared",
+    world: "AI_WORLD",
+    provenance: "authored",
+  });
+  await store.addAction({
+    title: "现实行动",
+    world: "EARTH",
+    provenance: "authored",
+  });
+  await store.addAction({
+    title: "AI World 行动",
+    world: "AI_WORLD",
+    provenance: "authored",
+  });
+
+  const { client, server } = await connectedClient(store);
+  try {
+    const earthDiaries = await client.callTool({
+      name: "home.list_diary",
+      arguments: { world: "EARTH", limit: 20 },
+    });
+    const earthEntries = (earthDiaries.structuredContent as { entries: Array<{ title: string; world: string }> }).entries;
+    assert.equal(earthEntries.length, 1);
+    assert.equal(earthEntries[0]?.title, "现实日记");
+    assert.equal(earthEntries.every((item) => item.world === "EARTH"), true);
+
+    const aiActions = await client.callTool({
+      name: "home.list_actions",
+      arguments: { world: "AI_WORLD", limit: 20 },
+    });
+    const actions = (aiActions.structuredContent as { actions: Array<{ title: string; world: string }> }).actions;
+    assert.equal(actions.length, 1);
+    assert.equal(actions[0]?.title, "AI World 行动");
+    assert.equal(actions.every((item) => item.world === "AI_WORLD"), true);
+
+    const aiActivity = await client.callTool({
+      name: "home.list_activity",
+      arguments: { world: "AI_WORLD", limit: 20 },
+    });
+    const activities = (aiActivity.structuredContent as { activities: Array<{ world: string }> }).activities;
+    assert.equal(activities.length, 2);
+    assert.equal(activities.every((item) => item.world === "AI_WORLD"), true);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
