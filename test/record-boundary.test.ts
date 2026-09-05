@@ -211,3 +211,113 @@ test("OH-30/OH-32: MCP world filters keep diary, action and activity reads mecha
     await server.close();
   }
 });
+
+test("OH-30/OH-31: relationship approval preserves the event boundary instead of rewriting it as Earth", async () => {
+  const store = await createStore();
+  const event = await store.proposeRelationshipEvent({
+    title: "AI World 共同纪念日",
+    occurredAt: "2026-09-05T10:00:00.000Z",
+    proposedBy: "agent",
+    importance: "major",
+    world: "AI_WORLD",
+    provenance: "authored",
+  });
+  assert.deepEqual([event.world, event.provenance], ["AI_WORLD", "authored"]);
+
+  const afterUserApproval = await store.approveRelationshipEvent(event.id, "user");
+  assert.equal(afterUserApproval.approvalStatus, "proposed");
+  assert.deepEqual([afterUserApproval.world, afterUserApproval.provenance], ["AI_WORLD", "authored"]);
+
+  const approved = await store.approveRelationshipEvent(event.id, "agent");
+  assert.equal(approved.approvalStatus, "approved");
+  assert.deepEqual([approved.world, approved.provenance], ["AI_WORLD", "authored"]);
+
+  const relationshipActivity = store.snapshot().activities.filter((item) => item.source === "RELATIONSHIP");
+  assert.equal(relationshipActivity.length, 3);
+  assert.equal(relationshipActivity.every((item) => item.world === "AI_WORLD" && item.provenance === "authored"), true);
+});
+
+test("OH-32: relationship events reject illegal boundaries and legacy calls remain quarantined", async () => {
+  const store = await createStore();
+  await assert.rejects(
+    store.proposeRelationshipEvent({
+      title: "非法观测",
+      occurredAt: "2026-09-05T10:00:00.000Z",
+      proposedBy: "agent",
+      importance: "ordinary",
+      world: "AI_WORLD",
+      provenance: "observed",
+    }),
+    /Illegal long-lived record boundary: AI_WORLD\/observed/,
+  );
+
+  const legacy = await store.proposeRelationshipEvent({
+    title: "旧关系调用",
+    occurredAt: "2026-09-05T10:00:00.000Z",
+    proposedBy: "user",
+    importance: "ordinary",
+  });
+  assert.deepEqual([legacy.world, legacy.provenance], ["FICTION", "authored"]);
+});
+
+test("OH-30/OH-32: MCP relationship reads are isolated by world and approval keeps the original boundary", async () => {
+  const store = await createStore();
+  const { client, server } = await connectedClient(store);
+  try {
+    const earthProposal = await client.callTool({
+      name: "home.propose_relationship_event",
+      arguments: {
+        title: "现实关系节点",
+        occurredAt: "2026-09-05T10:00:00.000Z",
+        proposedBy: "user",
+        importance: "ordinary",
+        world: "EARTH",
+        provenance: "user_declared",
+      },
+    });
+    assert.equal(earthProposal.isError, undefined);
+
+    const aiProposal = await client.callTool({
+      name: "home.propose_relationship_event",
+      arguments: {
+        title: "AI World 关系节点",
+        occurredAt: "2026-09-05T10:05:00.000Z",
+        proposedBy: "agent",
+        importance: "ordinary",
+        world: "AI_WORLD",
+        provenance: "authored",
+      },
+    });
+    assert.equal(aiProposal.isError, undefined);
+    const aiEvent = (aiProposal.structuredContent as { event: { id: string; world: string; provenance: string } }).event;
+
+    const approval = await client.callTool({
+      name: "home.approve_relationship_event",
+      arguments: { eventId: aiEvent.id, approvedBy: "user" },
+    });
+    assert.equal(approval.isError, undefined);
+    const approved = (approval.structuredContent as { event: { world: string; provenance: string } }).event;
+    assert.deepEqual([approved.world, approved.provenance], ["AI_WORLD", "authored"]);
+
+    const earthList = await client.callTool({
+      name: "home.list_relationship_events",
+      arguments: { world: "EARTH", limit: 20 },
+    });
+    const earthEvents = (earthList.structuredContent as { events: Array<{ title: string; world: string }> }).events;
+    assert.equal(earthEvents.length, 1);
+    assert.equal(earthEvents[0]?.title, "现实关系节点");
+    assert.equal(earthEvents.every((item) => item.world === "EARTH"), true);
+
+    const aiList = await client.callTool({
+      name: "home.list_relationship_events",
+      arguments: { world: "AI_WORLD", limit: 20 },
+    });
+    const aiEvents = (aiList.structuredContent as { events: Array<{ title: string; world: string }> }).events;
+    assert.equal(aiEvents.length, 1);
+    assert.equal(aiEvents[0]?.title, "AI World 关系节点");
+    assert.equal(aiEvents.every((item) => item.world === "AI_WORLD"), true);
+  } finally {
+    await client.close();
+    await server.close();
+  }
+});
