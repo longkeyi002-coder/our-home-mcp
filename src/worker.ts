@@ -168,11 +168,26 @@ export async function runProactiveCycle(
           if (!queued || queued.status !== "pending") return;
           queued.dueAt = careDelivery.nextAvailableAt!;
           queued.processingAt = undefined;
+          queued.lastDeliveryPolicy = {
+            evaluatedAt: observedAt,
+            outcome: "deferred",
+            reason: careDelivery.reason,
+            nextAvailableAt: careDelivery.nextAvailableAt,
+          };
         });
         process.stderr.write(
           `[our-home] proactive deferred: ${candidate.id}: ${careDelivery.reason} until ${careDelivery.nextAvailableAt}\n`,
         );
       } else {
+        await store.update((data) => {
+          const queued = data.proactiveQueue.find((item) => item.id === candidate.id);
+          if (!queued || queued.status !== "pending") return;
+          queued.lastDeliveryPolicy = {
+            evaluatedAt: observedAt,
+            outcome: "suppressed",
+            reason: careDelivery.reason,
+          };
+        });
         await store.resolveProactiveMessage(candidate.id, "dismissed");
         await clearProactiveClaim(store, candidate.id);
         process.stderr.write(`[our-home] proactive suppressed: ${candidate.id}: ${careDelivery.reason}\n`);
