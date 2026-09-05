@@ -36,8 +36,8 @@ test("OH-40/OH-47: quiet hours are disabled unless the full runtime configuratio
   );
 });
 
-test("OH-40/OH-47: overnight quiet hours defer until the local end time", () => {
-  const decision = decideQuietHours(overnight, "2026-09-07T23:30:00.000Z", "normal");
+test("OH-40/OH-47: overnight quiet hours defer until the exact local end minute", () => {
+  const decision = decideQuietHours(overnight, "2026-09-07T23:30:37.000Z", "normal");
   assert.deepEqual(decision, {
     defer: true,
     reason: "quiet_hours",
@@ -65,7 +65,7 @@ test("OH-47: high-priority wake bypass is explicit and can be disabled", () => {
   assert.equal(decideQuietHours(strict, "2026-09-07T23:00:00.000Z", "high").defer, true);
 });
 
-test("OH-P2: worker defers a pending message once and delivers it after quiet hours", async () => {
+test("OH-P2: worker persists why a message was deferred and delivers it after quiet hours", async () => {
   const dir = await mkdtemp(join(tmpdir(), "our-home-quiet-"));
   const store = await JsonStore.open(join(dir, "data.json"), false);
   const candidate = await store.scheduleProactiveMessage({
@@ -91,6 +91,12 @@ test("OH-P2: worker defers a pending message once and delivers it after quiet ho
   assert.equal(deferred.status, "pending");
   assert.equal(deferred.dueAt, "2026-09-08T07:00:00.000Z");
   assert.equal(deferred.processingAt, undefined);
+  assert.deepEqual(deferred.lastDeliveryPolicy, {
+    evaluatedAt: "2026-09-07T23:00:00.000Z",
+    outcome: "deferred",
+    reason: "quiet_hours",
+    nextAvailableAt: "2026-09-08T07:00:00.000Z",
+  });
 
   const beforeEnd = await runProactiveCycle(
     store,
@@ -112,5 +118,7 @@ test("OH-P2: worker defers a pending message once and delivers it after quiet ho
   assert.equal(afterEnd.dueCount, 1);
   assert.equal(afterEnd.deliveredCount, 1);
   assert.equal(delivered.length, 1);
-  assert.equal(store.snapshot().proactiveQueue.find((item) => item.id === candidate.id)?.status, "delivered");
+  const deliveredCandidate = store.snapshot().proactiveQueue.find((item) => item.id === candidate.id)!;
+  assert.equal(deliveredCandidate.status, "delivered");
+  assert.equal(deliveredCandidate.lastDeliveryPolicy?.reason, "quiet_hours");
 });
