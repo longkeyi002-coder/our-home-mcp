@@ -35,6 +35,13 @@ class PresenceDwellMonitor(
         val packageName = snapshot.currentPackage ?: return
         if (!snapshot.screenInteractive || !snapshot.unlocked || snapshot.currentStartedAtMs <= 0L) return
 
+        val lastInteractionAtMs = PresenceDwellPolicy.latestInteractionAtMs(
+            currentStartedAtMs = snapshot.currentStartedAtMs,
+            lastTransitionAtMs = snapshot.lastTransitionAtMs,
+            lastAccessibilityEventAtMs = snapshot.lastAccessibilityEventAtMs,
+        )
+        if (!PresenceDwellPolicy.isRecentlyActive(nowMs, lastInteractionAtMs)) return
+
         val durationMs = (nowMs - snapshot.currentStartedAtMs).coerceAtLeast(0L)
         val stage = PresenceDwellPolicy.stageFor(durationMs) ?: return
         val sessionKey = "$packageName:${snapshot.currentStartedAtMs}"
@@ -52,6 +59,9 @@ class PresenceDwellMonitor(
             durationMs = durationMs,
             stage = stage,
             atMs = nowMs,
+            screenInteractive = snapshot.screenInteractive,
+            unlocked = snapshot.unlocked,
+            lastInteractionAtMs = lastInteractionAtMs,
         )
     }
 
@@ -64,7 +74,19 @@ class PresenceDwellMonitor(
 }
 
 object PresenceDwellPolicy {
-    private val thresholdsMinutes = listOf(10, 20, 30, 45, 60, 90, 120)
+    const val ACTIVE_USE_FRESHNESS_MS = 7 * 60_000L
+    private val thresholdsMinutes = listOf(5, 10, 20, 30, 45, 60, 90, 120)
+
+    fun latestInteractionAtMs(
+        currentStartedAtMs: Long,
+        lastTransitionAtMs: Long,
+        lastAccessibilityEventAtMs: Long,
+    ): Long = maxOf(currentStartedAtMs, lastTransitionAtMs, lastAccessibilityEventAtMs)
+
+    fun isRecentlyActive(nowMs: Long, lastInteractionAtMs: Long): Boolean =
+        lastInteractionAtMs > 0L &&
+            nowMs >= lastInteractionAtMs &&
+            nowMs - lastInteractionAtMs <= ACTIVE_USE_FRESHNESS_MS
 
     /** Returns a stable 1-based milestone stage, or null before the first milestone. */
     fun stageFor(durationMs: Long): Int? {
