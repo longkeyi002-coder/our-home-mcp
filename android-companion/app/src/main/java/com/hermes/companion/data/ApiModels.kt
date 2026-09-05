@@ -52,6 +52,7 @@ data class VisualRequestAck(
 data class ApiAck(
     val dataSource: String? = null,
     val visualRequest: VisualRequestAck? = null,
+    val visualDecisionPending: Boolean = false,
 )
 
 @Serializable
