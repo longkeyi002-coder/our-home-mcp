@@ -44,8 +44,9 @@ function parseWeekdays(value: string | undefined): number[] {
 
 function parseBoolean(value: string | undefined, fallback: boolean): boolean {
   if (value === undefined) return fallback;
-  if (value === "true") return true;
-  if (value === "false") return false;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "true") return true;
+  if (normalized === "false") return false;
   throw new Error("Quiet-hours boolean settings must be true or false");
 }
 
@@ -143,8 +144,10 @@ function quietAt(policy: QuietHoursPolicy, atMs: number): boolean {
 }
 
 function nextQuietEnd(policy: QuietHoursPolicy, asOfMs: number): string | undefined {
-  for (let delta = MINUTE_MS; delta <= MAX_QUIET_SEARCH_MS; delta += MINUTE_MS) {
-    const candidate = asOfMs + delta;
+  // Search on absolute minute boundaries so a worker cycle at 23:30:37 defers to 07:00:00,
+  // not 07:00:37. Evaluating local time through Intl keeps DST and timezone rules authoritative.
+  const firstMinuteBoundary = Math.floor(asOfMs / MINUTE_MS) * MINUTE_MS + MINUTE_MS;
+  for (let candidate = firstMinuteBoundary; candidate - asOfMs <= MAX_QUIET_SEARCH_MS; candidate += MINUTE_MS) {
     if (!quietAt(policy, candidate)) return new Date(candidate).toISOString();
   }
   return undefined;
