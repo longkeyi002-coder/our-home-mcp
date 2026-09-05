@@ -47,8 +47,12 @@ object HermesNotifications {
         )
     }
 
-    fun show(context: Context, value: HermesNotification) {
-        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
+    fun show(
+        context: Context,
+        value: HermesNotification,
+        privacyMode: NotificationPrivacyMode = NotificationPrivacyMode.HIDE_ON_LOCK_SCREEN,
+    ): Boolean {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
         val activityClass = when (destinationScreen(value.destination)) {
             NotificationDestinationScreen.CHAT_MESSAGE -> ChatMessageActivity::class.java
             NotificationDestinationScreen.HOME -> MainActivity::class.java
@@ -66,14 +70,36 @@ object HermesNotifications {
             intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val presentation = NotificationPrivacyPolicy.present(privacyMode, value.title, value.body)
+        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
-            .setContentTitle(value.title)
-            .setContentText(value.body)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(value.body))
+            .setContentTitle(presentation.title)
+            .setContentText(presentation.body)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(presentation.body))
+            .setVisibility(
+                when (presentation.lockScreenVisibility) {
+                    NotificationLockScreenVisibility.PUBLIC -> NotificationCompat.VISIBILITY_PUBLIC
+                    NotificationLockScreenVisibility.PRIVATE -> NotificationCompat.VISIBILITY_PRIVATE
+                },
+            )
             .setAutoCancel(true)
             .setContentIntent(pending)
-            .build()
-        runCatching { NotificationManagerCompat.from(context).notify(requestCode, notification) }
+
+        if (presentation.publicTitle != null && presentation.publicBody != null) {
+            val publicVersion = NotificationCompat.Builder(context, CHANNEL_ID)
+                .setSmallIcon(android.R.drawable.ic_dialog_info)
+                .setContentTitle(presentation.publicTitle)
+                .setContentText(presentation.publicBody)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+                .setAutoCancel(true)
+                .setContentIntent(pending)
+                .build()
+            builder.setPublicVersion(publicVersion)
+        }
+
+        return runCatching {
+            NotificationManagerCompat.from(context).notify(requestCode, builder.build())
+            true
+        }.getOrDefault(false)
     }
 }

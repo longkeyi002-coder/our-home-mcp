@@ -2,6 +2,8 @@ package com.hermes.companion.data
 
 import android.content.Context
 import com.hermes.companion.UsageAccessOnboarding
+import com.hermes.companion.push.NotificationPrivacyMode
+import com.hermes.companion.push.NotificationReceiptWindow
 import java.util.UUID
 
 class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
@@ -65,6 +67,25 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
             .apply()
     }
 
+    fun notificationPrivacyMode(): NotificationPrivacyMode =
+        NotificationPrivacyMode.fromStorage(prefs.getString(KEY_NOTIFICATION_PRIVACY_MODE, null))
+
+    fun saveNotificationPrivacyMode(value: NotificationPrivacyMode) {
+        prefs.edit().putString(KEY_NOTIFICATION_PRIVACY_MODE, value.storageValue).apply()
+    }
+
+    fun hasDisplayedNotification(candidateId: String): Boolean =
+        NotificationReceiptWindow.contains(prefs.getString(KEY_DISPLAYED_NOTIFICATION_IDS, null), candidateId)
+
+    fun markNotificationDisplayed(candidateId: String) {
+        if (candidateId.isBlank()) return
+        val serialized = prefs.getString(KEY_DISPLAYED_NOTIFICATION_IDS, null)
+        val updated = NotificationReceiptWindow.record(serialized, candidateId)
+        // Commit synchronously: once notify() succeeds, receipt persistence should be
+        // durable before FirebaseMessagingService can be torn down by the process.
+        prefs.edit().putString(KEY_DISPLAYED_NOTIFICATION_IDS, updated).commit()
+    }
+
     fun lastSuccessfulUpload(): Long = prefs.getLong(KEY_LAST_SUCCESSFUL_UPLOAD, prefs.getLong(KEY_LAST_UPLOAD_LEGACY, 0L))
     fun lastUpload(): Long = lastSuccessfulUpload()
     fun lastManualHeartbeat(): Long = prefs.getLong(KEY_LAST_MANUAL_HEARTBEAT, prefs.getLong(KEY_LAST_HEARTBEAT_LEGACY, 0L))
@@ -114,6 +135,8 @@ class SettingsRepository(context: Context) : UsageAccessOnboarding.State {
         private const val KEY_LAST_PUSH_ATTEMPT = "last_push_registration_attempt"
         private const val KEY_LAST_PUSH_SUCCESS = "last_push_registration_success"
         private const val KEY_LAST_PUSH_ERROR = "last_push_registration_error"
+        private const val KEY_NOTIFICATION_PRIVACY_MODE = "notification_privacy_mode"
+        private const val KEY_DISPLAYED_NOTIFICATION_IDS = "displayed_notification_ids"
         private const val KEY_LAST_SUCCESSFUL_UPLOAD = "last_successful_upload"
         private const val KEY_LAST_MANUAL_HEARTBEAT = "last_manual_heartbeat"
         private const val KEY_LAST_PERIODIC_COLLECTION = "last_periodic_collection"
