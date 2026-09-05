@@ -2,8 +2,16 @@ node_modules/
 dist/
 /data/
 .env
+.env.*
+!.env.example
 *.log
 **/.gradle/
 **/build/
 **/local.properties
 **/google-services.json
+*.jks
+*.keystore
+*.p12
+*.pem
+**/*service-account*.json
+**/firebase-admin*.json
