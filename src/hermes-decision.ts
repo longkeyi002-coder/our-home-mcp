@@ -5,6 +5,10 @@ import type { LifeContext, WakeDecision, WakeEvent } from "./types.js";
 const wakeDecisionSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("ignore") }).strict(),
   z.object({
+    action: z.literal("request_visual"),
+    reason: z.string().trim().min(1).max(1_000),
+  }).strict(),
+  z.object({
     action: z.literal("proactive_message"),
     candidate: z.object({
       title: z.string().trim().min(1).max(200),
@@ -39,12 +43,26 @@ function responsesUrl(apiUrl: string): string {
   return `${normalized}/v1/responses`;
 }
 
+function decisionContract(wakeEvent: WakeEvent): string {
+  if (wakeEvent.type === "visual_opportunity") {
+    return [
+      "This wake event is only asking whether one already-eligible visual observation is worth requesting now.",
+      "You may not choose another app, session, or privacy policy. Android local guards remain authoritative and may still refuse capture.",
+      'Return only {"action":"ignore"} or {"action":"request_visual","reason":"..."}.',
+    ].join("\n");
+  }
+  return [
+    "This wake event is a Care decision, not a visual-observation decision.",
+    'Return only {"action":"ignore"} or {"action":"proactive_message","candidate":{"title":"...","message":"...","reason":"...","dueAt":"optional ISO datetime","dedupeKey":"optional"}}.',
+  ].join("\n");
+}
+
 function activationInput(wakeEvent: WakeEvent, context: LifeContext): string {
   return [
     "This is an AI Life Runtime wake activation delivered through the Hermes brain adapter.",
     "Evaluate the wake event using your existing tools, memory, and MCP access as needed.",
-    "Return only one WakeDecision V0.1 JSON object, with no Markdown or commentary.",
-    '{"action":"ignore"} or {"action":"proactive_message","candidate":{"title":"...","message":"...","reason":"...","dueAt":"optional ISO datetime","dedupeKey":"optional"}}.',
+    "Return only one WakeDecision V0.2 JSON object, with no Markdown or commentary.",
+    decisionContract(wakeEvent),
     JSON.stringify({
       wakeEvent: {
         id: wakeEvent.id,
@@ -53,6 +71,7 @@ function activationInput(wakeEvent: WakeEvent, context: LifeContext): string {
         observedAt: wakeEvent.observedAt,
         lifeState: wakeEvent.lifeState,
         previousLifeState: wakeEvent.previousLifeState,
+        visualContext: wakeEvent.visualContext,
       },
       context,
     }),
@@ -120,6 +139,12 @@ export class HermesDecisionEngine implements BrainAdapter {
     }
     const decisionResult = wakeDecisionSchema.safeParse(decision);
     if (!decisionResult.success) throw new Error("Hermes output_text violated the WakeDecision contract");
+    if (input.wakeEvent.type === "visual_opportunity" && decisionResult.data.action === "proactive_message") {
+      throw new Error("Visual opportunity cannot directly create a proactive message");
+    }
+    if (input.wakeEvent.type !== "visual_opportunity" && decisionResult.data.action === "request_visual") {
+      throw new Error("Only a visual opportunity may request visual observation");
+    }
     return decisionResult.data;
   }
 }
