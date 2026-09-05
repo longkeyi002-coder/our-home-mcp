@@ -62,7 +62,7 @@ test("push addresses are absent from life and Hermes wake context", async () => 
   assert.equal(serialized.includes("private-token"), false);
 });
 
-test("FCM sends one high-priority data-only payload, routes it to chat, and success marks candidate delivered", async () => {
+test("FCM sends one high-priority data-only payload with bounded lifetime and success marks candidate delivered", async () => {
   const store = await freshStore();
   await store.registerPhoneDevice({ deviceId: "android-main", pushToken: "target-token" });
   const candidate = await due(store);
@@ -81,7 +81,11 @@ test("FCM sends one high-priority data-only payload, routes it to chat, and succ
       title: candidate.title,
       body: candidate.message,
     },
-    android: { priority: "HIGH" },
+    android: {
+      priority: "HIGH",
+      ttl: "3600s",
+      collapse_key: candidate.id,
+    },
   });
   assert.equal("notification" in sent[0]!, false);
   assert.equal(store.snapshot().proactiveQueue[0]?.status, "delivered");
