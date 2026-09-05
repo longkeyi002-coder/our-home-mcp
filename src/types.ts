@@ -39,6 +39,9 @@ export type AiWorldWeather = "clear" | "cloudy" | "rain";
 export type AiWorldWorkState = "resting" | "preparing" | "working" | "off_duty";
 export type AiWorldActivity = "sleeping" | "morning_routine" | "focused_work" | "midday_break" | "free_time" | "winding_down";
 export type AiWorldRoom = "bedroom" | "study" | "living_room" | "kitchen";
+export type AiWorldItemKind = "task" | "waiting" | "plan" | "hobby" | "interest" | "collection";
+export type AiWorldItemStatus = "active" | "completed" | "archived";
+export type AiWorldItemProvenance = "inferred" | "simulated" | "authored" | "model_generated";
 
 export interface DiaryEntry {
   id: string;
@@ -223,9 +226,24 @@ export interface AiWorldHistoryEvent {
   changes: Partial<Record<"room" | "weather" | "workState" | "currentActivity", string>>;
 }
 
+export interface AiWorldItem {
+  id: string;
+  world: "AI_WORLD";
+  provenance: AiWorldItemProvenance;
+  source: "AGENT_LIFE";
+  kind: AiWorldItemKind;
+  title: string;
+  note?: string;
+  status: AiWorldItemStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface AiWorldData {
   state: AiWorldState;
   history: AiWorldHistoryEvent[];
+  /** Structured P3 continuity collections. Missing means pre-P3.2 data and is treated as empty. */
+  items?: AiWorldItem[];
 }
 
 export interface AiWorldSnapshot {
