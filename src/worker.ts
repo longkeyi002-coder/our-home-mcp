@@ -6,6 +6,7 @@ import type { LifeContext, ProactiveCandidate, WakeEvent } from "./types.js";
 import { HermesDecisionEngine } from "./hermes-decision.js";
 import { FcmHttpV1Sender, FcmNotifier } from "./fcm.js";
 import { decideCareDelivery } from "./care-delivery.js";
+import { enqueueVisualResultWakeEvents, visualResultWakeExpired } from "./visual-result-wake.js";
 import {
   claimDueProactiveMessages,
   claimPendingWakeEvents,
@@ -109,14 +110,22 @@ export async function runProactiveCycle(
   const observedAt = asOf.toISOString();
   const heartbeat = await store.recordHeartbeat("独立 Life Loop 心跳：检查主动消息队列。");
   const wakeEvents = await store.evaluateWakeEvents(observedAt);
+  let visualResultWakeCount = 0;
 
   if (decisionEngine) {
+    const visualResultWakeEvents = await enqueueVisualResultWakeEvents(store, observedAt);
+    visualResultWakeCount = visualResultWakeEvents.length;
     const claimedWakeEvents = await claimPendingWakeEvents(store, observedAt, 5);
     for (const wakeEvent of claimedWakeEvents) {
       if (
         wakeEvent.type === "visual_opportunity"
         && (!wakeEvent.visualContext || wakeEvent.visualContext.expiresAt <= observedAt)
       ) {
+        await store.resolveWakeEvent(wakeEvent.id, "dismissed");
+        await clearWakeEventClaim(store, wakeEvent.id);
+        continue;
+      }
+      if (visualResultWakeExpired(wakeEvent, observedAt)) {
         await store.resolveWakeEvent(wakeEvent.id, "dismissed");
         await clearWakeEventClaim(store, wakeEvent.id);
         continue;
@@ -137,8 +146,9 @@ export async function runProactiveCycle(
           await store.resolveWakeEvent(wakeEvent.id, "dismissed");
           await clearWakeEventClaim(store, wakeEvent.id);
         }
-        // Ordinary Care wakes retain the persisted five-minute lease. That prevents a failing
-        // provider from being called again every worker cycle and preserves existing behavior.
+        // Ordinary Care wakes, including fresh visual-result Care wakes, retain the persisted
+        // five-minute lease. That prevents a failing provider from being called every cycle;
+        // visual-result wakes are discarded by their own freshness bound before stale contact.
       }
     }
   }
@@ -171,7 +181,13 @@ export async function runProactiveCycle(
     }
   }
 
-  return { heartbeatId: heartbeat.id, wakeEventCount: wakeEvents.length, dueCount: due.length, deliveredCount, failedCount };
+  return {
+    heartbeatId: heartbeat.id,
+    wakeEventCount: wakeEvents.length + visualResultWakeCount,
+    dueCount: due.length,
+    deliveredCount,
+    failedCount,
+  };
 }
 
 const intervalMs = Number(process.env.OUR_HOME_WORKER_INTERVAL_MS ?? "60000");
