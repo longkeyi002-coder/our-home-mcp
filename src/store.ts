@@ -594,6 +594,18 @@ export class JsonStore {
     return result;
   }
 
+  async rescheduleProactiveMessage(id: string, dueAt: string): Promise<ProactiveCandidate> {
+    let result: ProactiveCandidate | undefined;
+    await this.update((data) => {
+      result = data.proactiveQueue.find((item) => item.id === id);
+      if (!result) throw new Error(`Proactive candidate not found: ${id}`);
+      if (result.status !== "pending") throw new Error(`Pending proactive candidate not found: ${id}`);
+      result.dueAt = dueAt;
+    });
+    if (!result) throw new Error(`Proactive candidate not found: ${id}`);
+    return result;
+  }
+
   async addAction(input: {
     title: string;
     description?: string;
