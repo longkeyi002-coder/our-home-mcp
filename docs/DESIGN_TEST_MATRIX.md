@@ -23,17 +23,17 @@
 | OH-45 | Sensitive Guard blocks protected apps/scenes before upload and cannot be bypassed by Brain/Curiosity; Presence-hidden apps cannot be observed visually; temporary grants expire | Local privacy-policy unit tests + `PresencePrivacyRulesTest` + `VisualCaptureBridge` local Presence gate + secure-window/manual device acceptance + temporary-grant lifecycle tests | TODO / MANUAL |
 | OH-46 | Permission onboarding detects current state and routes users to the shortest supported system setting without bypassing OS security; App privacy UI remains simple | Android permission-state/navigation tests + searchable launcher-App list manual acceptance + OPPO/OnePlus real-device manual acceptance | TODO / MANUAL |
 | OH-47 | FCM notification opens the intended Our Home Chat/message destination and obeys preview policy | Notification payload/deep-link tests + foreground/background real-device acceptance | TODO / MANUAL |
-| OH-50 | Autonomous browsing cannot silently perform external side effects | Capability policy tests | TODO |
+| OH-50 | Autonomous browsing cannot silently perform external side effects | P5.1 `ai-world-exploration.test.ts` protects the strict public-web-only/no-auth/no-side-effect capability and output contract; concrete provider enforcement and persisted result flow remain future P5 work | PARTIAL |
 | OH-51 | Skill/MCP proposal cannot install without approval | Proposal/approval state-machine tests | TODO |
-| OH-52 | Risk Level 2/3 actions require confirmation and remain independent from observation permissions | Action policy tests; P3 Level-0 AI World MCP is side-effect isolated, but Level 2/3 confirmation policy remains future work | TODO |
-| OH-60 | Runtime Core is provider-neutral | `BrainAdapter` compile boundary + mock brain tests; P4.4 adds a separate provider-neutral `AiWorldReflectionAdapter`; add import-boundary guard | PARTIAL |
+| OH-52 | Risk Level 2/3 actions require confirmation and remain independent from observation permissions | Action policy tests; P3 Level-0 AI World MCP is side-effect isolated; P5.1 exploration contract has no external-action surface; Level 2/3 confirmation policy remains future work | TODO |
+| OH-60 | Runtime Core is provider-neutral | `BrainAdapter` compile boundary + mock brain tests; P4.4 adds provider-neutral `AiWorldReflectionAdapter`; P5.1 adds provider-neutral `AiWorldExplorationAdapter`; add import-boundary guard | PARTIAL |
 | OH-61 | Daily telemetry survives without control WSS | Android HTTPS queue/upload + auto-config planning tests + compiled Runtime ingest/device auth + register-only enrollment test; real-device validation remains | PARTIAL / MANUAL |
 | OH-62 | Remote live read uses separate control path | Relay/Local MCP integration test when migrated | TODO |
 | OH-63 | FCM delivery does not depend on WSS | Notifier tests + future disconnected-WSS integration test | PARTIAL |
-| OH-64 | Runtime remains event-driven; no high-frequency LLM life loop | WorkManager 15-minute approximate schedule, immediate worker, wake scheduling tests, queue retry/backoff; P4 review maturity/preference/Soul maintenance is deterministic; P4.4 reflection requires an explicit due record and is limited to one source/cycle, six-hour success cooldown, one-hour failure backoff and three attempts/UTC-day | PARTIAL |
-| OH-65 | Model calls are bounded to cognition-worthy work | P4 deterministic maturity/preference/Soul/feedback work is zero-model-cost; `ai-world-reflection*.test.ts` proves zero calls without due work plus persisted cooldown/backoff/daily budget; broader cross-capability resource budget remains pending | PARTIAL |
+| OH-64 | Runtime remains event-driven; no high-frequency LLM life loop | WorkManager 15-minute approximate schedule, immediate worker, wake scheduling tests, queue retry/backoff; P4 review maturity/preference/Soul maintenance is deterministic; P4.4 reflection is due/budget gated; P5.1 exploration is free-time/topic gated with one call/cycle, six-hour success cooldown, one-hour failure backoff and two attempts/UTC-day | PARTIAL |
+| OH-65 | Model calls are bounded to cognition-worthy work | P4 deterministic maturity/preference/Soul/feedback work is zero-model-cost; P4 reflection has persisted cooldown/backoff/daily budget; P5.1 proves disabled/no-topic/non-free-time exploration makes zero provider calls and persists a separate exploration budget | PARTIAL |
 | OH-66 | Runtime/Android state is diagnosable without secret leakage | compiled `/v1/phone/status` tests; staged Android API-error tests; `DiagnosticsReportTest`; periodic/immediate worker state exposed | PARTIAL / MANUAL |
-| OH-67 | Provider/tool failures degrade gracefully | FCM/Hermes retry tests + Android Room retry + staged auth errors + production start scripts; AI World deterministic progression is isolated from provider failure; P4.4 reflection provider/contract failure leaves the source due, backs off, and cannot block Earth Worker/Care; P4 identity-maintenance failure is also isolated | PARTIAL |
+| OH-67 | Provider/tool failures degrade gracefully | FCM/Hermes retry tests + Android Room retry + staged auth errors + production start scripts; AI World deterministic progression is isolated from provider failure; P4 reflection and identity maintenance are failure-isolated; P5.1 provider/contract failure backs off without persisting web output or creating Earth/delivery side effects | PARTIAL |
 | OH-68 | Realtime Presence uses event-driven package/screen events, local dedupe/queue, per-App identity redaction before upload, no Accessibility tree retrieval, while UsageEvents remains reconciliation | Accessibility config/service tests + transition dedupe tests + `PresencePrivacyRulesTest` + `UsagePrivacyFilterTest` + Android/Runtime observation-kind contract test + queue tests + real-device verification | TODO / MANUAL |
 | OH-69 | Raw screenshot is ephemeral, guarded before provider upload, never placed in ordinary diagnostics/logs, and retries are bounded | Visual pipeline lifecycle/redaction tests + Presence-hidden visual gate + visual-audit package redaction + manual provider failure test | TODO / MANUAL |
 | OH-P1 | Real Android observation reaches persisted Life State | Runtime integration tests, Android telemetry/usage/auto-config tests, diagnostics tests and `OH_P1_ACCEPTANCE.md`; actual phone evidence still required | PARTIAL / MANUAL |
@@ -41,7 +41,7 @@
 | OH-P2 | Earth change → Wake → Brain → Decision → FCM → Android notification | End-to-end real-device acceptance including destination deep link | TODO / MANUAL |
 | OH-P3 | AI World persists while model sleeps | `ai-world*.test.ts` coverage proves deterministic state/history, restart/catch-up, explicit location, complete structured continuity kinds, provider-independent worker progression, bounded MCP access and Earth isolation; acceptance recorded in `OH_P3_ACCEPTANCE.md` | COVERED |
 | OH-P4 | Continuity + Soul evolve slowly and traceably | P4.1 continuity tests protect reusable public continuity/no hidden CoT; P4.2 preference tests protect evidence bounds/dedupe/decay; P4.3 Soul tests protect reviewed multi-evidence slow change/audit; P4.4 reflection tests protect sparse model cognition, exact source binding, AI World-only input, strict output, resource bounds and Worker isolation; P4.5 feedback tests protect Earth→AI World evidence translation and no direct Soul overwrite; final worker test proves zero-model-cost review/Soul catch-up; acceptance recorded in `OH_P4_ACCEPTANCE.md` | COVERED |
-| OH-P5 | Autonomous exploration produces traceable experience/share intent | browser adapter + intent tests | TODO |
+| OH-P5 | Autonomous exploration produces traceable experience/share intent | P5.1 `ai-world-exploration.test.ts` protects default-off/free-time/topic eligibility, current-phase derivation, provider-neutral read-only capability, strict result schema, restart-safe cooldown/backoff/daily budget and Earth-side-effect isolation; concrete public-web provider, traceable result persistence and maybe-share intent remain pending | PARTIAL |
 | OH-P6 | User feedback affects future strategy without direct overwrite | P4.5 feedback substrate and Feedback→Preference→review→Soul tests protect the learning boundary; automatic product-signal capture/strategy adaptation remains P6 | PARTIAL |
 | OH-P7 | Remote read and controlled actions are auditable | relay/action policy tests | TODO |
 
@@ -237,6 +237,36 @@ Final P4 Runtime integration automated:
 
 Test: `test/ai-world-identity-worker.test.ts`.
 Acceptance: `docs/OH_P4_ACCEPTANCE.md`.
+
+## OH-P5 evidence split
+
+P5.1 automated:
+
+- exploration is disabled by default at the core capability boundary;
+- no topic or non-free-time state makes zero provider calls;
+- Runtime binds one exact topic from AI World open questions/questions/interests/hobbies/ideas;
+- Earth Life observations, phone state and delivery queues are absent from adapter input;
+- eligibility derives the deterministic current AI World phase at `asOf` rather than trusting a stale persisted `free_time` snapshot;
+- the public-web capability explicitly disables authenticated sessions and external side effects;
+- accepted provider output is limited to 1–5 public HTTP(S) URL/title/summary records with no embedded credentials;
+- strict schema rejects extra action/hidden-reasoning fields;
+- P5.1 does not persist provider output into canonical AI World memory and does not create notifications;
+- successful calls have a six-hour cooldown;
+- provider/contract failures have a one-hour backoff;
+- provider attempts are capped at two per UTC day;
+- operational budget/lease state survives restart;
+- provider failure remains isolated from Earth/Android state.
+
+Test: `test/ai-world-exploration.test.ts`.
+Implementation note: `docs/P5_EXPLORATION_BOUNDARY_V01.md`.
+
+P5 remaining:
+
+- concrete public read-only search/fetch provider;
+- traceable Experience/Note/Collection persistence for accepted results;
+- structured reflection over explored material;
+- separate `maybe_share` intent and Level-1 delivery policy;
+- final P5 Phase Review.
 
 ## Rule for adding features
 
