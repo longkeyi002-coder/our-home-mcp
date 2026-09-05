@@ -6,6 +6,7 @@ import com.hermes.companion.data.UploadWorker
 import com.hermes.companion.presence.PresenceRuntime
 import com.hermes.companion.push.HermesNotifications
 import com.hermes.companion.push.PushRegistration
+import com.hermes.companion.push.PushRegistrationWorker
 
 class HermesCompanionApplication : Application() {
     override fun onCreate() {
@@ -15,6 +16,7 @@ class HermesCompanionApplication : Application() {
         UploadWorker.enqueueIfConfigured(this)
         PresenceRuntime.start(this)
         HermesNotifications.createChannel(this)
+        PushRegistrationWorker.schedulePeriodic(this)
         PushRegistration.refresh(this)
     }
 }
