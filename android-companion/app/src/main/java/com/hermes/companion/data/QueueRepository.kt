@@ -130,7 +130,7 @@ class QueueRepository private constructor(
                 if (outcome.sent) {
                     uploaded += 1
                     settings.recordSuccessfulUpload(System.currentTimeMillis())
-                    visualDecisionPending = enqueueVisualAck(outcome.ack) || visualDecisionPending
+                    visualDecisionPending = mergeVisualAck(outcome.ack, visualDecisionPending)
                 }
             } catch (error: Throwable) {
                 if (error is HttpException && error.code() == 401 && settings.hasDeviceToken()) {
@@ -149,7 +149,7 @@ class QueueRepository private constructor(
                         if (outcome.sent) {
                             uploaded += 1
                             settings.recordSuccessfulUpload(System.currentTimeMillis())
-                            visualDecisionPending = enqueueVisualAck(outcome.ack) || visualDecisionPending
+                            visualDecisionPending = mergeVisualAck(outcome.ack, visualDecisionPending)
                         }
                     } catch (retryError: Throwable) {
                         val message = describeApiError("upload after re-registration", retryError)
@@ -212,16 +212,17 @@ class QueueRepository private constructor(
     }
 
     /**
-     * ACK handling stays enqueue-only. It returns whether one sparse follow-up heartbeat should
-     * be scheduled after this whole upload cycle, coalescing multiple pending ACKs into one poll.
+     * ACK handling stays enqueue-only. A real request supersedes any older pending marker from
+     * the same upload cycle, so Android cannot schedule a redundant follow-up after capture work
+     * has already been handed off.
      */
-    private fun enqueueVisualAck(ack: ApiAck): Boolean {
+    private fun mergeVisualAck(ack: ApiAck, pendingSoFar: Boolean): Boolean {
         val visualRequest = ack.visualRequest
         if (visualRequest != null) {
             runCatching { visualRequestEnqueuer(visualRequest) }
             return false
         }
-        return ack.visualDecisionPending
+        return pendingSoFar || ack.visualDecisionPending
     }
 
     private suspend fun recordFailure(event: PendingEvent, now: Long, message: String) {
