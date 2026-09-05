@@ -64,6 +64,6 @@ test("new observations reject illegal world/provenance pairs", async () => {
   const store = await JsonStore.open(join(directory, "our-home.json"), false);
   await assert.rejects(
     store.recordObservation({ ...base, world: "AI_WORLD", provenance: "observed" }),
-    /Illegal world/provenance combination/,
+    /Illegal world\\/provenance combination/,
   );
 });
