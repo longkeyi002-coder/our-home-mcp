@@ -229,7 +229,7 @@ test("migrates a v1 data file without losing existing records", async () => {
 
   const store = await JsonStore.open(filePath, false);
   const snapshot = store.snapshot();
-  assert.equal(snapshot.schemaVersion, 2);
+  assert.equal(snapshot.schemaVersion, 3);
   assert.deepEqual(snapshot.observations, []);
   assert.deepEqual(snapshot.proactiveQueue, []);
 });

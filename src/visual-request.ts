@@ -1,3 +1,4 @@
+import { isEarthEvidence } from "./world-boundary.js";
 import { deriveContextUnderstanding } from "./context-understanding.js";
 import { decideCuriosity } from "./curiosity.js";
 import { decideVisualBudget } from "./visual-budget.js";
@@ -35,6 +36,7 @@ export function deriveVisualRequest(
   dwell: LifeObservation,
   observations: LifeObservation[],
 ): VisualRequest | null {
+  if (!isEarthEvidence(dwell)) return null;
   if (dwell.kind !== "presence_app_dwell") return null;
   const packageName = stringMetadata(dwell, "packageName") ?? dwell.label?.trim();
   const startedAt = stringMetadata(dwell, "startedAt");
@@ -76,3 +78,4 @@ export function deriveVisualRequest(
     expiresAt: new Date(observedAtMs + VISUAL_REQUEST_TTL_MS).toISOString(),
   };
 }
+
