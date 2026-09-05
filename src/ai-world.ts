@@ -15,7 +15,9 @@ import type {
 } from "./types.js";
 
 const MAX_HISTORY = 500;
+const MAX_PREFERENCE_EVIDENCE_IDS = 100;
 const CONTINUITY_PROVENANCES = new Set<AiWorldItemProvenance>(["inferred", "simulated", "authored", "model_generated"]);
+const INTEREST_EVIDENCE_DIRECTIONS = new Set(["support", "counter"] as const);
 
 interface LocalClock {
   date: string;
@@ -194,7 +196,7 @@ export function createAiWorldData(asOf: string, timezone: string): AiWorldData {
     state,
     history: [initialHistory(state)],
     items: [],
-    continuity: { experiences: [], notes: [], thoughtThreads: [] },
+    continuity: { experiences: [], notes: [], thoughtThreads: [], interestEvidence: [], preferences: [] },
   };
 }
 
@@ -277,12 +279,16 @@ export function assertValidAiWorldData(data: AiWorldData): void {
     for (const experience of continuity.experiences) {
       assertContinuityBoundary(experience);
       if (!experience.id || !experience.summary.trim()) throw new Error("AI World experience has invalid structured fields");
-      assertTimestamp(experience.occurredAt);
-      assertTimestamp(experience.createdAt);
+      const occurredAt = assertTimestamp(experience.occurredAt);
+      const createdAt = assertTimestamp(experience.createdAt);
+      if (occurredAt > createdAt) throw new Error("AI World experience cannot occur after creation");
       if (experience.confidence !== undefined && (!Number.isFinite(experience.confidence) || experience.confidence < 0 || experience.confidence > 1)) {
         throw new Error("AI World experience confidence must be between 0 and 1");
       }
       assertEvidenceRefs(experience.evidenceRefs);
+      if (experience.lastReviewedAt !== undefined && assertTimestamp(experience.lastReviewedAt) < createdAt) {
+        throw new Error("AI World experience lastReviewedAt cannot precede creation");
+      }
       assertOptionalReviewAt(experience.nextReviewAt, experience.createdAt);
     }
 
@@ -308,6 +314,71 @@ export function assertValidAiWorldData(data: AiWorldData): void {
       if (assertTimestamp(thread.updatedAt) < createdAt) throw new Error("AI World thought thread updatedAt cannot precede creation");
       assertEvidenceRefs(thread.evidenceRefs);
       assertOptionalReviewAt(thread.nextReviewAt, thread.createdAt);
+    }
+
+    const interestEvidence = continuity.interestEvidence ?? [];
+    if (!Array.isArray(interestEvidence)) throw new Error("AI World interestEvidence must be an array");
+    const evidenceKeys = new Set<string>();
+    const evidenceById = new Map<string, (typeof interestEvidence)[number]>();
+    for (const evidence of interestEvidence) {
+      assertContinuityBoundary(evidence);
+      if (!evidence.id || !evidence.interestKey.trim() || !evidence.evidenceKey.trim()
+        || !INTEREST_EVIDENCE_DIRECTIONS.has(evidence.direction) || !evidence.reason.trim()) {
+        throw new Error("AI World interest evidence has invalid structured fields");
+      }
+      if (!Number.isFinite(evidence.strength) || evidence.strength < 0 || evidence.strength > 1) {
+        throw new Error("AI World interest evidence strength must be between 0 and 1");
+      }
+      if (assertTimestamp(evidence.occurredAt) > assertTimestamp(evidence.createdAt)) {
+        throw new Error("AI World interest evidence cannot occur after creation");
+      }
+      assertEvidenceRefs(evidence.evidenceRefs);
+      const compositeKey = `${evidence.interestKey}\u0000${evidence.evidenceKey}`;
+      if (evidenceKeys.has(compositeKey)) throw new Error("Duplicate AI World interest evidence key");
+      if (evidenceById.has(evidence.id)) throw new Error("Duplicate AI World interest evidence id");
+      evidenceKeys.add(compositeKey);
+      evidenceById.set(evidence.id, evidence);
+    }
+
+    const preferences = continuity.preferences ?? [];
+    if (!Array.isArray(preferences)) throw new Error("AI World preferences must be an array");
+    const preferenceKeys = new Set<string>();
+    for (const preference of preferences) {
+      if (preference.world !== "AI_WORLD" || preference.provenance !== "inferred" || preference.source !== "AGENT_LIFE") {
+        throw new Error("AI World preference has an invalid world boundary");
+      }
+      if (!preference.id || !preference.interestKey.trim() || !Number.isFinite(preference.score)
+        || preference.score < -1 || preference.score > 1) {
+        throw new Error("AI World preference has invalid structured fields");
+      }
+      if (!Number.isInteger(preference.evidenceCount) || preference.evidenceCount < 1) {
+        throw new Error("AI World preference evidenceCount must be positive");
+      }
+      if (!Array.isArray(preference.evidenceIds) || preference.evidenceIds.length > MAX_PREFERENCE_EVIDENCE_IDS
+        || preference.evidenceIds.some((id) => typeof id !== "string" || !id)) {
+        throw new Error("AI World preference evidence trace is invalid");
+      }
+      const evidenceForPreference = interestEvidence.filter((item) => item.interestKey === preference.interestKey);
+      if (evidenceForPreference.length !== preference.evidenceCount) {
+        throw new Error("AI World preference evidenceCount does not match evidence");
+      }
+      for (const evidenceId of preference.evidenceIds) {
+        const evidence = evidenceById.get(evidenceId);
+        if (!evidence || evidence.interestKey !== preference.interestKey) {
+          throw new Error("AI World preference evidence trace references unrelated evidence");
+        }
+      }
+      const lastEvidenceAt = assertTimestamp(preference.lastEvidenceAt);
+      const lastEvaluatedAt = assertTimestamp(preference.lastEvaluatedAt);
+      const createdAt = assertTimestamp(preference.createdAt);
+      if (assertTimestamp(preference.updatedAt) < createdAt || lastEvaluatedAt < createdAt || lastEvidenceAt > lastEvaluatedAt) {
+        throw new Error("AI World preference timestamps are inconsistent");
+      }
+      if (preference.nextReviewAt !== undefined && assertTimestamp(preference.nextReviewAt) < lastEvaluatedAt) {
+        throw new Error("AI World preference nextReviewAt cannot precede last evaluation");
+      }
+      if (preferenceKeys.has(preference.interestKey)) throw new Error("Duplicate AI World preference state");
+      preferenceKeys.add(preference.interestKey);
     }
   }
 }
