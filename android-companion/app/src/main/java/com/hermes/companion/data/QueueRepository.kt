@@ -18,6 +18,7 @@ class QueueRepository private constructor(
     private val settings: SettingsRepository,
     private val apiFactory: (String) -> HermesApi = ApiClient::create,
     private val visualRequestEnqueuer: (VisualRequestAck) -> Unit = {},
+    private val visualDecisionPoller: () -> Unit = {},
     private val pushRefresher: () -> Unit = {},
     private val outboundPrivacy: OutboundTelemetryPrivacy = OutboundTelemetryPrivacy { true },
 ) {
@@ -209,12 +210,16 @@ class QueueRepository private constructor(
     }
 
     /**
-     * ACK handling is enqueue-only. Screenshot/provider work happens in VisualObservationWorker,
-     * never on the telemetry upload coroutine.
+     * ACK handling stays enqueue-only. A pending Brain decision schedules a sparse follow-up
+     * heartbeat; capture/provider work still happens only in VisualObservationWorker.
      */
     private fun enqueueVisualAck(ack: ApiAck) {
-        val visualRequest = ack.visualRequest ?: return
-        runCatching { visualRequestEnqueuer(visualRequest) }
+        val visualRequest = ack.visualRequest
+        if (visualRequest != null) {
+            runCatching { visualRequestEnqueuer(visualRequest) }
+            return
+        }
+        if (ack.visualDecisionPending) runCatching { visualDecisionPoller() }
     }
 
     private suspend fun recordFailure(event: PendingEvent, now: Long, message: String) {
@@ -255,6 +260,7 @@ class QueueRepository private constructor(
                 dao = database.pendingEventDao(),
                 settings = settings,
                 visualRequestEnqueuer = { VisualObservationWorker.enqueue(appContext, it) },
+                visualDecisionPoller = { UploadWorker.enqueueVisualDecisionPoll(appContext) },
                 pushRefresher = { PushRegistration.refresh(appContext) },
                 outboundPrivacy = OutboundTelemetryPrivacy(presencePrivacy::exposesIdentity),
             )
@@ -267,15 +273,38 @@ class QueueRepository private constructor(
             visualRequestEnqueuer: (VisualRequestAck) -> Unit = {},
             pushRefresher: () -> Unit = {},
             identityExposure: (String) -> Boolean = { true },
+            visualDecisionPoller: () -> Unit = {},
         ) = QueueRepository(
-            dao,
-            settings,
-            apiFactory,
-            visualRequestEnqueuer,
-            pushRefresher,
-            OutboundTelemetryPrivacy(identityExposure),
+            dao = dao,
+            settings = settings,
+            apiFactory = apiFactory,
+            visualRequestEnqueuer = visualRequestEnqueuer,
+            visualDecisionPoller = visualDecisionPoller,
+            pushRefresher = pushRefresher,
+            outboundPrivacy = OutboundTelemetryPrivacy(identityExposure),
         )
     }
 }
 
 private fun Throwable.safeMessage(): String = message?.take(300) ?: this::class.simpleName.orEmpty()
+
+internal fun describeApiError(stage: String, error: Throwable): String {
+    val detail = when (error) {
+        is HttpException -> "HTTP ${error.code()} ${error.message()}"
+        else -> error.safeMessage()
+    }
+    return "$stage: $detail".take(400)
+}
+
+private suspend fun verifyRegistration(api: HermesApi, bootstrap: String, request: RegisterRequest): RegisterResponse {
+    // health is intentionally checked first so diagnostics can distinguish an unreachable
+    // endpoint from a reachable endpoint with invalid bootstrap credentials.
+    val health = api.health()
+    if (!health.ok) throw IllegalStateException("Runtime health check returned not-ok")
+    return api.register("Bearer $bootstrap", request)
+}
+
+private object UploadSingleFlight {
+    private val mutex = kotlinx.coroutines.sync.Mutex()
+    suspend fun <T> run(block: suspend () -> T): T = mutex.withLock { block() }
+}
