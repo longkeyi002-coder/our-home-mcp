@@ -142,3 +142,48 @@ test("OH-44/OH-47: a stale visual-result wake is dismissed without calling Brain
   assert.equal(calls.length, 0);
   assert.equal(store.snapshot().wakeEvents.find((item) => item.id === created[0]!.id)?.status, "dismissed");
 });
+
+test("OH-47: a failed visual-result notification is not delivered after its context becomes stale", async () => {
+  const store = await createStore();
+  await recordCompletedVisual(store);
+  const brain: BrainAdapter = {
+    async evaluate() {
+      return {
+        action: "proactive_message",
+        candidate: {
+          title: "还在玩吗？",
+          message: "看起来你还在游戏里，需要我陪你聊会儿吗？",
+          reason: "fresh visual context",
+        },
+      };
+    },
+  };
+  let deliveryAttempts = 0;
+
+  const first = await runProactiveCycle(
+    store,
+    {
+      deliver: async () => {
+        deliveryAttempts += 1;
+        throw new Error("temporary FCM failure");
+      },
+    },
+    new Date("2026-09-05T12:12:00.000Z"),
+    brain,
+  );
+  assert.equal(first.failedCount, 1);
+  assert.equal(deliveryAttempts, 1);
+  assert.equal(store.snapshot().proactiveQueue[0]?.status, "pending");
+
+  const expiredAt = new Date(Date.parse("2026-09-05T12:11:20.000Z") + VISUAL_RESULT_WAKE_TTL_MS + 1_000);
+  const second = await runProactiveCycle(
+    store,
+    { deliver: async () => { deliveryAttempts += 1; } },
+    expiredAt,
+    brain,
+  );
+
+  assert.equal(second.deliveredCount, 0);
+  assert.equal(deliveryAttempts, 1);
+  assert.equal(store.snapshot().proactiveQueue[0]?.status, "dismissed");
+});
