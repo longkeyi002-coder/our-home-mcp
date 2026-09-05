@@ -12,6 +12,8 @@ import {
 import type { JsonStore } from "./store.js";
 import type { AiWorldExperience, AiWorldItem } from "./types.js";
 
+export const EXPLORATION_REVIEW_DELAY_MS = 12 * 60 * 60_000;
+
 const sourceSchema = z.object({
   url: z.string().trim().min(1).max(2_000).refine((value) => {
     try {
@@ -94,11 +96,13 @@ export async function persistAiWorldExplorationResult(
   result: Extract<AiWorldExplorationResult, { status: "completed" }>,
 ): Promise<PersistedAiWorldExplorationMemory> {
   const asOf = input.aiWorld.observedAt;
-  if (!Number.isFinite(Date.parse(asOf))) throw new Error("Exploration persistence requires a valid observedAt");
+  const asOfMs = Date.parse(asOf);
+  if (!Number.isFinite(asOfMs)) throw new Error("Exploration persistence requires a valid observedAt");
   const sources = canonicalSources(result.sources);
   const resultKey = hash(`${input.topic.topicKey}\n${sources.map((source) => source.url).join("\n")}`);
   const experienceId = `ai-world:exploration-experience:${resultKey}`;
   const evidenceRefs = [topicRef(input.topic), ...sources.map(sourceRef)];
+  const nextReviewAt = new Date(asOfMs + EXPLORATION_REVIEW_DELAY_MS).toISOString();
 
   let experience: AiWorldExperience | undefined;
   const collections: AiWorldItem[] = [];
@@ -124,6 +128,7 @@ export async function persistAiWorldExplorationResult(
         occurredAt: asOf,
         createdAt: asOf,
         evidenceRefs,
+        nextReviewAt,
       };
       aiWorld.continuity.experiences.unshift(experience);
     }
@@ -166,9 +171,10 @@ export async function persistAiWorldExplorationResult(
 }
 
 /**
- * Decorator used by P5.2 so accepted memory is written before P5.1 marks the provider call as
- * successful. If persistence throws, P5.1 treats the attempt as failed/backed-off; deterministic
- * ids make a retry idempotent if the process died after memory commit but before success state.
+ * Decorator used by P5.2/P5.3 so accepted memory is written before P5.1 marks the provider call
+ * as successful. If persistence throws, P5.1 treats the attempt as failed/backed-off;
+ * deterministic ids make a retry idempotent if the process died after memory commit but before
+ * success state.
  */
 export class PersistingAiWorldExplorationAdapter implements AiWorldExplorationAdapter {
   constructor(
