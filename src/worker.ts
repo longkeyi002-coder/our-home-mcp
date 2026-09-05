@@ -9,6 +9,8 @@ import { decideCareDelivery } from "./care-delivery.js";
 import { quietHoursPolicyFromEnv, type QuietHoursPolicy } from "./quiet-hours.js";
 import { advancePersistedAiWorld } from "./ai-world-store.js";
 import { aiWorldTimezoneFromEnv } from "./ai-world.js";
+import { reviewDueAiWorldPreferences } from "./ai-world-preference.js";
+import { applyReviewedPreferenceToSoul, reviewDueAiWorldSoul } from "./ai-world-soul.js";
 import {
   runAiWorldReflectionCycle,
   WebhookReflectionEngine,
@@ -128,6 +130,20 @@ export async function runProactiveCycle(
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown AI World error";
     process.stderr.write(`[our-home] ai-world advance failed: ${message}\n`);
+  }
+
+  // OH-P4: Preference review, reviewed-evidence Soul promotion, and Soul decay are
+  // deterministic zero-model-cost identity maintenance. They must continue while Brain sleeps.
+  // Any corrupt identity state is isolated from Earth heartbeat/Wake/Care/Delivery.
+  try {
+    const reviewedPreferences = await reviewDueAiWorldPreferences(store, observedAt);
+    for (const preference of reviewedPreferences) {
+      await applyReviewedPreferenceToSoul(store, preference.interestKey, observedAt);
+    }
+    await reviewDueAiWorldSoul(store, observedAt);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown AI World identity maintenance error";
+    process.stderr.write(`[our-home] ai-world identity maintenance failed: ${message}\n`);
   }
 
   // OH-P4.4: reflection is a separate, bounded AI World cognition path. It receives no
