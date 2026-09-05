@@ -14,7 +14,7 @@ export interface VisualRequest {
 }
 
 export interface VisualOpportunity {
-  deviceId?: string;
+  deviceId: string;
   packageName: string;
   sessionId: string;
   curiosityReason: string;
@@ -45,7 +45,7 @@ export function deriveVisualOpportunity(
   observations: LifeObservation[],
 ): VisualOpportunity | null {
   if (!isEarthEvidence(dwell)) return null;
-  if (dwell.kind !== "presence_app_dwell") return null;
+  if (dwell.kind !== "presence_app_dwell" || !dwell.deviceId) return null;
   const packageName = stringMetadata(dwell, "packageName") ?? dwell.label?.trim();
   const startedAt = stringMetadata(dwell, "startedAt");
   const durationMs = Number(stringMetadata(dwell, "durationMs"));
