@@ -1,4 +1,5 @@
 import { decideCuriosity, type ContextUnderstandingState } from "./curiosity.js";
+import { decideVisualBudget } from "./visual-budget.js";
 import type { LifeObservation } from "./types.js";
 
 export interface VisualRequest {
@@ -61,7 +62,8 @@ function understandingFor(
 /**
  * OH-44/OH-64: only sparse dwell milestones can create a visual request. The request is
  * a short-lived proposal bound to one exact foreground App session. Android still owns
- * final privacy/capture authority.
+ * final privacy/capture authority. Runtime also applies a rolling per-device visual budget
+ * so curiosity cannot become frequent screenshot/Vision activity across App sessions.
  */
 export function deriveVisualRequest(
   dwell: LifeObservation,
@@ -88,6 +90,9 @@ export function deriveVisualRequest(
     lastVisualAtMs: context.lastVisualAtMs,
   });
   if (!decision.requestVisual) return null;
+
+  const budget = decideVisualBudget(observations, dwell.deviceId, observedAtMs);
+  if (!budget.allowed) return null;
 
   const stage = stringMetadata(dwell, "stage") ?? "x";
   const requestId = `visual:${dwell.deviceId ?? "phone"}:${startedAtMs}:${stage}:${decision.reason}`;

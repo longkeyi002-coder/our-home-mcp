@@ -35,6 +35,24 @@ function declaration(at: string, activity?: string): LifeObservation {
   };
 }
 
+function captureAudit(id: string, at: string): LifeObservation {
+  return {
+    id,
+    kind: "visual_policy_audit",
+    label: "capture_succeeded",
+    value: "CAPTURED_EPHEMERAL",
+    observedAt: at,
+    source: "phone",
+    confidence: "observed",
+    deviceId: "android-1",
+    metadata: {
+      packageName: "com.example.other",
+      action: "capture_succeeded",
+      allowed: "true",
+    },
+  };
+}
+
 test("unknown context creates a short-lived request at first 10 minute dwell", () => {
   const item = dwell(10, "1", "2026-09-05T00:10:00.000Z");
   const request = deriveVisualRequest(item, [item]);
@@ -92,4 +110,15 @@ test("recent visual observation enforces cooldown for the same App session", () 
   const later = deriveVisualRequest(at45, [visual, at45]);
   assert.ok(later);
   assert.equal(later.reason, "known_dwell_recheck");
+});
+
+test("rolling visual budget blocks a new curiosity request after three successful captures in one hour", () => {
+  const item = dwell(10, "1", "2026-09-05T00:10:00.000Z");
+  const observations = [
+    captureAudit("capture-1", "2026-09-05T00:01:00.000Z"),
+    captureAudit("capture-2", "2026-09-05T00:03:00.000Z"),
+    captureAudit("capture-3", "2026-09-05T00:05:00.000Z"),
+    item,
+  ];
+  assert.equal(deriveVisualRequest(item, observations), null);
 });
