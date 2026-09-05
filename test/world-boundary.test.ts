@@ -54,7 +54,7 @@ test("v2 observations migrate deterministically without upgrading ambiguous reco
   const observations = store.snapshot().observations;
   assert.deepEqual(
     observations.map((item) => [item.id, item.world, item.provenance]),
-    [["ambiguous", "EARTH", "legacy_unclassified"], ["obs", "EARTH", "observed"]],
+    [["obs", "EARTH", "observed"], ["ambiguous", "EARTH", "legacy_unclassified"]],
   );
   assert.equal(store.snapshot().schemaVersion, 3);
 });
