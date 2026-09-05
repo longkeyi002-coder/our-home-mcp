@@ -476,16 +476,20 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     "home.list_relationship_events",
     {
       title: "List relationship events",
-      description: "List proposed and approved relationship events with their proposer and approval state.",
+      description: "List relationship events with approval state. Supply world for Earth/AI World/Fiction-isolated reads.",
       inputSchema: {
         status: z.enum(["proposed", "approved", "rejected"]).optional(),
+        world: worldSchema.optional(),
         limit: z.number().int().min(1).max(100).default(50),
       },
       outputSchema: z.object({ events: z.array(z.record(z.string(), z.unknown())), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ status, limit }) => structured({
-      events: store.snapshot().relationshipEvents.filter((item) => !status || item.approvalStatus === status).slice(0, limit),
+    async ({ status, world, limit }) => structured({
+      events: store.snapshot().relationshipEvents
+        .filter((item) => !status || item.approvalStatus === status)
+        .filter((item) => !world || item.world === world)
+        .slice(0, limit),
       dataSource: "local-mock" as const,
     }),
   );
@@ -494,20 +498,22 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     "home.propose_relationship_event",
     {
       title: "Propose a relationship event",
-      description: "Propose a relationship event. It is not a confirmed fact until its approval status becomes approved.",
+      description: "Propose a relationship event. New callers should provide an explicit world/provenance boundary; legacy calls without both are quarantined as FICTION/authored. It is not a confirmed fact until its approval status becomes approved.",
       inputSchema: {
         title: z.string().trim().min(1).max(200),
         description: z.string().trim().max(5_000).optional(),
         occurredAt: dateSchema,
         proposedBy: actorSchema,
         importance: z.enum(["ordinary", "major"]),
+        world: worldSchema.optional(),
+        provenance: recordProvenanceSchema.optional(),
       },
       outputSchema: z.object({ event: z.record(z.string(), z.unknown()), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ title, description, occurredAt, proposedBy, importance }) => {
+    async ({ title, description, occurredAt, proposedBy, importance, world, provenance }) => {
       try {
-        const event = await store.proposeRelationshipEvent({ title, description, occurredAt, proposedBy, importance });
+        const event = await store.proposeRelationshipEvent({ title, description, occurredAt, proposedBy, importance, world, provenance });
         return structured({ event, dataSource: "local-mock" as const });
       } catch (error) {
         return toolError(error);
@@ -519,7 +525,7 @@ export function createOurHomeServer(store: JsonStore): McpServer {
     "home.approve_relationship_event",
     {
       title: "Approve a relationship event",
-      description: "Record one person's approval. Major events become approved only after both user and agent approve.",
+      description: "Record one person's approval without changing the event's world/provenance boundary. Major events become approved only after both user and agent approve.",
       inputSchema: { eventId: z.string().trim().min(1), approvedBy: actorSchema },
       outputSchema: z.object({ event: z.record(z.string(), z.unknown()), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
