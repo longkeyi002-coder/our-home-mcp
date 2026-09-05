@@ -5,14 +5,17 @@ import type {
   AiWorldItemKind,
   AiWorldItemProvenance,
   AiWorldItemStatus,
+  AiWorldNoteKind,
   AiWorldRoom,
   AiWorldSnapshot,
   AiWorldState,
+  AiWorldThoughtThreadStatus,
   AiWorldWeather,
   AiWorldWorkState,
 } from "./types.js";
 
 const MAX_HISTORY = 500;
+const CONTINUITY_PROVENANCES = new Set<AiWorldItemProvenance>(["inferred", "simulated", "authored", "model_generated"]);
 
 interface LocalClock {
   date: string;
@@ -31,6 +34,35 @@ function assertTimestamp(value: string): number {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed)) throw new Error(`Invalid AI World timestamp: ${value}`);
   return parsed;
+}
+
+function assertOptionalReviewAt(nextReviewAt: string | undefined, createdAt: string): void {
+  if (nextReviewAt === undefined) return;
+  if (assertTimestamp(nextReviewAt) < assertTimestamp(createdAt)) {
+    throw new Error("AI World nextReviewAt cannot precede record creation");
+  }
+}
+
+function assertEvidenceRefs(evidenceRefs: string[] | undefined): void {
+  if (evidenceRefs === undefined) return;
+  if (!Array.isArray(evidenceRefs) || evidenceRefs.length > 50) {
+    throw new Error("AI World evidenceRefs must be a bounded array");
+  }
+  for (const ref of evidenceRefs) {
+    if (typeof ref !== "string" || !ref.trim() || ref.length > 500) {
+      throw new Error("AI World evidenceRefs contains an invalid reference");
+    }
+  }
+}
+
+function assertContinuityBoundary(record: {
+  world: string;
+  provenance: AiWorldItemProvenance;
+  source: string;
+}): void {
+  if (record.world !== "AI_WORLD" || record.source !== "AGENT_LIFE" || !CONTINUITY_PROVENANCES.has(record.provenance)) {
+    throw new Error("AI World continuity record has an invalid world boundary");
+  }
 }
 
 export function assertAiWorldTimezone(timezone: string): void {
@@ -158,7 +190,12 @@ export function createAiWorldData(asOf: string, timezone: string): AiWorldData {
     lastTransitionAt: asOf,
     updatedAt: asOf,
   };
-  return { state, history: [initialHistory(state)], items: [] };
+  return {
+    state,
+    history: [initialHistory(state)],
+    items: [],
+    continuity: { experiences: [], notes: [], thoughtThreads: [] },
+  };
 }
 
 export function assertValidAiWorldData(data: AiWorldData): void {
@@ -230,6 +267,49 @@ export function assertValidAiWorldData(data: AiWorldData): void {
       assertTimestamp(item.updatedAt);
     }
   }
+
+  if (data.continuity !== undefined) {
+    const continuity = data.continuity;
+    if (!Array.isArray(continuity.experiences) || !Array.isArray(continuity.notes) || !Array.isArray(continuity.thoughtThreads)) {
+      throw new Error("AI World continuity collections must be arrays");
+    }
+
+    for (const experience of continuity.experiences) {
+      assertContinuityBoundary(experience);
+      if (!experience.id || !experience.summary.trim()) throw new Error("AI World experience has invalid structured fields");
+      assertTimestamp(experience.occurredAt);
+      assertTimestamp(experience.createdAt);
+      if (experience.confidence !== undefined && (!Number.isFinite(experience.confidence) || experience.confidence < 0 || experience.confidence > 1)) {
+        throw new Error("AI World experience confidence must be between 0 and 1");
+      }
+      assertEvidenceRefs(experience.evidenceRefs);
+      assertOptionalReviewAt(experience.nextReviewAt, experience.createdAt);
+    }
+
+    const noteKinds = new Set<AiWorldNoteKind>(["note", "journal"]);
+    for (const note of continuity.notes) {
+      assertContinuityBoundary(note);
+      if (!note.id || !noteKinds.has(note.kind) || !note.title.trim() || !note.body.trim()) {
+        throw new Error("AI World note has invalid structured fields");
+      }
+      const createdAt = assertTimestamp(note.createdAt);
+      if (assertTimestamp(note.updatedAt) < createdAt) throw new Error("AI World note updatedAt cannot precede creation");
+      assertEvidenceRefs(note.evidenceRefs);
+      assertOptionalReviewAt(note.nextReviewAt, note.createdAt);
+    }
+
+    const threadStatuses = new Set<AiWorldThoughtThreadStatus>(["active", "resolved", "archived"]);
+    for (const thread of continuity.thoughtThreads) {
+      assertContinuityBoundary(thread);
+      if (!thread.id || !thread.title.trim() || !thread.summary.trim() || !threadStatuses.has(thread.status)) {
+        throw new Error("AI World thought thread has invalid structured fields");
+      }
+      const createdAt = assertTimestamp(thread.createdAt);
+      if (assertTimestamp(thread.updatedAt) < createdAt) throw new Error("AI World thought thread updatedAt cannot precede creation");
+      assertEvidenceRefs(thread.evidenceRefs);
+      assertOptionalReviewAt(thread.nextReviewAt, thread.createdAt);
+    }
+  }
 }
 
 export function advanceAiWorldData(
@@ -275,6 +355,7 @@ export function advanceAiWorldData(
       state,
       history: [event, ...current.history].slice(0, MAX_HISTORY),
       items: current.items ?? [],
+      continuity: current.continuity,
     },
   };
 }
