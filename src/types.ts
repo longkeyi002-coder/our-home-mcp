@@ -31,9 +31,10 @@ export type ProactiveCandidateStatus = "pending" | "delivered" | "dismissed";
 export type LifeActivity = "active_on_phone" | "probably_idle" | "charging" | "offline" | "unknown";
 export type DevicePresence = "online" | "screen_on" | "screen_off" | "idle" | "unknown";
 export type ConnectivityState = "online" | "offline" | "unknown";
-export type WakeEventType = "became_active" | "became_idle" | "device_offline" | "charging_started" | "battery_low" | "long_dwell";
+export type WakeEventType = "became_active" | "became_idle" | "device_offline" | "charging_started" | "battery_low" | "long_dwell" | "visual_opportunity";
 export type WakeEventStatus = "pending" | "handled" | "dismissed";
 export type WakeEventPriority = "low" | "normal" | "high";
+export type VisualRequestStatus = "pending" | "observed";
 
 export interface DiaryEntry {
   id: string;
@@ -126,6 +127,14 @@ export interface LifeState {
   reasons: string[];
 }
 
+export interface VisualWakeContext {
+  deviceId?: string;
+  packageName: string;
+  sessionId: string;
+  curiosityReason: string;
+  expiresAt: string;
+}
+
 export interface WakeEvent {
   id: string;
   type: WakeEventType;
@@ -137,8 +146,23 @@ export interface WakeEvent {
   dedupeKey: string;
   lifeState: LifeState;
   previousLifeState: LifeState;
+  /** Present only for a bounded Brain decision about whether to request one visual observation. */
+  visualContext?: VisualWakeContext;
   /** Durable single-worker lease marker; cleared after success/failure or on owner restart. */
   processingAt?: string;
+}
+
+export interface VisualRequestRecord {
+  requestId: string;
+  deviceId?: string;
+  packageName: string;
+  sessionId: string;
+  reason: string;
+  issuedAt: string;
+  expiresAt: string;
+  status: VisualRequestStatus;
+  wakeEventId: string;
+  observedAt?: string;
 }
 
 export interface WakeEngineState {
@@ -196,6 +220,7 @@ export interface PhoneDeviceRegistration {
 
 export type WakeDecision =
   | { action: "ignore" }
+  | { action: "request_visual"; reason: string }
   | { action: "proactive_message"; candidate: { title: string; message: string; reason: string; dueAt?: string; dedupeKey?: string } };
 
 export interface LifeContext {
@@ -223,6 +248,8 @@ export interface OurHomeData {
   wakeEvents: WakeEvent[];
   wakeEngineState: WakeEngineState;
   phoneDeviceRegistrations: PhoneDeviceRegistration[];
+  /** Runtime-issued requests awaiting or having completed one Android-local guarded capture. */
+  visualRequests?: VisualRequestRecord[];
 }
 
 export interface DataStatus {
@@ -232,4 +259,3 @@ export interface DataStatus {
   fetchedAt: string;
   note?: string;
 }
-
