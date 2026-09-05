@@ -51,6 +51,8 @@ export interface DiaryEntry {
 
 export interface RelationshipEvent {
   id: string;
+  world: ObservationWorld;
+  provenance: ObservationProvenance;
   title: string;
   description?: string;
   occurredAt: string;
