@@ -151,16 +151,39 @@ Validated Runtime code baseline: `93c61eaffa87737ccdf5afc4eb0518cacc5ea1f0` (`np
 
 ## OH-P4 — Continuity + Soul V0.1
 
-Implement:
+**Status: IN PROGRESS.**
 
-- Experience records;
+### P4.1 — Traceable Continuity Substrate
+
+**Status: COMPLETE. Issue #42. See `docs/P4_CONTINUITY_V01.md`.**
+
+Implemented:
+
+- structured Experience records;
 - Notes / Journal;
-- Thought Thread;
-- nextReviewAt;
-- user feedback records;
+- Thought Thread with topic/summary/conclusion/open question only;
+- explicit AI World world/provenance/source/timestamps;
+- optional evidence references;
+- deterministic `nextReviewAt` maturity;
+- Experience `lastReviewedAt` + clear/reschedule lifecycle;
+- restart persistence;
+- preservation across deterministic P3 world progression;
+- tests proving hidden reasoning / chain-of-thought fields are not persisted;
+- Earth Life State / notification queues remain isolated.
+
+P4.1 deliberately does not mutate Soul and does not automatically invoke a model when review becomes due.
+
+Validated Runtime code baseline: `ac3ad42659cd202059a2ba2c3c9360e6e1cd01c7` (`npm run check` passed in Runtime CI run `33962034322`).
+
+### Remaining P4
+
+Implement next:
+
 - interest evidence;
-- bounded preference reinforcement/decay;
-- traceable Soul changes.
+- bounded preference state and reinforcement/decay;
+- traceable Soul changes;
+- user feedback records and their bounded influence;
+- safe review/reflect decision layer on top of due Continuity records.
 
 One interaction must not be able to rewrite long-term identity.
 
