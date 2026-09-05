@@ -151,7 +151,9 @@ Validated Runtime code baseline: `93c61eaffa87737ccdf5afc4eb0518cacc5ea1f0` (`np
 
 ## OH-P4 — Continuity + Soul V0.1
 
-**Status: IN PROGRESS.**
+**Status: COMPLETE. Acceptance: `docs/OH_P4_ACCEPTANCE.md`. Final review issue #47.**
+
+P4 proves that AI World continuity and long-term identity can evolve gradually, traceably and resource-boundedly while the model is asleep. It does not add autonomous exploration or automatic relationship-signal capture.
 
 ### P4.1 — Traceable Continuity Substrate
 
@@ -170,8 +172,6 @@ Implemented:
 - preservation across deterministic P3 world progression;
 - tests proving hidden reasoning / chain-of-thought fields are not persisted;
 - Earth Life State / notification queues remain isolated.
-
-P4.1 deliberately does not mutate Soul and does not automatically invoke a model when review becomes due.
 
 Validated Runtime code baseline: `ac3ad42659cd202059a2ba2c3c9360e6e1cd01c7` (`npm run check` passed in Runtime CI run `33962034322`).
 
@@ -194,7 +194,7 @@ Implemented:
 - tests proving evidence application order does not change the reducer result;
 - Earth Life State / notification queues remain isolated.
 
-P4.2 is still **not Soul**. Preference state is a traceable inferred precursor only; no single evidence item may rewrite long-term identity, and no model call is required for evidence application or decay.
+P4.2 is a temporary inferred precursor, not Soul. No model call is required for evidence application, review or decay.
 
 Validated Runtime code baseline: `d9f00e7d58c809e37c8e514f1006b39f18057859` (`npm run check` passed in Runtime CI run `33962795575`).
 
@@ -218,7 +218,7 @@ Implemented:
 - generic AI World validation protects Soul boundaries, evidence basis, audit math and dedupe;
 - restart/P3 progression persistence and Earth/notification isolation.
 
-Brain cannot write Soul scores or deltas directly. The only current write path asks Runtime to evaluate an already-reviewed canonical preference; Runtime owns eligibility, magnitude and audit creation.
+Brain cannot write Soul scores or deltas directly. Runtime owns eligibility, magnitude and audit creation.
 
 Validated Runtime code/test baseline: `bed1ebebf447318d7a6309805dbbc7080c1ca0f2` (`npm run check` passed in Runtime CI run `33963600675`).
 
@@ -239,25 +239,60 @@ Implemented:
 - six-hour cooldown after successful reflection decisions;
 - one-hour provider failure backoff;
 - at most three provider attempts per UTC day;
-- persisted 20-minute processing lease and restart-safe budget state;
-- deterministic 14-day source reschedule after recorded reflection and 30-day reschedule after ignore;
+- persisted processing lease and restart-safe budget state;
+- deterministic source reschedule;
 - exact review-basis evidence reference for crash/dedupe reconciliation;
 - optional Hermes and dedicated webhook reflection adapters;
 - Worker integration isolated from Earth Wake/Care/Delivery;
 - deployment default remains disabled unless `OUR_HOME_REFLECTION_ENABLED=true`.
 
-Reflection can read Soul as context but has no action capable of changing Soul. It also cannot create a proactive message or Android action.
+Reflection can read Soul as context but has no action capable of changing Soul, creating a proactive message, operating Android or mutating Earth.
 
 Validated Runtime code/test baseline: `17a1f74c39d2cbe4a1abff288f83790c319c9349` (`npm run check` passed in Runtime CI run `33964300565`).
 
-### Remaining P4
+### P4.5 — Bounded User Feedback Bridge
 
-Implement next:
+**Status: COMPLETE. Issue #46. See `docs/P4_USER_FEEDBACK_V01.md`.**
 
-- user feedback records and their bounded influence, without direct Soul overwrite;
-- final P4 phase review proving Continuity → Preference → Soul → Reflection remains traceable, slow and resource-bounded.
+Implemented:
 
-One interaction must not be able to rewrite long-term identity.
+```text
+EARTH/user_declared feedback
+→ deterministic Bridge
+→ AI_WORLD InterestEvidence
+→ bounded Preference
+→ explicit review
+→ bounded Soul gate
+```
+
+- feedback remains a separate `EARTH/user_declared/RELATIONSHIP` record;
+- stable feedback-key idempotency and collision rejection;
+- deterministic feedback signal → evidence direction/strength mapping;
+- exact cross-world evidence reference back to the Earth feedback record;
+- no caller-controlled evidence strength, Preference score, Soul score or Soul delta;
+- no model call required;
+- one feedback cannot directly change Soul;
+- repeated feedback still must pass P4.2 review and P4.3 evidence/magnitude/dedupe gates.
+
+Validated Runtime implementation/test baseline: `095f8f492c09ffb763c14bf66564cec88212f382` (`npm run check` passed in Runtime CI run `33964680626`).
+
+### Final P4 Runtime integration
+
+The final Phase Review found and fixed one integration gap: the deterministic P4.2/P4.3 review functions existed but were not yet driven by the persistent Life Loop.
+
+Runtime now performs zero-model-cost identity maintenance on each cycle:
+
+```text
+review due Preferences
+→ attempt eligible reviewed Preference bases through Soul gate
+→ review / decay due Soul tendencies
+```
+
+This path uses the existing bounded P4.2/P4.3 rules, supports absolute-time catch-up after downtime, and is failure-isolated from Earth heartbeat/Wake/Care/Delivery.
+
+Validated final worker baseline: `77ba55d15150c5c3da86d918a858324d084639ea`; Runtime CI `33964882082` success; Android CI `33964882135` success.
+
+P4 is complete at the defined phase boundary. Automatic like/reply/ignore/accept-reject capture remains P6, and autonomous web exploration remains P5.
 
 ---
 
@@ -290,7 +325,7 @@ Implement user feedback signals:
 - correction of inference;
 - review of learned preference.
 
-Feedback influences future behavior but does not directly overwrite Soul.
+P6 should produce real product/relationship feedback records into the already-bounded P4.5 substrate. Feedback influences future behavior but does not directly overwrite Soul.
 
 ---
 
