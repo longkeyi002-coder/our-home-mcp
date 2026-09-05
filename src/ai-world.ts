@@ -1,3 +1,4 @@
+import { assertValidAiWorldSoulMemory } from "./ai-world-soul-validation.js";
 import type {
   AiWorldActivity,
   AiWorldData,
@@ -104,7 +105,6 @@ function localClock(at: string, timezone: string): LocalClock {
 }
 
 function weatherForDate(date: string): AiWorldWeather {
-  // A deterministic virtual-weather cycle. It is an AI World fact, never Earth weather.
   let hash = 0;
   for (const char of date) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
   const bucket = hash % 6;
@@ -196,7 +196,15 @@ export function createAiWorldData(asOf: string, timezone: string): AiWorldData {
     state,
     history: [initialHistory(state)],
     items: [],
-    continuity: { experiences: [], notes: [], thoughtThreads: [], interestEvidence: [], preferences: [] },
+    continuity: {
+      experiences: [],
+      notes: [],
+      thoughtThreads: [],
+      interestEvidence: [],
+      preferences: [],
+      soulTendencies: [],
+      soulChanges: [],
+    },
   };
 }
 
@@ -380,6 +388,8 @@ export function assertValidAiWorldData(data: AiWorldData): void {
       if (preferenceKeys.has(preference.interestKey)) throw new Error("Duplicate AI World preference state");
       preferenceKeys.add(preference.interestKey);
     }
+
+    assertValidAiWorldSoulMemory(continuity);
   }
 }
 
