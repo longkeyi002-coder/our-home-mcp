@@ -25,6 +25,7 @@ import {
   aiWorldExplorationConfigFromEnv,
   selectAiWorldExplorationAdapter,
 } from "./ai-world-exploration-runtime.js";
+import { createAiWorldShareIntent } from "./ai-world-share-intent.js";
 import { enqueueVisualResultWakeEvents, visualResultWakeExpired } from "./visual-result-wake.js";
 import {
   claimDueProactiveMessages,
@@ -155,13 +156,28 @@ export async function runProactiveCycle(
     process.stderr.write(`[our-home] ai-world identity maintenance failed: ${message}\n`);
   }
 
-  // OH-P4.4: reflection is a separate, bounded AI World cognition path. It receives no
-  // Earth Life context and cannot directly mutate Soul, delivery, Android, or external state.
+  // OH-P4.4/P5.5: reflection stays AI World-only. A successfully recorded/reconciled public
+  // Thought Thread may create one internal maybe-share intent, but that intent is not an Earth
+  // notification or delivery candidate and cannot block the rest of the Life Loop.
   if (reflectionEngine) {
     try {
       const reflection = await runAiWorldReflectionCycle(store, reflectionEngine, observedAt);
       if (reflection.attempted || reflection.status === "reconciled") {
         process.stderr.write(`[our-home] ai-world reflection=${reflection.status} source=${reflection.sourceKey ?? "none"}\n`);
+      }
+      if (reflection.reflectionThreadId && (reflection.status === "recorded" || reflection.status === "reconciled")) {
+        try {
+          const share = await createAiWorldShareIntent(store, {
+            basisType: "thought_thread",
+            basisId: reflection.reflectionThreadId,
+          }, observedAt);
+          process.stderr.write(
+            `[our-home] ai-world maybe_share=${share.duplicate ? "existing" : "created"} basis=${share.intent.basisKey}\n`,
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown AI World share-intent error";
+          process.stderr.write(`[our-home] ai-world maybe_share handoff failed: ${message}\n`);
+        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown AI World reflection error";
