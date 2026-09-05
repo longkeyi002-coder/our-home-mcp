@@ -186,6 +186,31 @@ test("Care message cooldown expires after one hour", () => {
   );
 });
 
+test("worker keeps cooldown-blocked Care pending until nextAvailableAt", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "our-home-care-cooldown-"));
+  const store = await JsonStore.open(join(directory, "our-home.json"), false);
+  const currentWake = wake("care-current");
+  const previousWake = wake("care-previous");
+  const current = candidate("candidate-current", currentWake.id);
+  const delivered = candidate("candidate-previous", previousWake.id, {
+    status: "delivered",
+    deliveredAt: "2026-09-05T12:00:00.000Z",
+  });
+  await store.update((data) => {
+    data.wakeEvents.push(currentWake, previousWake);
+    data.proactiveQueue.push(current, delivered);
+    data.observations.push(...presence("2026-09-05T12:30:00.000Z", 90 * 60_000));
+  });
+
+  let calls = 0;
+  const result = await runProactiveCycle(store, { deliver: async () => { calls += 1; } }, new Date("2026-09-05T12:30:00.000Z"));
+  const pending = store.snapshot().proactiveQueue.find((entry) => entry.id === current.id);
+  assert.equal(calls, 0);
+  assert.equal(result.deliveredCount, 0);
+  assert.equal(pending?.status, "pending");
+  assert.equal(pending?.dueAt, "2026-09-05T13:00:00.000Z");
+});
+
 test("worker dismisses stale long-dwell message without calling notifier", async () => {
   const directory = await mkdtemp(join(tmpdir(), "our-home-care-"));
   const store = await JsonStore.open(join(directory, "our-home.json"), false);

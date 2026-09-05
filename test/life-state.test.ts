@@ -108,6 +108,17 @@ test("stale foreground app is not treated as current", () => {
   assert.equal(state.lastPhoneActivityAt, "2026-09-03T11:40:00.000Z");
 });
 
+test("screen_on does not revive a foreground app observed ten minutes ago", () => {
+  const state = deriveLifeState([
+    observation({ kind: "screen_app", observedAt: "2026-09-03T11:50:00.000Z", value: "com.example.old" }),
+    observation({ kind: "device_presence", observedAt: asOf, value: "screen_on", metadata: { connectivityState: "online" } }),
+  ], asOf);
+
+  assert.notEqual(state.currentActivity, "active_on_phone");
+  assert.equal(state.foregroundPackage, "com.example.old");
+  assert.equal(state.lastPhoneActivityAt, "2026-09-03T11:50:00.000Z");
+});
+
 test("no observations derives unknown", () => {
   const state = deriveLifeState([], asOf);
   assert.equal(state.currentActivity, "unknown");

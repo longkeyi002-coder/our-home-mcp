@@ -131,7 +131,11 @@ export async function runProactiveCycle(
   for (const candidate of due) {
     const careDelivery = decideCareDelivery(candidate, store.snapshot(), observedAt);
     if (!careDelivery.deliver) {
-      await store.resolveProactiveMessage(candidate.id, "dismissed");
+      if (careDelivery.reason === "care_message_cooldown" && careDelivery.nextAvailableAt) {
+        await store.rescheduleProactiveMessage(candidate.id, careDelivery.nextAvailableAt);
+      } else {
+        await store.resolveProactiveMessage(candidate.id, "dismissed");
+      }
       await clearProactiveClaim(store, candidate.id);
       process.stderr.write(`[our-home] proactive suppressed: ${candidate.id}: ${careDelivery.reason}\n`);
       continue;
