@@ -15,6 +15,7 @@ import com.hermes.companion.MainActivity
 
 data class HermesNotification(
     val candidateId: String,
+    val wakeEventId: String,
     val title: String,
     val body: String,
     val destination: String,
@@ -29,6 +30,7 @@ object HermesNotifications {
     const val CHANNEL_ID = "hermes_life"
     const val EXTRA_DESTINATION = "our_home_destination"
     const val EXTRA_CANDIDATE_ID = "our_home_candidate_id"
+    const val EXTRA_WAKE_EVENT_ID = "our_home_wake_event_id"
     const val EXTRA_MESSAGE_TITLE = "our_home_message_title"
     const val EXTRA_MESSAGE_BODY = "our_home_message_body"
 
@@ -40,6 +42,7 @@ object HermesNotifications {
 
     fun fromPayload(data: Map<String, String>, notificationTitle: String?, notificationBody: String?) = HermesNotification(
         candidateId = data["candidateId"].orEmpty(),
+        wakeEventId = data["wakeEventId"].orEmpty(),
         title = notificationTitle ?: data["title"].orEmpty(),
         body = notificationBody ?: data["body"].orEmpty(),
         destination = data["destination"].takeUnless { it.isNullOrBlank() } ?: CHAT_DESTINATION,
@@ -65,6 +68,7 @@ object HermesNotifications {
             .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             .putExtra(EXTRA_DESTINATION, value.destination)
             .putExtra(EXTRA_CANDIDATE_ID, value.candidateId)
+            .putExtra(EXTRA_WAKE_EVENT_ID, value.wakeEventId)
             .putExtra(EXTRA_MESSAGE_TITLE, value.title)
             .putExtra(EXTRA_MESSAGE_BODY, value.body)
         val requestCode = value.candidateId.hashCode()
