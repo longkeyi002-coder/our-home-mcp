@@ -175,15 +175,36 @@ P4.1 deliberately does not mutate Soul and does not automatically invoke a model
 
 Validated Runtime code baseline: `ac3ad42659cd202059a2ba2c3c9360e6e1cd01c7` (`npm run check` passed in Runtime CI run `33962034322`).
 
+### P4.2 — Interest Evidence + Bounded Preference State
+
+**Status: COMPLETE. Issue #43. See `docs/P4_PREFERENCE_V01.md`.**
+
+Implemented:
+
+- structured `AiWorldInterestEvidence`;
+- one canonical `AiWorldPreferenceState` per interest;
+- `(interestKey, evidenceKey)` dedupe;
+- hard per-evidence score delta cap of `0.05`;
+- score bounded to `[-1,1]`;
+- deterministic time decay toward neutral (`0.005` per 24 hours);
+- deterministic seven-day review while non-neutral;
+- bounded evidence-ID trace;
+- generic AI World validation for preference/evidence boundary corruption;
+- restart persistence and preservation across deterministic P3 world progression;
+- tests proving evidence application order does not change the reducer result;
+- Earth Life State / notification queues remain isolated.
+
+P4.2 is still **not Soul**. Preference state is a traceable inferred precursor only; no single evidence item may rewrite long-term identity, and no model call is required for evidence application or decay.
+
+Validated Runtime code baseline: `d9f00e7d58c809e37c8e514f1006b39f18057859` (`npm run check` passed in Runtime CI run `33962795575`).
+
 ### Remaining P4
 
 Implement next:
 
-- interest evidence;
-- bounded preference state and reinforcement/decay;
-- traceable Soul changes;
+- separately bounded, traceable Soul-change records/rules;
 - user feedback records and their bounded influence;
-- safe review/reflect decision layer on top of due Continuity records.
+- safe review/reflect decision layer on top of due Continuity/preference records.
 
 One interaction must not be able to rewrite long-term identity.
 
