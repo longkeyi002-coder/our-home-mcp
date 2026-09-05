@@ -89,7 +89,6 @@ Automated:
 - package transition debounce/dedupe;
 - screen/app session lifecycle;
 - no Accessibility UI-tree retrieval configuration;
-- complete launcher-App inventory is independent from recent UsageStats and is not capped at 12;
 - per-App Presence identity policy defaults deterministically and is applied before upload;
 - periodic heartbeat/usage summaries redact hidden App identity, sessions, totals and categories;
 - Presence-hidden App cannot proceed into visual observation;
@@ -105,7 +104,7 @@ Real-device/manual:
 
 - Accessibility enable/disable and OEM permission repair flow;
 - OPPO/OnePlus restricted-settings onboarding where applicable;
-- privacy page lists and searches the device's normal user-launchable Apps, including Apps not used today;
+- privacy page lists and searches the device's normal user-launchable Apps, including Apps not used today, with no fixed 12-App cap;
 - recently used Apps sort ahead of otherwise alphabetical Apps without hiding unused Apps;
 - changing an App to “不感知” results in only generic private-app state reaching Runtime, never package/label/category identity;
 - foreground app transitions arrive near-real-time;
