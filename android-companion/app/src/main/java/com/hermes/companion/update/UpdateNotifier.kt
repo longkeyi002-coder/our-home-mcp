@@ -7,7 +7,6 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import com.hermes.companion.R
 
 object UpdateNotifier {
     private const val CHANNEL_ID = "our_home_updates"
@@ -39,7 +38,7 @@ object UpdateNotifier {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle("Our Home 可以更新了")
             .setContentText("新版本 $versionName 已下载并校验，点这里安装")
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
