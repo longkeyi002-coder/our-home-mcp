@@ -76,7 +76,7 @@ test("proactive candidate claim is durable and explicitly releasable", async () 
   assert.deepEqual(third.map((item) => item.id), [candidate.id]);
 });
 
-test("failed proactive delivery is exponentially backed off before it can be claimed again", async () => {
+test("failed proactive delivery retry stays on the Runtime cycle clock", async () => {
   const store = await createStore();
   const candidate = await store.scheduleProactiveMessage({
     title: "test",
@@ -84,21 +84,25 @@ test("failed proactive delivery is exponentially backed off before it can be cla
     reason: "test",
     dueAt: "2026-09-05T00:00:00.000Z",
   });
+  const attemptedAt = "2026-09-05T00:01:00.000Z";
 
-  // Keep the entire assertion in one deterministic clock domain. Production
-  // recordProactiveAttempt() intentionally uses wall-clock now(), so mixing it
-  // with hard-coded asOf values makes this test timezone/run-time dependent.
-  await store.update((data) => {
-    const item = data.proactiveQueue.find((value) => value.id === candidate.id)!;
-    item.attempts = 1;
-    item.lastAttemptAt = "2026-09-05T00:00:00.000Z";
-    item.processingAt = undefined;
-  });
+  const first = await claimDueProactiveMessages(store, attemptedAt);
+  assert.deepEqual(first.map((item) => item.id), [candidate.id]);
 
+  // recordProactiveAttempt is also used by older direct callers and therefore still stamps
+  // wall-clock now(). The Worker claim owns the deterministic cycle timestamp, so releasing
+  // that claim must normalize lastAttemptAt back to processingAt before retry policy reads it.
+  await store.recordProactiveAttempt(candidate.id, "temporary failure");
+  await releaseProactiveClaim(store, candidate.id);
+
+  const persisted = store.snapshot().proactiveQueue.find((item) => item.id === candidate.id)!;
+  assert.equal(persisted.lastAttemptAt, attemptedAt);
+  assert.equal(persisted.processingAt, undefined);
+  assert.equal(persisted.attempts, 1);
   assert.equal(proactiveRetryDelayMs(1), 30_000);
-  assert.equal((await claimDueProactiveMessages(store, "2026-09-05T00:00:29.999Z")).length, 0);
+  assert.equal((await claimDueProactiveMessages(store, "2026-09-05T00:01:29.999Z")).length, 0);
   assert.deepEqual(
-    (await claimDueProactiveMessages(store, "2026-09-05T00:00:30.000Z")).map((item) => item.id),
+    (await claimDueProactiveMessages(store, "2026-09-05T00:01:30.000Z")).map((item) => item.id),
     [candidate.id],
   );
 });
