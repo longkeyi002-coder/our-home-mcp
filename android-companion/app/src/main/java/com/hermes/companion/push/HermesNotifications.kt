@@ -1,12 +1,16 @@
 package com.hermes.companion.push
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.hermes.companion.MainActivity
 
 data class HermesNotification(
@@ -52,7 +56,7 @@ object HermesNotifications {
         value: HermesNotification,
         privacyMode: NotificationPrivacyMode = NotificationPrivacyMode.HIDE_ON_LOCK_SCREEN,
     ): Boolean {
-        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        if (!canPostNotifications(context)) return false
         val activityClass = when (destinationScreen(value.destination)) {
             NotificationDestinationScreen.CHAT_MESSAGE -> ChatMessageActivity::class.java
             NotificationDestinationScreen.HOME -> MainActivity::class.java
@@ -97,9 +101,18 @@ object HermesNotifications {
             builder.setPublicVersion(publicVersion)
         }
 
-        return runCatching {
+        return try {
             NotificationManagerCompat.from(context).notify(requestCode, builder.build())
             true
-        }.getOrDefault(false)
+        } catch (_: SecurityException) {
+            false
+        }
+    }
+
+    private fun canPostNotifications(context: Context): Boolean {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
     }
 }

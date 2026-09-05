@@ -1,13 +1,17 @@
 package com.hermes.companion.vision
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.hermes.companion.data.VisualRequestAck
 import com.hermes.companion.presence.PresenceStateStore
 import com.hermes.companion.privacy.AppSensitivityClassifier
@@ -69,7 +73,7 @@ object VisualConsentPrompt {
         if (!needsConsent) return false
         if (policy == VisualAppPolicy.AUTO && sensitivity != SensitivityClass.PROTECTED) return false
 
-        if (!NotificationManagerCompat.from(appContext).areNotificationsEnabled()) return false
+        if (!canPostNotifications(appContext)) return false
         createChannel(appContext)
         val notificationId = notificationId(ack.requestId)
         val allowIntent = actionIntent(appContext, ack, ACTION_ALLOW_ONCE, notificationId)
@@ -84,8 +88,11 @@ object VisualConsentPrompt {
             .addAction(0, "这次允许", allowIntent)
             .addAction(0, "不允许", denyIntent)
             .build()
-        runCatching { NotificationManagerCompat.from(appContext).notify(notificationId, notification) }
-            .getOrElse { return false }
+        try {
+            NotificationManagerCompat.from(appContext).notify(notificationId, notification)
+        } catch (_: SecurityException) {
+            return false
+        }
         return true
     }
 
@@ -114,6 +121,13 @@ object VisualConsentPrompt {
             sessionId = ack.sessionId,
         )
         VisualObservationWorker.enqueueAfterConsent(context.applicationContext, ack)
+    }
+
+    private fun canPostNotifications(context: Context): Boolean {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
     }
 
     private fun createChannel(context: Context) {
