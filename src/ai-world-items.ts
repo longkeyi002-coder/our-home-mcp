@@ -9,7 +9,16 @@ import type {
 import { assertValidAiWorldData } from "./ai-world.js";
 import { assertValidRecordBoundary } from "./record-boundary.js";
 
-const ITEM_KINDS = new Set<AiWorldItemKind>(["task", "waiting", "plan", "hobby", "interest", "collection"]);
+const ITEM_KINDS = new Set<AiWorldItemKind>([
+  "task",
+  "waiting",
+  "plan",
+  "idea",
+  "question",
+  "hobby",
+  "interest",
+  "collection",
+]);
 const ITEM_STATUSES = new Set<AiWorldItemStatus>(["active", "completed", "archived"]);
 const ITEM_PROVENANCES = new Set<AiWorldItemProvenance>(["inferred", "simulated", "authored", "model_generated"]);
 
