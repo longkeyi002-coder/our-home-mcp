@@ -9,6 +9,12 @@ import { decideCareDelivery } from "./care-delivery.js";
 import { quietHoursPolicyFromEnv, type QuietHoursPolicy } from "./quiet-hours.js";
 import { advancePersistedAiWorld } from "./ai-world-store.js";
 import { aiWorldTimezoneFromEnv } from "./ai-world.js";
+import {
+  runAiWorldReflectionCycle,
+  WebhookReflectionEngine,
+  type AiWorldReflectionAdapter,
+} from "./ai-world-reflection.js";
+import { HermesReflectionEngine } from "./hermes-reflection.js";
 import { enqueueVisualResultWakeEvents, visualResultWakeExpired } from "./visual-result-wake.js";
 import {
   claimDueProactiveMessages,
@@ -111,6 +117,7 @@ export async function runProactiveCycle(
   decisionEngine?: BrainAdapter,
   quietHoursPolicy: QuietHoursPolicy = quietHoursPolicyFromEnv({}),
   aiWorldTimezone = "UTC",
+  reflectionEngine?: AiWorldReflectionAdapter,
 ): Promise<{ heartbeatId: string; wakeEventCount: number; dueCount: number; deliveredCount: number; failedCount: number }> {
   const observedAt = asOf.toISOString();
 
@@ -121,6 +128,20 @@ export async function runProactiveCycle(
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown AI World error";
     process.stderr.write(`[our-home] ai-world advance failed: ${message}\n`);
+  }
+
+  // OH-P4.4: reflection is a separate, bounded AI World cognition path. It receives no
+  // Earth Life context and cannot directly mutate Soul, delivery, Android, or external state.
+  if (reflectionEngine) {
+    try {
+      const reflection = await runAiWorldReflectionCycle(store, reflectionEngine, observedAt);
+      if (reflection.attempted || reflection.status === "reconciled") {
+        process.stderr.write(`[our-home] ai-world reflection=${reflection.status} source=${reflection.sourceKey ?? "none"}\n`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown AI World reflection error";
+      process.stderr.write(`[our-home] ai-world reflection failed: ${message}\n`);
+    }
   }
 
   const heartbeat = await store.recordHeartbeat("独立 Life Loop 心跳：检查主动消息队列。");
@@ -238,6 +259,9 @@ const webhookUrl = process.env.OUR_HOME_NOTIFY_WEBHOOK_URL;
 const webhookToken = process.env.OUR_HOME_NOTIFY_WEBHOOK_TOKEN;
 const decisionUrl = process.env.OUR_HOME_DECISION_WEBHOOK_URL;
 const decisionToken = process.env.OUR_HOME_DECISION_WEBHOOK_TOKEN;
+const reflectionEnabled = process.env.OUR_HOME_REFLECTION_ENABLED === "true";
+const reflectionUrl = process.env.OUR_HOME_REFLECTION_WEBHOOK_URL;
+const reflectionToken = process.env.OUR_HOME_REFLECTION_WEBHOOK_TOKEN;
 const hermesApiUrl = process.env.OUR_HOME_HERMES_API_URL;
 const hermesApiKey = process.env.OUR_HOME_HERMES_API_KEY;
 const hermesConversation = process.env.OUR_HOME_HERMES_CONVERSATION;
@@ -301,6 +325,19 @@ export function startRuntimeWorker(store: JsonStore): RuntimeWorkerHandle {
     : decisionUrl
       ? new WebhookDecisionEngine(decisionUrl, decisionToken, externalTimeoutMs)
       : undefined;
+  const reflectionEngine: AiWorldReflectionAdapter | undefined = !reflectionEnabled
+    ? undefined
+    : hermesApiUrl && hermesApiKey
+      ? new HermesReflectionEngine({
+        apiUrl: hermesApiUrl,
+        apiKey: hermesApiKey,
+        conversation: hermesConversation,
+        model: hermesModel,
+        timeoutMs: externalTimeoutMs,
+      })
+      : reflectionUrl
+        ? new WebhookReflectionEngine(reflectionUrl, reflectionToken, externalTimeoutMs)
+        : undefined;
 
   const controller = new AbortController();
   const done = (async () => {
@@ -314,6 +351,7 @@ export function startRuntimeWorker(store: JsonStore): RuntimeWorkerHandle {
           decisionEngine,
           quietHoursPolicy,
           aiWorldTimezone,
+          reflectionEngine,
         );
         process.stderr.write(
           `[our-home] heartbeat=${result.heartbeatId} due=${result.dueCount} delivered=${result.deliveredCount} failed=${result.failedCount}\n`,
