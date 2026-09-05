@@ -18,6 +18,7 @@ export interface QuietHoursDecision {
 const LOCAL_TIME_PATTERN = /^([01]\d|2[0-3]):([0-5]\d)$/;
 const MINUTE_MS = 60_000;
 const MAX_QUIET_SEARCH_MS = 36 * 60 * 60_000;
+const formatterCache = new Map<string, Intl.DateTimeFormat>();
 
 function parseLocalMinutes(value: string): number {
   const match = LOCAL_TIME_PATTERN.exec(value);
@@ -95,14 +96,23 @@ interface LocalClock {
   minuteOfDay: number;
 }
 
+function formatterFor(timezone: string): Intl.DateTimeFormat {
+  let formatter = formatterCache.get(timezone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      weekday: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    });
+    formatterCache.set(timezone, formatter);
+  }
+  return formatter;
+}
+
 function localClock(atMs: number, timezone: string): LocalClock {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: timezone,
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(atMs);
+  const parts = formatterFor(timezone).formatToParts(atMs);
   const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value;
   const weekdayName = value("weekday");
   const weekdays: Record<string, number> = {
