@@ -19,10 +19,10 @@ import com.hermes.companion.platform.UsageSession
 import java.io.IOException
 import kotlinx.coroutines.runBlocking
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import kotlin.test.assertEquals
 
 @RunWith(AndroidJUnit4::class)
 class QueueRepositoryTest {
@@ -43,7 +43,11 @@ class QueueRepositoryTest {
         settings.saveServerUrl("https://example.com")
         settings.saveBootstrapToken("bootstrap")
         val api = failingApi()
-        val repository = QueueRepository.forTest(database.pendingEventDao(), settings) { api }
+        val repository = QueueRepository.forTest(
+            dao = database.pendingEventDao(),
+            settings = settings,
+            apiFactory = { api },
+        )
         repository.enqueueHeartbeat(sampleHeartbeat())
         val result = repository.uploadPending()
         assertEquals(0, result.uploaded)
@@ -55,7 +59,11 @@ class QueueRepositoryTest {
         val settings = SettingsRepository(ApplicationProvider.getApplicationContext())
         settings.saveServerUrl("https://example.com")
         settings.saveBootstrapToken("bootstrap")
-        val repository = QueueRepository.forTest(database.pendingEventDao(), settings, { successfulApi() })
+        val repository = QueueRepository.forTest(
+            dao = database.pendingEventDao(),
+            settings = settings,
+            apiFactory = { successfulApi() },
+        )
         repository.enqueueHeartbeat(sampleHeartbeat())
         val result = repository.uploadPending()
         assertEquals(1, result.uploaded)
@@ -67,7 +75,11 @@ class QueueRepositoryTest {
         val settings = SettingsRepository(ApplicationProvider.getApplicationContext())
         settings.saveServerUrl("https://example.com")
         settings.saveBootstrapToken("bootstrap")
-        val repository = QueueRepository.forTest(database.pendingEventDao(), settings) { successfulApi() }
+        val repository = QueueRepository.forTest(
+            dao = database.pendingEventDao(),
+            settings = settings,
+            apiFactory = { successfulApi() },
+        )
         val summary = UsageTimelineSummary(
             observedAt = 1_700_000_000_000,
             currentPackageName = "com.example.app",
@@ -88,7 +100,11 @@ class QueueRepositoryTest {
         settings.saveServerUrl("https://example.com")
         settings.saveBootstrapToken("bootstrap")
         val request = sampleHeartbeat().copy(clientEventId = "periodic-heartbeat:android-test:42")
-        val repository = QueueRepository.forTest(database.pendingEventDao(), settings) { successfulApi() }
+        val repository = QueueRepository.forTest(
+            dao = database.pendingEventDao(),
+            settings = settings,
+            apiFactory = { successfulApi() },
+        )
 
         repository.enqueueHeartbeat(request, scheduleUpload = false)
         repository.enqueueHeartbeat(request, scheduleUpload = false)
