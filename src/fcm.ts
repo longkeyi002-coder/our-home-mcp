@@ -17,6 +17,8 @@ export interface FcmSendInput {
   };
   android: {
     priority: "HIGH";
+    ttl: "3600s";
+    collapse_key: string;
   };
 }
 
@@ -101,6 +103,8 @@ export class FcmNotifier implements ProactiveNotifier {
     // PendingIntent. Data-only delivery ensures FirebaseMessagingService builds the
     // notification itself, preserving the /chat message destination. High priority is
     // appropriate because every successful message becomes a visible user notification.
+    // A bounded TTL prevents old context-sensitive care messages arriving much later;
+    // collapse_key keeps ambiguous network retries for the same candidate idempotent in FCM.
     await this.sender.send({
       token: target.pushToken,
       data: {
@@ -112,7 +116,11 @@ export class FcmNotifier implements ProactiveNotifier {
         title: candidate.title,
         body: candidate.message,
       },
-      android: { priority: "HIGH" },
+      android: {
+        priority: "HIGH",
+        ttl: "3600s",
+        collapse_key: candidate.id,
+      },
     });
   }
 }
