@@ -39,7 +39,8 @@ export type AiWorldWeather = "clear" | "cloudy" | "rain";
 export type AiWorldWorkState = "resting" | "preparing" | "working" | "off_duty";
 export type AiWorldActivity = "sleeping" | "morning_routine" | "focused_work" | "midday_break" | "free_time" | "winding_down";
 export type AiWorldRoom = "bedroom" | "study" | "living_room" | "kitchen";
-export type AiWorldItemKind = "task" | "waiting" | "plan" | "hobby" | "interest" | "collection";
+export type AiWorldLocation = "our_home";
+export type AiWorldItemKind = "task" | "waiting" | "plan" | "idea" | "question" | "hobby" | "interest" | "collection";
 export type AiWorldItemStatus = "active" | "completed" | "archived";
 export type AiWorldItemProvenance = "inferred" | "simulated" | "authored" | "model_generated";
 
@@ -205,6 +206,8 @@ export interface AiWorldState {
   provenance: "simulated";
   timezone: string;
   home: "our_home";
+  /** Current high-level virtual location. P3 V0.1 starts inside Our Home only. */
+  location: AiWorldLocation;
   room: AiWorldRoom;
   weather: AiWorldWeather;
   workState: AiWorldWorkState;
@@ -223,7 +226,7 @@ export interface AiWorldHistoryEvent {
   occurredAt: string;
   fromPhaseKey?: string;
   toPhaseKey: string;
-  changes: Partial<Record<"room" | "weather" | "workState" | "currentActivity", string>>;
+  changes: Partial<Record<"location" | "room" | "weather" | "workState" | "currentActivity", string>>;
 }
 
 export interface AiWorldItem {
