@@ -1,4 +1,4 @@
-import type {
+import { isEarthEvidence } from "./world-boundary.js";\nimport type {
   ConnectivityState,
   DevicePresence,
   LifeActivity,
@@ -23,7 +23,7 @@ function newest(observations: LifeObservation[], predicate: (item: LifeObservati
 }
 
 function isUsableObservation(item: LifeObservation, asOfMs: number): boolean {
-  if (item.source === "mock" || item.confidence === "inferred") return false;
+  if (!isEarthEvidence(item)) return false;
   const observedMs = timestamp(item.observedAt);
   if (!Number.isFinite(observedMs) || observedMs > asOfMs) return false;
   if (item.expiresAt && timestamp(item.expiresAt) < asOfMs) return false;
@@ -136,7 +136,7 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
   const asOfMs = timestamp(observedAt);
   const usable = observations.filter((item) => isUsableObservation(item, asOfMs));
   const historical = observations.filter(
-    (item) => item.source !== "mock" && item.confidence !== "inferred" && timestamp(item.observedAt) <= asOfMs,
+    (item) => isEarthEvidence(item) && timestamp(item.observedAt) <= asOfMs,
   );
   const latestAny = newest(historical, () => true);
   const latestPresence = newest(usable, (item) => item.kind === "device_presence" || item.kind === "presence_screen");
