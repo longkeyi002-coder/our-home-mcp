@@ -155,7 +155,13 @@ function seedData(): OurHomeData {
   };
 }
 
-function migratePersistedObservation(value: LifeObservation): LifeObservation {\n  const raw = value as LifeObservation & { world?: ObservationWorld; provenance?: ObservationProvenance };\n  const boundary = resolveObservationBoundary({ source: raw.source, confidence: raw.confidence, world: raw.world, provenance: raw.provenance });\n  return { ...raw, ...boundary };\n}\n\nfunction migrateData(value: unknown): OurHomeData {
+function migratePersistedObservation(value: LifeObservation): LifeObservation {
+  const raw = value as LifeObservation & { world?: ObservationWorld; provenance?: ObservationProvenance };
+  const boundary = resolveObservationBoundary({ source: raw.source, confidence: raw.confidence, world: raw.world, provenance: raw.provenance });
+  return { ...raw, ...boundary };
+}
+
+function migrateData(value: unknown): OurHomeData {
   if (!value || typeof value !== "object") {
     throw new Error("Our Home data file must contain a JSON object");
   }
@@ -458,7 +464,15 @@ export class JsonStore {
         result = existing;
         return;
       }
-      const { clientEventId: _ignoredClientEventId, world: _world, provenance: _provenance, ...observationInput } = input;\n      const boundary = resolveObservationBoundary(input);\n      const observation: LifeObservation = {\n        id: randomUUID(),\n        ...observationInput,\n        ...boundary,\n        metadata: clientEventId ? { ...(input.metadata ?? {}), clientEventId } : input.metadata,\n      };\n      data.observations.unshift(observation);
+      const { clientEventId: _ignoredClientEventId, world: _world, provenance: _provenance, ...observationInput } = input;
+      const boundary = resolveObservationBoundary(input);
+      const observation: LifeObservation = {
+        id: randomUUID(),
+        ...observationInput,
+        ...boundary,
+        metadata: clientEventId ? { ...(input.metadata ?? {}), clientEventId } : input.metadata,
+      };
+      data.observations.unshift(observation);
       compactUsageSummaryObservations(data);
       appendActivity(data, {
         kind: "observation_recorded",
