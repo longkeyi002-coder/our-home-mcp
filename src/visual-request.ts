@@ -13,7 +13,17 @@ export interface VisualRequest {
   expiresAt: string;
 }
 
+export interface VisualOpportunity {
+  deviceId?: string;
+  packageName: string;
+  sessionId: string;
+  curiosityReason: string;
+  observedAt: string;
+  expiresAt: string;
+}
+
 export const VISUAL_REQUEST_TTL_MS = 2 * 60_000;
+export const VISUAL_OPPORTUNITY_TTL_MS = 5 * 60_000;
 
 function time(value: string | undefined): number {
   if (!value) return Number.NaN;
@@ -27,15 +37,13 @@ function stringMetadata(item: LifeObservation, key: string): string | null {
 }
 
 /**
- * OH-44/OH-64: only sparse dwell milestones can create a visual request. The request is
- * a short-lived proposal bound to one exact foreground App session. Android still owns
- * final privacy/capture authority. Runtime also applies context fusion and a rolling
- * per-device visual budget before returning any request to the phone.
+ * Cheap deterministic eligibility gate. This answers only whether the current sparse dwell
+ * milestone is worth asking the Brain about. It does not authorize a screenshot.
  */
-export function deriveVisualRequest(
+export function deriveVisualOpportunity(
   dwell: LifeObservation,
   observations: LifeObservation[],
-): VisualRequest | null {
+): VisualOpportunity | null {
   if (!isEarthEvidence(dwell)) return null;
   if (dwell.kind !== "presence_app_dwell") return null;
   const packageName = stringMetadata(dwell, "packageName") ?? dwell.label?.trim();
@@ -67,15 +75,37 @@ export function deriveVisualRequest(
   const budget = decideVisualBudget(observations, dwell.deviceId, observedAtMs);
   if (!budget.allowed) return null;
 
-  const stage = stringMetadata(dwell, "stage") ?? "x";
-  const requestId = `visual:${dwell.deviceId ?? "phone"}:${startedAtMs}:${stage}:${decision.reason}`;
   return {
-    requestId,
+    deviceId: dwell.deviceId,
     packageName,
     sessionId,
-    reason: decision.reason,
-    issuedAt: new Date(observedAtMs).toISOString(),
-    expiresAt: new Date(observedAtMs + VISUAL_REQUEST_TTL_MS).toISOString(),
+    curiosityReason: decision.reason,
+    observedAt: new Date(observedAtMs).toISOString(),
+    expiresAt: new Date(observedAtMs + VISUAL_OPPORTUNITY_TTL_MS).toISOString(),
   };
 }
 
+/**
+ * Backward-compatible direct request derivation retained for isolated policy tests and callers
+ * that have not moved to Brain-directed observation yet. Runtime HTTP no longer uses it to
+ * authorize capture; production flow converts an approved visual opportunity into a request.
+ */
+export function deriveVisualRequest(
+  dwell: LifeObservation,
+  observations: LifeObservation[],
+): VisualRequest | null {
+  const opportunity = deriveVisualOpportunity(dwell, observations);
+  if (!opportunity) return null;
+  const stage = stringMetadata(dwell, "stage") ?? "x";
+  const observedAtMs = Date.parse(opportunity.observedAt);
+  const startedAtMs = Number(opportunity.sessionId.slice(opportunity.packageName.length + 1));
+  const requestId = `visual:${dwell.deviceId ?? "phone"}:${startedAtMs}:${stage}:${opportunity.curiosityReason}`;
+  return {
+    requestId,
+    packageName: opportunity.packageName,
+    sessionId: opportunity.sessionId,
+    reason: opportunity.curiosityReason,
+    issuedAt: opportunity.observedAt,
+    expiresAt: new Date(observedAtMs + VISUAL_REQUEST_TTL_MS).toISOString(),
+  };
+}
