@@ -19,6 +19,8 @@ function capture(
   return {
     id,
     kind: "visual_policy_audit",
+    world: "EARTH",
+    provenance: "observed",
     label: action,
     value: allowed === true || allowed === "true" ? "CAPTURED_EPHEMERAL" : "BLOCKED",
     observedAt,

@@ -13,6 +13,8 @@ function observed(
   return {
     id,
     kind,
+    world: "EARTH",
+    provenance: "observed",
     label: id,
     value,
     observedAt,

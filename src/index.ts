@@ -258,6 +258,8 @@ async function handlePhoneObservations(
         observedAt: item.observedAt ?? new Date().toISOString(),
         source: "phone",
         confidence: "observed",
+        world: "EARTH",
+        provenance: "observed",
         metadata: item.clientEventId ? { ...(item.metadata ?? {}), clientEventId: item.clientEventId } : item.metadata,
       });
       observations.push(observation);
@@ -330,6 +332,8 @@ async function handlePhoneHeartbeat(
         observedAt,
         source: "phone",
         confidence: "observed",
+        world: "EARTH",
+        provenance: "observed",
         deviceId: parsed.data.deviceId,
         clientEventId: parsed.data.clientEventId ? `${parsed.data.clientEventId}:foreground` : undefined,
       });

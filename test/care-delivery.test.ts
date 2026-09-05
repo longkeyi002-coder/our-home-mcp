@@ -64,6 +64,8 @@ function presence(at: string, dwellMs: number): LifeObservation[] {
     {
       id: `presence-${at}`,
       kind: "device_presence",
+      world: "EARTH",
+      provenance: "observed",
       label: "screen on",
       value: "screen_on",
       observedAt: at,
@@ -75,6 +77,8 @@ function presence(at: string, dwellMs: number): LifeObservation[] {
     {
       id: `dwell-${at}`,
       kind: "presence_app_dwell",
+      world: "EARTH",
+      provenance: "observed",
       label: "com.example.game",
       value: `${Math.floor(dwellMs / 60_000)}m`,
       observedAt: at,

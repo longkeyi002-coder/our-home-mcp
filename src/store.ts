@@ -24,9 +24,12 @@ import type {
   WakeEvent,
   WakeEventStatus,
   WakeDecision,
+  ObservationProvenance,
+  ObservationWorld,
 } from "./types.js";
 import { deriveLifeState } from "./life-state.js";
 import { deriveWakeEventDrafts } from "./wake-engine.js";
+import { resolveObservationBoundary } from "./world-boundary.js";
 
 const now = () => new Date().toISOString();
 export interface StoreFileSystem { writeFile: typeof writeFile }
@@ -75,7 +78,7 @@ function compactUsageSummaryObservations(data: OurHomeData, asOf = Date.now()): 
 function emptyData(): OurHomeData {
   const timestamp = now();
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     diaries: [],
     relationshipEvents: [],
     actions: [],
@@ -103,7 +106,7 @@ function emptyWakeEngineState(): WakeEngineState {
 function seedData(): OurHomeData {
   const timestamp = now();
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     diaries: [
       {
         id: "diary_seed_welcome",
@@ -155,6 +158,17 @@ function seedData(): OurHomeData {
   };
 }
 
+function migratePersistedObservation(value: LifeObservation): LifeObservation {
+  const raw = value as LifeObservation & { world?: ObservationWorld; provenance?: ObservationProvenance };
+  const boundary = resolveObservationBoundary({
+    source: raw.source,
+    confidence: raw.confidence,
+    world: raw.world,
+    provenance: raw.provenance,
+  });
+  return { ...raw, ...boundary };
+}
+
 function migrateData(value: unknown): OurHomeData {
   if (!value || typeof value !== "object") {
     throw new Error("Our Home data file must contain a JSON object");
@@ -188,7 +202,7 @@ function migrateData(value: unknown): OurHomeData {
   if (candidate.schemaVersion === 1) {
     return {
       ...(candidate as Omit<OurHomeData, "schemaVersion" | "observations" | "routines" | "heartbeats" | "proactiveQueue">),
-      schemaVersion: 2,
+      schemaVersion: 3,
       observations: [],
       routines: [],
       heartbeats: [],
@@ -199,7 +213,7 @@ function migrateData(value: unknown): OurHomeData {
     };
   }
   if (
-    candidate.schemaVersion !== 2 ||
+    candidate.schemaVersion !== 2 && candidate.schemaVersion !== 3 ||
     !Array.isArray(candidate.observations) ||
     !Array.isArray(candidate.routines) ||
     !Array.isArray(candidate.heartbeats) ||
@@ -209,6 +223,8 @@ function migrateData(value: unknown): OurHomeData {
   }
   return {
     ...(candidate as OurHomeData),
+    schemaVersion: 3,
+    observations: candidate.observations.map(migratePersistedObservation),
     wakeEvents: candidate.wakeEvents ?? [],
     wakeEngineState: candidate.wakeEngineState ?? emptyWakeEngineState(),
     phoneDeviceRegistrations: candidate.phoneDeviceRegistrations ?? [],
@@ -445,6 +461,9 @@ export class JsonStore {
     expiresAt?: string;
     deviceId?: string;
     metadata?: Record<string, string | number | boolean>;
+    evidenceRefs?: string[];
+    world?: ObservationWorld;
+    provenance?: ObservationProvenance;
     clientEventId?: string;
   }): Promise<LifeObservation> {
     let result: LifeObservation | undefined;
@@ -458,10 +477,12 @@ export class JsonStore {
         result = existing;
         return;
       }
-      const { clientEventId: _ignoredClientEventId, ...observationInput } = input;
+      const { clientEventId: _ignoredClientEventId, world: _world, provenance: _provenance, ...observationInput } = input;
+      const boundary = resolveObservationBoundary(input);
       const observation: LifeObservation = {
         id: randomUUID(),
         ...observationInput,
+        ...boundary,
         metadata: clientEventId ? { ...(input.metadata ?? {}), clientEventId } : input.metadata,
       };
       data.observations.unshift(observation);

@@ -177,6 +177,9 @@ export function createOurHomeServer(store: JsonStore): McpServer {
         observedAt: dateSchema,
         source: z.enum(["user", "phone", "screen", "calendar", "system", "mock"]),
         confidence: z.enum(["observed", "declared", "inferred"]),
+        world: z.enum(["EARTH", "AI_WORLD", "FICTION"]).optional(),
+        provenance: z.enum(["observed", "user_declared", "inferred", "simulated", "authored", "model_generated"]).optional(),
+        evidenceRefs: z.array(z.string().trim().min(1).max(500)).max(20).optional(),
         expiresAt: dateSchema.optional(),
         deviceId: z.string().trim().max(200).optional(),
         metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).optional(),
@@ -185,9 +188,9 @@ export function createOurHomeServer(store: JsonStore): McpServer {
       outputSchema: z.object({ observation: z.record(z.string(), z.unknown()), dataSource: z.literal("local-mock") }),
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ kind, label, value, observedAt, source, confidence, expiresAt, deviceId, metadata, clientEventId }) => {
+    async ({ kind, label, value, observedAt, source, confidence, world, provenance, evidenceRefs, expiresAt, deviceId, metadata, clientEventId }) => {
       try {
-        const observation = await store.recordObservation({ kind, label, value, observedAt, source, confidence, expiresAt, deviceId, metadata: clientEventId ? { ...(metadata ?? {}), clientEventId } : metadata });
+        const observation = await store.recordObservation({ kind, label, value, observedAt, source, confidence, world, provenance, evidenceRefs, expiresAt, deviceId, metadata: clientEventId ? { ...(metadata ?? {}), clientEventId } : metadata });
         return structured({ observation, dataSource: "local-mock" as const });
       } catch (error) {
         return toolError(error);
