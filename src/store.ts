@@ -247,6 +247,13 @@ function migrateData(value: unknown): OurHomeData {
       }
       return migratePersistedObservation(item);
     }),
+    // RoutineWindow has always represented user-declared Earth routine context. Older
+    // records can therefore be normalized without guessing an ambiguous world.
+    routines: candidate.routines.map((item) => ({
+      ...item,
+      world: "EARTH" as const,
+      provenance: "user_declared" as const,
+    })),
     // Legacy wake snapshots were derived before world filtering. Keep their history,
     // but do not let queued decisions reuse unverified Earth evidence after migration.
     wakeEvents: (candidate.wakeEvents ?? []).map((event) => candidate.schemaVersion === 2 && event.status === "pending"
@@ -407,7 +414,7 @@ export class JsonStore {
   getPendingVisualRequest(deviceId: string, asOf = now()): VisualRequestRecord | undefined {
     return (this.snapshot().visualRequests ?? [])
       .filter((item) => item.status === "pending" && item.deviceId === deviceId && item.expiresAt > asOf)
-      .sort((left, right) => right.issuedAt.localeCompare(left.issuedAt))[0];
+      .sort((left, right) => right.issuedAt.localeCompare(left.issuedAt) || left.requestId.localeCompare(right.requestId))[0];
   }
 
   async resolveWakeEvent(id: string, status: Exclude<WakeEventStatus, "pending">): Promise<WakeEvent> {
@@ -659,6 +666,8 @@ export class JsonStore {
     const timestamp = now();
     const routine: RoutineWindow = {
       id: randomUUID(),
+      world: "EARTH",
+      provenance: "user_declared",
       ...input,
       enabled: true,
       createdAt: timestamp,
@@ -671,8 +680,8 @@ export class JsonStore {
         title: "建立一段生活时间表",
         summary: routine.label,
         source: "HOME_STATE",
-        world: "EARTH",
-        provenance: "user_declared",
+        world: routine.world,
+        provenance: routine.provenance,
       });
     });
     return routine;
