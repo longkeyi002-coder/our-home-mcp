@@ -24,6 +24,7 @@ export interface VisualOpportunity {
 
 export const VISUAL_REQUEST_TTL_MS = 2 * 60_000;
 export const VISUAL_OPPORTUNITY_TTL_MS = 5 * 60_000;
+export const VISUAL_ACTIVE_USE_FRESHNESS_MS = 7 * 60_000;
 
 function time(value: string | undefined): number {
   if (!value) return Number.NaN;
@@ -36,9 +37,20 @@ function stringMetadata(item: LifeObservation, key: string): string | null {
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+function booleanMetadata(item: LifeObservation, key: string): boolean | null {
+  const value = item.metadata?.[key];
+  if (value === true || value === "true") return true;
+  if (value === false || value === "false") return false;
+  return null;
+}
+
 /**
  * Cheap deterministic eligibility gate. This answers only whether the current sparse dwell
  * milestone is worth asking the Brain about. It does not authorize a screenshot.
+ *
+ * OH-43/OH-44: the dwell event itself must prove that the screen was usable and that the
+ * current App session had recent local activity. Missing metadata fails closed. This prevents
+ * a delayed/stale dwell or a merely-lit unattended screen from becoming visual curiosity.
  */
 export function deriveVisualOpportunity(
   dwell: LifeObservation,
@@ -49,12 +61,33 @@ export function deriveVisualOpportunity(
   const packageName = stringMetadata(dwell, "packageName") ?? dwell.label?.trim();
   const startedAt = stringMetadata(dwell, "startedAt");
   const durationMs = Number(stringMetadata(dwell, "durationMs"));
+  const screenInteractive = booleanMetadata(dwell, "screenInteractive");
+  const unlocked = booleanMetadata(dwell, "unlocked");
+  const lastInteractionAt = stringMetadata(dwell, "lastInteractionAt");
   const observedAtMs = time(dwell.observedAt);
-  if (!packageName || !startedAt || !Number.isFinite(durationMs) || durationMs < 0 || !Number.isFinite(observedAtMs)) {
+  if (
+    !packageName
+    || !startedAt
+    || !Number.isFinite(durationMs)
+    || durationMs < 0
+    || !Number.isFinite(observedAtMs)
+    || screenInteractive !== true
+    || unlocked !== true
+    || !lastInteractionAt
+  ) {
     return null;
   }
   const startedAtMs = time(startedAt);
-  if (!Number.isFinite(startedAtMs) || startedAtMs > observedAtMs) return null;
+  const lastInteractionAtMs = time(lastInteractionAt);
+  if (
+    !Number.isFinite(startedAtMs)
+    || startedAtMs > observedAtMs
+    || !Number.isFinite(lastInteractionAtMs)
+    || lastInteractionAtMs > observedAtMs
+    || observedAtMs - lastInteractionAtMs > VISUAL_ACTIVE_USE_FRESHNESS_MS
+  ) {
+    return null;
+  }
 
   const sessionId = `${packageName}:${startedAtMs}`;
   const context = deriveContextUnderstanding(
@@ -66,7 +99,7 @@ export function deriveVisualOpportunity(
   const decision = decideCuriosity({
     understanding: context.understanding,
     dwellMs: durationMs,
-    screenUsable: true,
+    screenUsable: screenInteractive && unlocked,
     nowMs: observedAtMs,
     lastVisualAtMs: context.lastVisualAtMs,
   });
