@@ -16,7 +16,8 @@ Canonical design: `docs/OUR_HOME_DESIGN.md`
 → Presence State
 → 持续时间 / 用户主动声明 / 最近视觉理解
 → Context Understanding
-→ Curiosity：是否值得看一眼？
+→ Curiosity Eligibility：现在是否值得问 Brain 一次？
+→ Brain Visual Decision：这次看 / 不看
 → Visual Privacy Guard
 → 可选 Visual Observation
 → Care：是否值得联系用户？
@@ -25,7 +26,7 @@ Canonical design: `docs/OUR_HOME_DESIGN.md`
 → 点击进入对应 Our Home Chat
 ```
 
-核心不是持续监控，也不是固定每 N 分钟截图；而是“持续感知 → 偶尔观察 → 有选择地关心”。
+核心不是持续监控，也不是固定每 N 分钟截图；而是“持续感知 → 低成本筛选 → AI 自己决定是否偶尔观察 → 有选择地关心”。
 
 ## 2. 与现有阶段的关系
 
@@ -96,9 +97,11 @@ Canonical design: `docs/OUR_HOME_DESIGN.md`
 - CONFLICT：用户声明与设备事实明显冲突；
 - STALE：已有理解需要重新确认。
 
-### E. Curiosity Engine（Runtime，默认规则，不用 LLM）
+### E. Curiosity Eligibility Gate（Runtime，规则，不用 LLM 常驻轮询）
 
-决定“哥哥要不要看一眼”。因素包括：
+Curiosity 不再直接决定“截图”，只回答：**当前稀疏 dwell 节点是否值得唤醒 Brain 做一次 look-or-ignore 判断。**
+
+因素包括：
 
 - 当前状态是否 UNKNOWN；
 - 同一 App 持续时间；
@@ -106,15 +109,30 @@ Canonical design: `docs/OUR_HOME_DESIGN.md`
 - 用户是否已经主动说明；
 - 最近是否刚观察过；
 - screen 是否可用；
-- App / 场景隐私策略；
 - 当前视觉预算与 cooldown；
 - AI 当前活动/忙闲状态（后续可接 AI World）。
 
 用户主动说明只降低观察需求，不意味着永远不再观察。
 
+这一层必须保持低成本：Presence transition 不直接调用 Brain；只有稀疏 dwell milestone 且 Curiosity/budget 通过时，才生成一个短时 `visual_opportunity`。
+
+### E2. Brain Visual Decision（Runtime / BrainAdapter）
+
+最终“这次看还是不看”由 Brain 决定，而不是由固定阈值直接授权截图。
+
+约束：
+
+- Brain 对 `visual_opportunity` 只能返回 `ignore` 或 `request_visual`；
+- opportunity 由 Runtime 绑定当前 `deviceId + packageName + sessionId`，Brain 不能改成另一个 App 或另一个 session；
+- Brain 只决定是否值得看以及给出 reason，无权改变 Presence / Visual privacy policy；
+- Brain timeout、Provider 故障、decision contract 非法或 opportunity 过期时，默认不看；
+- 没有通过 Curiosity eligibility 的普通 Presence 事件不调用 Brain；
+- “请求看”仍只是一个请求，Android 本地 Visual Privacy Guard / secure-window / exact-session preflight 拥有最终否决权；
+- “看”与“发消息”仍是两次独立决定。
+
 ### F. Visual Observation（Android + Vision Provider）
 
-只有 Curiosity 通过安全策略后才触发一次观察。
+只有 Brain 对一个仍有效的 `visual_opportunity` 返回 `request_visual`，并且 Android 本地 Guard / preflight 继续允许时，才触发一次观察。
 
 - Android 11+：Accessibility screenshot；
 - Android 8–10：若未来支持，使用用户明确同意的 MediaProjection session；
@@ -130,13 +148,13 @@ Canonical design: `docs/OUR_HOME_DESIGN.md`
 
 默认类别：
 
-1. 普通：按 Curiosity 规则可自动观察。
+1. 普通：在 Curiosity eligibility + Brain request 后可自动观察。
 2. 私人：相机、相册、文件、云盘、聊天等，由用户选择“允许自动观察 / 仅我允许时 / 永远不看”。
 3. 高度敏感：银行、支付、密码管理、身份认证、支付确认、密码/验证码等默认硬保护。
 
 强规则：
 
-- AI / Soul / Curiosity 无权解除 Guard；
+- AI / Soul / Curiosity / Brain 无权解除 Guard；
 - 系统 Secure Window 永不绕过；
 - 高度敏感页面默认不截图、不上传；
 - 用户明确要求可看时，只建立一次性或限时临时授权；切 App、锁屏或超时自动失效；
@@ -172,7 +190,7 @@ Canonical design: `docs/OUR_HOME_DESIGN.md`
 
 决定：保持沉默 / 生成 wake / 生成 proactive message。
 
-示例：持续游戏较久 → 可观察一次 → 若仍持续且满足 Care policy → 提醒休息；若屏幕关闭/离开游戏 → 取消过时提醒。
+示例：持续游戏较久 → Curiosity 产生机会 → Brain 可选择观察一次 → 若仍持续且满足 Care policy → 提醒休息；若屏幕关闭/离开游戏 → 取消过时提醒。
 
 ### J. Notification & Deep Link
 
@@ -257,12 +275,14 @@ Action Permission 单独归入“哥哥可以帮我做什么”或等价入口�
 4. structured vision summary ingest。
 5. visual freshness + cooldown + budget。
 
-### Stage 4 — Curiosity / Context V0.1
+### Stage 4 — Curiosity / Context / Brain Visual Decision V0.1
 
 1. observed + user_declared + visual summary 融合。
 2. UNKNOWN / KNOWN / CONFLICT / STALE。
-3. rule-based Curiosity，不调用 LLM 做常驻轮询。
-4. 长时间同 App 仍可再次观察。
+3. rule-based Curiosity 只做 eligibility gate，不调用 LLM 做常驻轮询。
+4. 稀疏 eligibility 通过后，Brain 对当前 device/App/session 做一次 `ignore` / `request_visual` 决策。
+5. Brain 不能 retarget，失败/超时/过期默认不看。
+6. 长时间同 App 仍可在 cooldown/budget 允许时再次产生新的观察机会。
 
 ### Stage 5 — Care + FCM deep link
 
@@ -290,18 +310,20 @@ Action Permission 单独归入“哥哥可以帮我做什么”或等价入口�
 1. 用户说“我去打游戏”。
 2. 手机进入游戏 App。
 3. Context 识别声明与观测一致。
-4. 哥哥可偶尔观察，但不机械重复截图。
-5. 连续游戏较久后 Care 可触发一次休息提醒。
-6. 切出游戏或熄屏后，游戏 session 结束，不继续发送过时提醒。
+4. Curiosity 通常降低观察需求；若后续稀疏机会成立，Brain 可选择看或继续不看。
+5. Brain 请求观察也必须再次通过本地 Guard；不能机械重复截图。
+6. 连续游戏较久后 Care 可触发一次休息提醒。
+7. 切出游戏或熄屏后，游戏 session 结束，不继续发送过时提醒。
 
 ### Scenario B — 用户未声明游戏
 
 1. 进入游戏 App，未告诉哥哥。
 2. Presence 在本地识别 package 与 dwell；该 App 的 Presence 策略允许时才把身份上传。
-3. UNKNOWN 持续后 Curiosity 上升。
-4. 安全策略允许时观察一次。
-5. 视觉摘要形成“正在打游戏”的 observed/inferred context。
-6. 系统可选择沉默，也可在 Care 条件成立时联系用户。
+3. UNKNOWN 持续到稀疏 milestone 后，Curiosity eligibility 可以产生一次 `visual_opportunity`。
+4. Brain 结合当前 Life Context 决定 `ignore` 或 `request_visual`，不能改看另一个 App。
+5. Brain 请求观察后仍必须通过 Android 本地 Visual Guard / exact-session preflight。
+6. 视觉摘要形成“正在打游戏”的 observed/inferred context。
+7. 系统可选择沉默，也可在 Care 条件成立时联系用户。
 
 ### Scenario C — Presence 隐藏 App
 
@@ -347,6 +369,7 @@ Action Permission 单独归入“哥哥可以帮我做什么”或等价入口�
 - 每次 App 切换都调用 LLM；
 - 固定高频截图 cron；
 - 让 Brain 自己修改隐私规则；
+- 让 Brain 自己选择当前 opportunity 之外的 App/session 去看；
 - 通过截图/模拟点击替代正式支付或高影响 Tool 授权；
 - 用 WSS 维持日常感知。
 
@@ -355,9 +378,16 @@ Action Permission 单独归入“哥哥可以帮我做什么”或等价入口�
 ```text
 Local App Inventory / Presence / dwell / screen / privacy guards / cooldown
 → deterministic Runtime / Android logic
+→ sparse Curiosity eligibility
 
-只有真正需要理解或写消息
-→ Vision / Brain
+只有 eligibility 成立时
+→ Brain look-or-ignore decision
+
+只有 Brain 请求且本地 Guard 仍允许时
+→ Vision
+
+只有真正需要联系用户时
+→ Brain/Care message decision
 ```
 
-所有事件必须可去重、可重试、可审计；网络断开时先本地排队；恢复后上传。截图类数据遵循最短生命周期和最小化持久化。隐私拒绝必须在数据离开 Android 设备之前生效。
+所有事件必须可去重、可重试、可审计；网络断开时先本地排队；恢复后上传。Brain 失败或 opportunity 过期默认不观察；截图类数据遵循最短生命周期和最小化持久化。隐私拒绝必须在数据离开 Android 设备之前生效。
