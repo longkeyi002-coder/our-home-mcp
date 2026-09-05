@@ -31,7 +31,7 @@ import type {
 import { deriveLifeState } from "./life-state.js";
 import { deriveWakeEventDrafts } from "./wake-engine.js";
 import { assertValidObservationBoundary, resolveObservationBoundary } from "./world-boundary.js";
-import { assertValidRecordBoundary } from "./record-boundary.js";
+import { assertValidRecordBoundary, resolveRecordBoundary } from "./record-boundary.js";
 import { VISUAL_REQUEST_TTL_MS, type VisualOpportunity } from "./visual-request.js";
 
 const now = () => new Date().toISOString();
@@ -542,14 +542,15 @@ export class JsonStore {
     body: string;
     author: Actor;
     visibility: DiaryVisibility;
-    world: ObservationWorld;
-    provenance: ObservationProvenance;
+    world?: ObservationWorld;
+    provenance?: ObservationProvenance;
   }): Promise<DiaryEntry> {
-    assertValidRecordBoundary(input);
+    const boundary = resolveRecordBoundary(input);
     const timestamp = now();
     const entry: DiaryEntry = {
       id: randomUUID(),
       ...input,
+      ...boundary,
       source: input.author === "agent" ? "AGENT_LIFE" : "RELATIONSHIP",
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -771,13 +772,14 @@ export class JsonStore {
     title: string;
     description?: string;
     dueAt?: string;
-    world: ObservationWorld;
-    provenance: ObservationProvenance;
+    world?: ObservationWorld;
+    provenance?: ObservationProvenance;
   }): Promise<ActionItem> {
-    assertValidRecordBoundary(input);
+    const boundary = resolveRecordBoundary(input);
     const action: ActionItem = {
       id: randomUUID(),
       ...input,
+      ...boundary,
       status: "todo",
       createdAt: now(),
       updatedAt: now(),
