@@ -99,6 +99,33 @@ test("expired visual opportunity fails closed without calling Brain", async () =
   assert.equal((store.snapshot().visualRequests ?? []).length, 0);
 });
 
+test("an expired pending visual opportunity does not block a fresh one for the same session", async () => {
+  const store = await createStore();
+  const first = await store.enqueueVisualOpportunity(opportunity({ expiresAt: "2026-09-05T12:10:30.000Z" }));
+  const second = await store.enqueueVisualOpportunity(opportunity({
+    observedAt: "2026-09-05T12:11:00.000Z",
+    expiresAt: "2026-09-05T12:16:00.000Z",
+  }));
+
+  assert.notEqual(second.id, first.id);
+  const snapshot = store.snapshot();
+  assert.equal(snapshot.wakeEvents.find((item) => item.id === first.id)?.status, "dismissed");
+  assert.equal(snapshot.wakeEvents.find((item) => item.id === second.id)?.status, "pending");
+  assert.equal(store.hasPendingVisualDecision("android-1", "2026-09-05T12:11:30.000Z"), true);
+});
+
+test("an unexpired pending visual opportunity still coalesces for the same session", async () => {
+  const store = await createStore();
+  const first = await store.enqueueVisualOpportunity(opportunity());
+  const second = await store.enqueueVisualOpportunity(opportunity({
+    observedAt: "2026-09-05T12:11:00.000Z",
+    expiresAt: "2026-09-05T12:16:00.000Z",
+  }));
+
+  assert.equal(second.id, first.id);
+  assert.equal(store.snapshot().wakeEvents.filter((item) => item.type === "visual_opportunity").length, 1);
+});
+
 test("a visual summary consumes the matching Brain-approved request", async () => {
   const store = await createStore();
   const visualOpportunity = opportunity();
