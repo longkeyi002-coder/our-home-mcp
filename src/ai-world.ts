@@ -135,6 +135,7 @@ function initialHistory(state: AiWorldState): AiWorldHistoryEvent {
     occurredAt: state.updatedAt,
     toPhaseKey: state.phaseKey,
     changes: {
+      location: state.location,
       room: state.room,
       weather: state.weather,
       workState: state.workState,
@@ -152,6 +153,7 @@ export function createAiWorldData(asOf: string, timezone: string): AiWorldData {
     provenance: "simulated",
     timezone,
     home: "our_home",
+    location: "our_home",
     ...phase,
     lastTransitionAt: asOf,
     updatedAt: asOf,
@@ -164,7 +166,12 @@ export function assertValidAiWorldData(data: AiWorldData): void {
     throw new Error("Invalid persisted AI World data");
   }
   const state = data.state;
-  if (state.world !== "AI_WORLD" || state.provenance !== "simulated" || state.home !== "our_home") {
+  if (
+    state.world !== "AI_WORLD"
+    || state.provenance !== "simulated"
+    || state.home !== "our_home"
+    || state.location !== "our_home"
+  ) {
     throw new Error("AI World state has an invalid world boundary");
   }
   assertAiWorldTimezone(state.timezone);
@@ -200,7 +207,16 @@ export function assertValidAiWorldData(data: AiWorldData): void {
 
   if (data.items !== undefined) {
     if (!Array.isArray(data.items)) throw new Error("AI World items must be an array");
-    const kinds = new Set<AiWorldItemKind>(["task", "waiting", "plan", "hobby", "interest", "collection"]);
+    const kinds = new Set<AiWorldItemKind>([
+      "task",
+      "waiting",
+      "plan",
+      "idea",
+      "question",
+      "hobby",
+      "interest",
+      "collection",
+    ]);
     const statuses = new Set<AiWorldItemStatus>(["active", "completed", "archived"]);
     const provenances = new Set<AiWorldItemProvenance>(["inferred", "simulated", "authored", "model_generated"]);
     for (const item of data.items) {
