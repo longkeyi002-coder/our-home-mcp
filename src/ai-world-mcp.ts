@@ -4,7 +4,7 @@ import type { JsonStore } from "./store.js";
 import { addAiWorldItem, listAiWorldItems, updateAiWorldItem } from "./ai-world-items.js";
 import { readPersistedAiWorld } from "./ai-world-store.js";
 
-const kindSchema = z.enum(["task", "waiting", "plan", "hobby", "interest", "collection"]);
+const kindSchema = z.enum(["task", "waiting", "plan", "idea", "question", "hobby", "interest", "collection"]);
 const statusSchema = z.enum(["active", "completed", "archived"]);
 // MCP callers may author/infer/model-generate semantic continuity. `simulated` is reserved
 // for the deterministic AI World state machine rather than caller-authored content.
@@ -59,7 +59,7 @@ export function registerAiWorldTools(server: McpServer, store: JsonStore): void 
     "home.list_ai_world_items",
     {
       title: "List AI World continuity items",
-      description: "List structured AI World tasks, waiting items, plans, hobbies, interests, or collection entries. This never reads Earth actions as AI World items.",
+      description: "List structured AI World tasks, waiting items, plans, ideas, questions, hobbies, interests, or collection entries. This never reads Earth actions as AI World items.",
       inputSchema: {
         kind: kindSchema.optional(),
         status: statusSchema.optional(),
