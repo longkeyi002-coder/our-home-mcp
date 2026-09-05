@@ -13,6 +13,7 @@ import com.hermes.companion.data.QueueRepository
 import com.hermes.companion.data.RegisterRequest
 import com.hermes.companion.data.RegisterResponse
 import com.hermes.companion.data.SettingsRepository
+import com.hermes.companion.data.VisualRequestAck
 import com.hermes.companion.platform.UsageTimelineSummary
 import com.hermes.companion.platform.UsageSession
 import java.io.IOException
@@ -95,13 +96,66 @@ class QueueRepositoryTest {
         assertEquals(1, database.pendingEventDao().count())
     }
 
+    @Test
+    fun pendingBrainVisualDecisionSchedulesOnlyOnePollPerUploadCycle() = runBlocking {
+        val settings = SettingsRepository(ApplicationProvider.getApplicationContext())
+        settings.saveServerUrl("https://example.com")
+        settings.saveBootstrapToken("bootstrap")
+        var pollCount = 0
+        val repository = QueueRepository.forTest(
+            dao = database.pendingEventDao(),
+            settings = settings,
+            apiFactory = { successfulApi(ApiAck("phone-ingest", visualDecisionPending = true)) },
+            visualDecisionPoller = { pollCount += 1 },
+        )
+
+        repository.enqueueHeartbeat(sampleHeartbeat().copy(clientEventId = "visual-pending-1"), scheduleUpload = false)
+        repository.enqueueHeartbeat(sampleHeartbeat().copy(clientEventId = "visual-pending-2"), scheduleUpload = false)
+        val result = repository.uploadPending()
+
+        assertEquals(2, result.uploaded)
+        assertEquals(1, pollCount)
+        assertEquals(0, database.pendingEventDao().count())
+    }
+
+    @Test
+    fun approvedVisualRequestEnqueuesCaptureAndDoesNotScheduleAnotherPoll() = runBlocking {
+        val settings = SettingsRepository(ApplicationProvider.getApplicationContext())
+        settings.saveServerUrl("https://example.com")
+        settings.saveBootstrapToken("bootstrap")
+        var pollCount = 0
+        val visualRequests = mutableListOf<VisualRequestAck>()
+        val request = VisualRequestAck(
+            requestId = "visual-brain:wake-1",
+            packageName = "com.example.game",
+            sessionId = "com.example.game:123",
+            reason = "Brain approved one glance",
+            issuedAt = "2026-09-05T12:11:00Z",
+            expiresAt = "2026-09-05T12:13:00Z",
+        )
+        val repository = QueueRepository.forTest(
+            dao = database.pendingEventDao(),
+            settings = settings,
+            apiFactory = { successfulApi(ApiAck("phone-ingest", visualRequest = request, visualDecisionPending = true)) },
+            visualRequestEnqueuer = { visualRequests += it },
+            visualDecisionPoller = { pollCount += 1 },
+        )
+
+        repository.enqueueHeartbeat(sampleHeartbeat().copy(clientEventId = "visual-approved"), scheduleUpload = false)
+        val result = repository.uploadPending()
+
+        assertEquals(1, result.uploaded)
+        assertEquals(listOf(request), visualRequests)
+        assertEquals(0, pollCount)
+    }
+
     private fun sampleHeartbeat() = HeartbeatRequest("android-test", batteryPercent = 82, charging = false, appVersion = "0.1.0", connectivityState = "online", observedAt = "2026-09-02T00:00:00Z", clientEventId = "event-${System.nanoTime()}")
 
-    private fun successfulApi() = object : HermesApi {
+    private fun successfulApi(ack: ApiAck = ApiAck("phone-ingest")) = object : HermesApi {
         override suspend fun health() = HealthResponse(true)
         override suspend fun register(authorization: String, request: RegisterRequest) = RegisterResponse(request.deviceId, "device-token")
-        override suspend fun heartbeat(authorization: String, request: HeartbeatRequest) = ApiAck("phone-ingest")
-        override suspend fun observation(authorization: String, request: com.hermes.companion.data.ObservationRequest) = ApiAck("phone-ingest")
+        override suspend fun heartbeat(authorization: String, request: HeartbeatRequest) = ack
+        override suspend fun observation(authorization: String, request: com.hermes.companion.data.ObservationRequest) = ack
     }
 
     private fun failingApi() = object : HermesApi {
