@@ -154,7 +154,7 @@ export async function applyReviewedPreferenceToSoul(
   interest: string,
   asOf = new Date().toISOString(),
 ): Promise<SoulPreferenceApplyResult> {
-  timestamp(asOf, "Soul application asOf");
+  const asOfMs = timestamp(asOf, "Soul application asOf");
   const interestKey = normalizeInterestKey(interest);
   const snapshot = store.snapshot().aiWorld;
   if (!snapshot) return { applied: false, reason: "preference_not_found" };
@@ -163,9 +163,11 @@ export async function applyReviewedPreferenceToSoul(
   if (!preference) return { applied: false, reason: "preference_not_found" };
   if (preference.evidenceCount < MIN_SOUL_EVIDENCE_COUNT) return { applied: false, reason: "insufficient_evidence" };
   if (!preference.lastReviewedAt) return { applied: false, reason: "preference_not_reviewed" };
-  if (timestamp(preference.lastReviewedAt, "preference lastReviewedAt") < timestamp(preference.lastEvidenceAt, "preference lastEvidenceAt")) {
+  const preflightReviewedAt = timestamp(preference.lastReviewedAt, "preference lastReviewedAt");
+  if (preflightReviewedAt < timestamp(preference.lastEvidenceAt, "preference lastEvidenceAt")) {
     return { applied: false, reason: "review_predates_latest_evidence" };
   }
+  if (asOfMs < preflightReviewedAt) throw new Error("Soul application cannot precede preference review");
   if (Math.abs(preference.score) < MIN_REVIEWED_PREFERENCE_MAGNITUDE) {
     return { applied: false, reason: "preference_too_weak" };
   }
@@ -191,10 +193,12 @@ export async function applyReviewedPreferenceToSoul(
       result = { applied: false, reason: "preference_not_reviewed" };
       return;
     }
-    if (timestamp(currentPreference.lastReviewedAt, "preference lastReviewedAt") < timestamp(currentPreference.lastEvidenceAt, "preference lastEvidenceAt")) {
+    const reviewedAt = timestamp(currentPreference.lastReviewedAt, "preference lastReviewedAt");
+    if (reviewedAt < timestamp(currentPreference.lastEvidenceAt, "preference lastEvidenceAt")) {
       result = { applied: false, reason: "review_predates_latest_evidence" };
       return;
     }
+    if (asOfMs < reviewedAt) throw new Error("Soul application cannot precede preference review");
     if (Math.abs(currentPreference.score) < MIN_REVIEWED_PREFERENCE_MAGNITUDE) {
       result = { applied: false, reason: "preference_too_weak" };
       return;
@@ -209,6 +213,9 @@ export async function applyReviewedPreferenceToSoul(
 
     const tendencyIndex = memory.tendencies.findIndex((item) => item.interestKey === interestKey);
     const existing = tendencyIndex >= 0 ? memory.tendencies[tendencyIndex] : undefined;
+    if (existing && asOfMs < timestamp(existing.updatedAt, "Soul tendency updatedAt")) {
+      throw new Error("Soul application cannot precede the current tendency state");
+    }
     const beforeScore = existing?.score ?? 0;
     const requestedDelta = currentPreference.score - beforeScore;
     const delta = roundScore(clamp(requestedDelta, -MAX_SOUL_DELTA, MAX_SOUL_DELTA));
