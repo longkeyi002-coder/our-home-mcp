@@ -32,6 +32,30 @@ interface ServiceAccount {
   token_uri?: string;
 }
 
+export class FcmSendError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly errorCode?: string,
+  ) {
+    super(`FCM send failed with HTTP ${status}${errorCode ? ` (${errorCode})` : ""}`);
+    this.name = "FcmSendError";
+  }
+}
+
+export function fcmErrorCodeFromPayload(value: unknown): string | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const error = (value as { error?: unknown }).error;
+  if (!error || typeof error !== "object") return undefined;
+  const details = (error as { details?: unknown }).details;
+  if (!Array.isArray(details)) return undefined;
+  for (const detail of details) {
+    if (!detail || typeof detail !== "object") continue;
+    const errorCode = (detail as { errorCode?: unknown }).errorCode;
+    if (typeof errorCode === "string" && errorCode.trim()) return errorCode.trim();
+  }
+  return undefined;
+}
+
 const encode = (value: string | Buffer) => Buffer.from(value).toString("base64url");
 
 /** Minimal FCM HTTP v1 adapter using service-account ADC from the runtime. */
@@ -56,7 +80,15 @@ export class FcmHttpV1Sender implements FcmSender {
         signal: AbortSignal.timeout(this.timeoutMs),
       },
     );
-    if (!response.ok) throw new Error(`FCM send failed with HTTP ${response.status}`);
+    if (!response.ok) {
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        payload = undefined;
+      }
+      throw new FcmSendError(response.status, fcmErrorCodeFromPayload(payload));
+    }
   }
 
   private async getAccessToken(): Promise<string> {
@@ -98,6 +130,7 @@ export class FcmNotifier implements ProactiveNotifier {
   async deliver(candidate: ProactiveCandidate): Promise<void> {
     const target = this.store.getPrimaryPushDevice();
     if (!target?.pushToken) throw new Error("No Android push target is registered");
+    const pushToken = target.pushToken;
     // OH-P2: use data-only FCM. Mixed notification+data messages are rendered by
     // Google Play services while the app is backgrounded and can bypass our custom
     // PendingIntent. Data-only delivery ensures FirebaseMessagingService builds the
@@ -105,22 +138,37 @@ export class FcmNotifier implements ProactiveNotifier {
     // appropriate because every successful message becomes a visible user notification.
     // A bounded TTL prevents old context-sensitive care messages arriving much later;
     // collapse_key keeps ambiguous network retries for the same candidate idempotent in FCM.
-    await this.sender.send({
-      token: target.pushToken,
-      data: {
-        candidateId: candidate.id,
-        wakeEventId: candidate.wakeEventId ?? "",
-        reason: candidate.reason,
-        source: "AGENT_LIFE",
-        destination: "/chat",
-        title: candidate.title,
-        body: candidate.message,
-      },
-      android: {
-        priority: "HIGH",
-        ttl: "3600s",
-        collapse_key: candidate.id,
-      },
-    });
+    try {
+      await this.sender.send({
+        token: pushToken,
+        data: {
+          candidateId: candidate.id,
+          wakeEventId: candidate.wakeEventId ?? "",
+          reason: candidate.reason,
+          source: "AGENT_LIFE",
+          destination: "/chat",
+          title: candidate.title,
+          body: candidate.message,
+        },
+        android: {
+          priority: "HIGH",
+          ttl: "3600s",
+          collapse_key: candidate.id,
+        },
+      });
+    } catch (error) {
+      if (error instanceof FcmSendError && error.errorCode === "UNREGISTERED") {
+        await this.store.update((data) => {
+          const current = data.phoneDeviceRegistrations.find((item) => item.deviceId === target.deviceId);
+          // Only invalidate the exact token that failed. A concurrent Android refresh
+          // may already have replaced it while this request was in flight.
+          if (!current || current.pushToken !== pushToken) return;
+          delete current.pushToken;
+          delete current.pushFid;
+          current.updatedAt = new Date().toISOString();
+        });
+      }
+      throw error;
+    }
   }
 }

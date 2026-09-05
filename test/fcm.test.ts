@@ -3,7 +3,13 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
-import { FcmNotifier, type FcmSendInput, type FcmSender } from "../src/fcm.js";
+import {
+  FcmNotifier,
+  FcmSendError,
+  fcmErrorCodeFromPayload,
+  type FcmSendInput,
+  type FcmSender,
+} from "../src/fcm.js";
 import { registerPhone } from "../src/phone-registration.js";
 import { JsonStore } from "../src/store.js";
 import { NoopNotifier, WebhookNotifier, runProactiveCycle, selectNotifier } from "../src/worker.js";
@@ -62,6 +68,19 @@ test("push addresses are absent from life and Hermes wake context", async () => 
   assert.equal(serialized.includes("private-token"), false);
 });
 
+test("FCM error payload exposes only the structured FCM error code", () => {
+  assert.equal(fcmErrorCodeFromPayload({
+    error: {
+      status: "NOT_FOUND",
+      message: "Requested entity was not found.",
+      details: [
+        { "@type": "type.googleapis.com/google.firebase.fcm.v1.FcmError", errorCode: "UNREGISTERED" },
+      ],
+    },
+  }), "UNREGISTERED");
+  assert.equal(fcmErrorCodeFromPayload({ error: { details: [{ somethingElse: "UNREGISTERED" }] } }), undefined);
+});
+
 test("FCM sends one high-priority data-only payload with bounded lifetime and success marks candidate delivered", async () => {
   const store = await freshStore();
   await store.registerPhoneDevice({ deviceId: "android-main", pushToken: "target-token" });
@@ -100,8 +119,45 @@ for (const failure of ["FCM send failed with HTTP 401", "FCM send failed with HT
     await runProactiveCycle(store, new FcmNotifier(store, sender), new Date("2026-09-03T00:01:00Z"));
     assert.equal(store.snapshot().proactiveQueue[0]?.status, "pending");
     assert.equal(store.snapshot().proactiveQueue[0]?.attempts, 1);
+    assert.equal(store.snapshot().phoneDeviceRegistrations[0]?.pushToken, "target-token");
   });
 }
+
+test("UNREGISTERED invalidates the exact stale push address and keeps candidate pending", async () => {
+  const store = await freshStore();
+  await store.registerPhoneDevice({ deviceId: "android-main", pushFid: "fid-stale", pushToken: "stale-token" });
+  await due(store);
+  const sender: FcmSender = {
+    send: async () => { throw new FcmSendError(404, "UNREGISTERED"); },
+  };
+
+  await runProactiveCycle(store, new FcmNotifier(store, sender), new Date("2026-09-03T00:01:00Z"));
+
+  const registration = store.snapshot().phoneDeviceRegistrations[0];
+  assert.equal(registration?.pushToken, undefined);
+  assert.equal(registration?.pushFid, undefined);
+  assert.equal(store.snapshot().proactiveQueue[0]?.status, "pending");
+  assert.equal(store.snapshot().proactiveQueue[0]?.attempts, 1);
+});
+
+test("late UNREGISTERED cannot erase a concurrently refreshed push token", async () => {
+  const store = await freshStore();
+  await store.registerPhoneDevice({ deviceId: "android-main", pushFid: "fid-old", pushToken: "old-token" });
+  await due(store);
+  const sender: FcmSender = {
+    send: async () => {
+      await store.registerPhoneDevice({ deviceId: "android-main", pushFid: "fid-new", pushToken: "new-token" });
+      throw new FcmSendError(404, "UNREGISTERED");
+    },
+  };
+
+  await runProactiveCycle(store, new FcmNotifier(store, sender), new Date("2026-09-03T00:01:00Z"));
+
+  const registration = store.snapshot().phoneDeviceRegistrations[0];
+  assert.equal(registration?.pushToken, "new-token");
+  assert.equal(registration?.pushFid, "fid-new");
+  assert.equal(store.snapshot().proactiveQueue[0]?.status, "pending");
+});
 
 test("no target stays pending and retry backoff does not duplicate immediately", async () => {
   const store = await freshStore();
