@@ -198,13 +198,37 @@ P4.2 is still **not Soul**. Preference state is a traceable inferred precursor o
 
 Validated Runtime code baseline: `d9f00e7d58c809e37c8e514f1006b39f18057859` (`npm run check` passed in Runtime CI run `33962795575`).
 
+### P4.3 — Bounded Traceable Soul Tendency
+
+**Status: COMPLETE. Issue #44. See `docs/P4_SOUL_V01.md`.**
+
+Implemented:
+
+- one slow `AiWorldSoulTendency` per interest key;
+- append-only `AiWorldSoulChange` audit history;
+- preference must contain at least 3 evidence items before Soul eligibility;
+- preference must be explicitly reviewed at/after its latest evidence;
+- reviewed preference magnitude must be at least `0.08`;
+- one canonical evidence set may influence Soul only once;
+- hard Soul delta cap of `0.02` per newly accepted evidence set;
+- counter evidence follows the same review gate and bounded correction path;
+- deterministic Soul decay toward neutral at `0.0002` per 24 hours;
+- 30-day deterministic review schedule while non-neutral;
+- backdated Soul application before preference review is rejected;
+- generic AI World validation protects Soul boundaries, evidence basis, audit math and dedupe;
+- restart/P3 progression persistence and Earth/notification isolation.
+
+Brain cannot write Soul scores or deltas directly. The only current write path asks Runtime to evaluate an already-reviewed canonical preference; Runtime owns eligibility, magnitude and audit creation.
+
+Validated Runtime code/test baseline: `bed1ebebf447318d7a6309805dbbc7080c1ca0f2` (`npm run check` passed in Runtime CI run `33963600675`).
+
 ### Remaining P4
 
 Implement next:
 
-- separately bounded, traceable Soul-change records/rules;
 - user feedback records and their bounded influence;
-- safe review/reflect decision layer on top of due Continuity/preference records.
+- safe review/reflect cognition policy on top of due Continuity/preference/Soul records;
+- final P4 phase review proving feedback cannot directly overwrite Soul and cognition remains resource-bounded.
 
 One interaction must not be able to rewrite long-term identity.
 
