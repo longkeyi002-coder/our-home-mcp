@@ -13,6 +13,8 @@ function observed(
   return {
     id,
     kind,
+    world: "EARTH",
+    provenance: "observed",
     label: id,
     value,
     observedAt,
@@ -21,7 +23,6 @@ function observed(
     deviceId: "android-presence",
     metadata,
   };
-}
 
 test("realtime app transition becomes the current foreground package", () => {
   const state = deriveLifeState([
