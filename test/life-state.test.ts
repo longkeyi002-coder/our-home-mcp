@@ -13,6 +13,8 @@ function observation(input: Partial<LifeObservation> & Pick<LifeObservation, "ki
   return {
     id: input.id ?? "observation-test",
     kind: input.kind,
+    world: input.world ?? "EARTH",
+    provenance: input.provenance ?? (input.confidence === "declared" ? "user_declared" : input.confidence === "inferred" ? "inferred" : "observed"),
     label: input.label ?? input.kind,
     observedAt: input.observedAt,
     source: input.source ?? "phone",
