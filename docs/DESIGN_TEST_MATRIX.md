@@ -13,8 +13,8 @@
 
 | Design | Requirement | Protection | Status |
 |---|---|---|---|
-| OH-30 / OH-32 | Earth / AI World / Fiction records cannot leak across factual queries | `world-boundary.test.ts` protects strict observation evidence; `record-boundary.test.ts` protects diary/action/relationship/activity boundaries, approval inheritance and world-filtered reads; `LONG_LIVED_RECORD_BOUNDARY_CLASSIFICATION.md` excludes Runtime control state from canonical memory | COVERED |
-| OH-31 | Long-lived semantic records preserve world/provenance/source/time | Observation schema + `record-boundary.test.ts` + `routine-boundary.test.ts`; diary/action/relationship/activity carry explicit boundaries and RoutineWindow is fixed to `EARTH/user_declared` | COVERED |
+| OH-30 / OH-32 | Earth / AI World / Fiction records cannot leak across factual queries | `world-boundary.test.ts` protects strict observation evidence; `record-boundary.test.ts` protects diary/action/relationship/activity boundaries, approval inheritance and world-filtered reads; `LONG_LIVED_RECORD_BOUNDARY_CLASSIFICATION.md` excludes Runtime control state from canonical memory; P4 preference corruption is rejected by generic AI World validation | COVERED |
+| OH-31 | Long-lived semantic records preserve world/provenance/source/time | Observation schema + `record-boundary.test.ts` + `routine-boundary.test.ts`; diary/action/relationship/activity carry explicit boundaries and RoutineWindow is fixed to `EARTH/user_declared`; P4 continuity/preference records carry explicit AI World boundaries and timestamps | COVERED |
 | OH-40 | Repeated events do not produce wake/message storms | Wake cooldown/dedupe tests + `TelemetryPolicyTest` stable heartbeat bucket ID + Room unique dedupe key instrumentation coverage | COVERED |
 | OH-41 | User can correct/delete/revoke/pause and control per-App sensing | Configuration gate + explicit manual fallback + diagnostics copy without credential values; `PresencePrivacyRulesTest` protects per-App identity allow/hide semantics; broader pause/delete/revoke controls still pending | PARTIAL |
 | OH-42 | Sensitive sensing/credentials are minimized before data leaves Android | `TelemetryPolicyTest`; `PresencePrivacyRulesTest`; `UsagePrivacyFilterTest` covers current App/session/totals/category redaction; register-only enrollment token cannot ingest directly (`phone-enrollment.test.ts`); diagnostics URL query/secret redaction test; Usage Access manual acceptance | PARTIAL / MANUAL |
@@ -30,8 +30,8 @@
 | OH-61 | Daily telemetry survives without control WSS | Android HTTPS queue/upload + auto-config planning tests + compiled Runtime ingest/device auth + register-only enrollment test; real-device validation remains | PARTIAL / MANUAL |
 | OH-62 | Remote live read uses separate control path | Relay/Local MCP integration test when migrated | TODO |
 | OH-63 | FCM delivery does not depend on WSS | Notifier tests + future disconnected-WSS integration test | PARTIAL |
-| OH-64 | Runtime remains event-driven; no high-frequency LLM life loop | WorkManager 15-minute approximate schedule, immediate worker, wake scheduling tests, queue retry/backoff; P4 review maturity is deterministic/read-only and does not invoke Brain | PARTIAL |
-| OH-65 | Model calls are bounded to cognition-worthy work | P4 `nextReviewAt` maturity is zero-model-cost and does not itself wake Brain; broader resource-budget layer remains pending | PARTIAL |
+| OH-64 | Runtime remains event-driven; no high-frequency LLM life loop | WorkManager 15-minute approximate schedule, immediate worker, wake scheduling tests, queue retry/backoff; P4 review maturity and preference decay are deterministic Runtime work and do not invoke Brain | PARTIAL |
+| OH-65 | Model calls are bounded to cognition-worthy work | P4 `nextReviewAt` maturity and bounded preference evidence/decay are zero-model-cost; broader resource-budget layer remains pending | PARTIAL |
 | OH-66 | Runtime/Android state is diagnosable without secret leakage | compiled `/v1/phone/status` tests; staged Android API-error tests; `DiagnosticsReportTest`; periodic/immediate worker state exposed | PARTIAL / MANUAL |
 | OH-67 | Provider/tool failures degrade gracefully | FCM/Hermes retry tests + Android Room retry + staged auth errors + production start scripts; `ai-world-worker.test.ts` proves deterministic AI World progression is independent from Brain/provider availability and isolated from Earth delivery failure | PARTIAL |
 | OH-68 | Realtime Presence uses event-driven package/screen events, local dedupe/queue, per-App identity redaction before upload, no Accessibility tree retrieval, while UsageEvents remains reconciliation | Accessibility config/service tests + transition dedupe tests + `PresencePrivacyRulesTest` + `UsagePrivacyFilterTest` + Android/Runtime observation-kind contract test + queue tests + real-device verification | TODO / MANUAL |
@@ -40,7 +40,7 @@
 | OH-P1.5 | Realtime Presence → local privacy guard → Context → Curiosity → visual guard → optional Visual summary works on a real phone | `OH_PRESENCE_VISUAL_PLAN.md` scenarios A-E + automated policy/session/privacy tests | TODO / MANUAL |
 | OH-P2 | Earth change → Wake → Brain → Decision → FCM → Android notification | End-to-end real-device acceptance including destination deep link | TODO / MANUAL |
 | OH-P3 | AI World persists while model sleeps | `ai-world*.test.ts` coverage proves deterministic state/history, restart/catch-up, explicit location, complete structured continuity kinds, provider-independent worker progression, bounded MCP access and Earth isolation; acceptance recorded in `OH_P3_ACCEPTANCE.md` | COVERED |
-| OH-P4 | Continuity + Soul evolve slowly and traceably | P4.1 `ai-world-continuity*.test.ts` covers Experience/Journal/Thought Thread, nextReviewAt lifecycle, no hidden chain-of-thought persistence, restart and Earth isolation; interest evidence + bounded preference/Soul evolution remain pending | PARTIAL |
+| OH-P4 | Continuity + Soul evolve slowly and traceably | P4.1 `ai-world-continuity*.test.ts` covers Experience/Journal/Thought Thread and no hidden chain-of-thought persistence; P4.2 `ai-world-preference.test.ts` covers bounded per-evidence change, dedupe, deterministic reduction, time decay, restart and Earth isolation; Soul change/user-feedback policy remains pending | PARTIAL |
 | OH-P5 | Autonomous exploration produces traceable experience/share intent | browser adapter + intent tests | TODO |
 | OH-P6 | User feedback affects future strategy without direct overwrite | feedback evidence/update tests | TODO |
 | OH-P7 | Remote read and controlled actions are auditable | relay/action policy tests | TODO |
@@ -152,16 +152,30 @@ P4.1 automated:
 - continuity writes cannot alter Earth Life State or proactive-message queues.
 
 Tests: `test/ai-world-continuity.test.ts`, `test/ai-world-continuity-review.test.ts`.
+Implementation note: `docs/P4_CONTINUITY_V01.md`.
+
+P4.2 automated:
+
+- interest evidence is explicit `AI_WORLD` memory with stable evidence keys and optional evidence refs;
+- one evidence item is hard-capped to a `0.05` score effect;
+- duplicate `(interestKey, evidenceKey)` input is idempotent and cannot reinforce twice;
+- reducer output is independent of evidence write order;
+- score remains bounded in `[-1,1]`;
+- non-neutral preference decays toward zero by a deterministic `0.005` per 24 hours;
+- seven-day due review is zero-model-cost and stops once preference reaches neutral;
+- preference state keeps a bounded recent evidence-ID trace and exact evidence count;
+- restart and P3 deterministic phase progression preserve preference memory;
+- generic AI World validation rejects corrupt preference/evidence boundaries;
+- preference writes/reviews do not alter Earth Life State, observations, actions or notification queues.
+
+Test: `test/ai-world-preference.test.ts`.
+Implementation note: `docs/P4_PREFERENCE_V01.md`.
 
 P4 remaining:
 
-- interest evidence;
-- bounded preference reinforcement/decay;
-- traceable Soul changes;
+- separately bounded traceable Soul changes;
 - user feedback learning;
 - review/reflect cognition policy.
-
-Implementation note: `docs/P4_CONTINUITY_V01.md`.
 
 ## Rule for adding features
 
