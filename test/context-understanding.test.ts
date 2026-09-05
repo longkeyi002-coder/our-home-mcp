@@ -14,6 +14,8 @@ function declaration(at: string, activity?: string): LifeObservation {
   return {
     id: `decl-${at}-${activity ?? "none"}`,
     kind: "manual_status",
+    world: "EARTH",
+    provenance: "user_declared",
     label: "user status",
     value: activity ?? "busy",
     observedAt: at,
@@ -27,6 +29,8 @@ function visual(at: string, activity: string, confidence: number | string = 0.9,
   return {
     id: `visual-${at}-${activity}-${deviceId}`,
     kind: "visual_observation_summary",
+    world: "EARTH",
+    provenance: "observed",
     label: activity,
     value: `${activity} activity`,
     observedAt: at,
