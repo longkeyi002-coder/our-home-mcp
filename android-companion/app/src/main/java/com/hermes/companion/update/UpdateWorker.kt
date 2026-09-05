@@ -95,7 +95,7 @@ class UpdateWorker(
             }
             if (total == 0L) error("Update APK is empty")
             val actual = digest.digest().joinToString("") { "%02x".format(it) }
-            if (!actual.equals(manifest.sha256, ignoreCase = true)) {
+            if (!UpdateIntegrity.matchesSha256(actual, manifest.sha256)) {
                 temp.delete()
                 error("Update APK SHA-256 mismatch")
             }
