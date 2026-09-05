@@ -71,7 +71,16 @@ class PresenceReporter(context: Context) {
         }
     }
 
-    fun reportDwell(packageName: String, startedAtMs: Long, durationMs: Long, stage: Int, atMs: Long) {
+    fun reportDwell(
+        packageName: String,
+        startedAtMs: Long,
+        durationMs: Long,
+        stage: Int,
+        atMs: Long,
+        screenInteractive: Boolean,
+        unlocked: Boolean,
+        lastInteractionAtMs: Long,
+    ) {
         val deviceId = settings.deviceId()
         val label = PresenceDwellPolicy.stageLabel(stage)
         val expose = privacy.exposesIdentity(packageName)
@@ -91,6 +100,9 @@ class PresenceReporter(context: Context) {
                         "durationMs" to durationMs.toString(),
                         "stage" to stage.toString(),
                         "stageLabel" to label,
+                        "screenInteractive" to screenInteractive.toString(),
+                        "unlocked" to unlocked.toString(),
+                        "lastInteractionAt" to Instant.ofEpochMilli(lastInteractionAtMs).toString(),
                     ),
                     clientEventId = "presence-dwell:$deviceId:$startedAtMs:$stage:$exposedPackage",
                 ),
