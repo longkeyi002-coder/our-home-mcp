@@ -222,13 +222,40 @@ Brain cannot write Soul scores or deltas directly. The only current write path a
 
 Validated Runtime code/test baseline: `bed1ebebf447318d7a6309805dbbc7080c1ca0f2` (`npm run check` passed in Runtime CI run `33963600675`).
 
+### P4.4 — Bounded Review / Reflection Cognition Gate
+
+**Status: COMPLETE. Issue #45. See `docs/P4_REFLECTION_V01.md`.**
+
+Implemented:
+
+- deterministic selection of one due P4.1 Continuity source;
+- exact source/due-time binding controlled by Runtime;
+- provider-neutral `AiWorldReflectionAdapter`;
+- strict `ignore | record_reflection` decision contract;
+- reflection input contains only the due AI World source, current AI World state and at most 10 read-only Soul tendencies;
+- no Earth Life context enters the reflection input;
+- public reusable reflection output only: title/summary/conclusion/open question;
+- strict rejection of messaging, hidden reasoning, Soul-delta and arbitrary extra fields;
+- six-hour cooldown after successful reflection decisions;
+- one-hour provider failure backoff;
+- at most three provider attempts per UTC day;
+- persisted 20-minute processing lease and restart-safe budget state;
+- deterministic 14-day source reschedule after recorded reflection and 30-day reschedule after ignore;
+- exact review-basis evidence reference for crash/dedupe reconciliation;
+- optional Hermes and dedicated webhook reflection adapters;
+- Worker integration isolated from Earth Wake/Care/Delivery;
+- deployment default remains disabled unless `OUR_HOME_REFLECTION_ENABLED=true`.
+
+Reflection can read Soul as context but has no action capable of changing Soul. It also cannot create a proactive message or Android action.
+
+Validated Runtime code/test baseline: `17a1f74c39d2cbe4a1abff288f83790c319c9349` (`npm run check` passed in Runtime CI run `33964300565`).
+
 ### Remaining P4
 
 Implement next:
 
-- user feedback records and their bounded influence;
-- safe review/reflect cognition policy on top of due Continuity/preference/Soul records;
-- final P4 phase review proving feedback cannot directly overwrite Soul and cognition remains resource-bounded.
+- user feedback records and their bounded influence, without direct Soul overwrite;
+- final P4 phase review proving Continuity → Preference → Soul → Reflection remains traceable, slow and resource-bounded.
 
 One interaction must not be able to rewrite long-term identity.
 
