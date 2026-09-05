@@ -97,7 +97,14 @@ export async function claimDueProactiveMessages(
 export async function releaseProactiveClaim(store: JsonStore, id: string): Promise<void> {
   await store.update((data) => {
     const candidate = data.proactiveQueue.find((item) => item.id === id);
-    if (candidate) candidate.processingAt = undefined;
+    if (!candidate) return;
+    // `processingAt` is stamped from the Runtime cycle's asOf clock. Store.recordProactiveAttempt
+    // still uses wall-clock time for backward-compatible direct callers, but Worker retry policy
+    // must remain in one clock domain for deterministic replay/catch-up and stable tests.
+    if (candidate.processingAt && candidate.attempts > 0) {
+      candidate.lastAttemptAt = candidate.processingAt;
+    }
+    candidate.processingAt = undefined;
   });
 }
 
