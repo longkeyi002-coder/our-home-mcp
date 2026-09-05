@@ -35,6 +35,29 @@ function declaration(at: string, activity?: string): LifeObservation {
   };
 }
 
+function visual(at: string, activity: string, confidence: number | string = 0.9): LifeObservation {
+  const sessionId = `com.example.game:${Date.parse("2026-09-05T00:00:00.000Z")}`;
+  return {
+    id: `visual-${at}-${activity}`,
+    kind: "visual_observation_summary",
+    label: activity,
+    value: `${activity} activity`,
+    observedAt: at,
+    source: "phone",
+    confidence: "observed",
+    deviceId: "android-1",
+    metadata: {
+      packageName: "com.example.game",
+      activity,
+      confidence,
+      provider: "zhipu",
+      model: "glm-4.6v-flash",
+      requestId: `request-${at}`,
+      sessionId,
+    },
+  };
+}
+
 function captureAudit(id: string, at: string): LifeObservation {
   return {
     id,
@@ -84,32 +107,34 @@ test("structured user declaration lowers urgency further but does not disable fu
 
 test("recent visual observation enforces cooldown for the same App session", () => {
   const at20 = dwell(20, "2", "2026-09-05T00:20:00.000Z");
-  const sessionId = `com.example.game:${Date.parse("2026-09-05T00:00:00.000Z")}`;
-  const visual: LifeObservation = {
-    id: "visual-1",
-    kind: "visual_observation_summary",
-    label: "gaming",
-    value: "game activity",
-    observedAt: "2026-09-05T00:15:00.000Z",
-    source: "phone",
-    confidence: "observed",
-    deviceId: "android-1",
-    metadata: {
-      packageName: "com.example.game",
-      activity: "gaming",
-      confidence: "0.9",
-      provider: "zhipu",
-      model: "glm-4.6v-flash",
-      requestId: "visual-1",
-      sessionId,
-    },
-  };
-  assert.equal(deriveVisualRequest(at20, [visual, at20]), null);
+  const recentVisual = visual("2026-09-05T00:15:00.000Z", "gaming", "0.9");
+  assert.equal(deriveVisualRequest(at20, [recentVisual, at20]), null);
 
   const at45 = dwell(45, "4", "2026-09-05T00:45:00.000Z");
-  const later = deriveVisualRequest(at45, [visual, at45]);
+  const later = deriveVisualRequest(at45, [recentVisual, at45]);
   assert.ok(later);
   assert.equal(later.reason, "known_dwell_recheck");
+});
+
+test("conflicting declared and visual activities create a context-conflict curiosity reason after cooldown", () => {
+  const item = dwell(30, "3", "2026-09-05T00:30:00.000Z");
+  const request = deriveVisualRequest(item, [
+    visual("2026-09-05T00:05:00.000Z", "gaming", 0.9),
+    declaration("2026-09-05T00:25:00.000Z", "work"),
+    item,
+  ]);
+  assert.ok(request);
+  assert.equal(request.reason, "context_conflict");
+});
+
+test("old visual understanding becomes stale and can trigger a fresh recheck", () => {
+  const item = dwell(120, "7", "2026-09-05T02:00:00.000Z");
+  const request = deriveVisualRequest(item, [
+    visual("2026-09-05T00:30:00.000Z", "gaming", 0.9),
+    item,
+  ]);
+  assert.ok(request);
+  assert.equal(request.reason, "stale_context");
 });
 
 test("rolling visual budget blocks a new curiosity request after three successful captures in one hour", () => {

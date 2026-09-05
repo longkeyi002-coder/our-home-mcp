@@ -1,4 +1,5 @@
-export type ContextUnderstandingState = "UNKNOWN" | "PARTIAL" | "KNOWN" | "CONFLICT" | "STALE";
+import type { ContextUnderstandingState } from "./context-understanding.js";
+export type { ContextUnderstandingState } from "./context-understanding.js";
 
 export type CuriosityReason =
   | "screen_unavailable"
