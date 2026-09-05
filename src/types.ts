@@ -128,7 +128,7 @@ export interface LifeState {
 }
 
 export interface VisualWakeContext {
-  deviceId?: string;
+  deviceId: string;
   packageName: string;
   sessionId: string;
   curiosityReason: string;
@@ -154,7 +154,7 @@ export interface WakeEvent {
 
 export interface VisualRequestRecord {
   requestId: string;
-  deviceId?: string;
+  deviceId: string;
   packageName: string;
   sessionId: string;
   reason: string;
