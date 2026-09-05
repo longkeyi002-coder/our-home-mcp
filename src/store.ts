@@ -825,11 +825,15 @@ export class JsonStore {
     occurredAt: string;
     proposedBy: Actor;
     importance: "ordinary" | "major";
+    world?: ObservationWorld;
+    provenance?: ObservationProvenance;
   }): Promise<RelationshipEvent> {
+    const boundary = resolveRecordBoundary(input);
     const timestamp = now();
     const event: RelationshipEvent = {
       id: randomUUID(),
       ...input,
+      ...boundary,
       approvalStatus: "proposed",
       approvedBy: [],
       createdAt: timestamp,
@@ -842,8 +846,8 @@ export class JsonStore {
         title: "提出一项关系事件提案",
         summary: event.title,
         source: "RELATIONSHIP",
-        world: "EARTH",
-        provenance: event.proposedBy === "user" ? "user_declared" : "model_generated",
+        world: event.world,
+        provenance: event.provenance,
       });
     });
     return event;
@@ -857,6 +861,7 @@ export class JsonStore {
       if (result.approvalStatus === "rejected") {
         throw new Error("A rejected relationship event cannot be approved");
       }
+      assertValidRecordBoundary(result);
       if (!result.approvedBy.includes(approvedBy)) result.approvedBy.push(approvedBy);
       const fullyApproved =
         result.importance === "ordinary" ||
@@ -868,8 +873,8 @@ export class JsonStore {
         title: fullyApproved ? "关系事件已批准" : "记录关系事件批准",
         summary: result.title,
         source: "RELATIONSHIP",
-        world: "EARTH",
-        provenance: approvedBy === "user" ? "user_declared" : "model_generated",
+        world: result.world,
+        provenance: result.provenance,
       });
     });
     if (!result) throw new Error(`Relationship event not found: ${id}`);
