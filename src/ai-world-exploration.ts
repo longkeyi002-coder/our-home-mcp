@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { assertValidAiWorldData } from "./ai-world.js";
+import { advanceAiWorldData, assertValidAiWorldData } from "./ai-world.js";
 import type { JsonStore } from "./store.js";
 import type { AiWorldState } from "./types.js";
 
@@ -221,7 +221,11 @@ export async function runAiWorldExplorationCycle(
   const snapshot = store.snapshot();
   if (!snapshot.aiWorld) return { status: "uninitialized", attempted: false };
   assertValidAiWorldData(snapshot.aiWorld);
-  if (snapshot.aiWorld.state.currentActivity !== "free_time") {
+  // Eligibility must be evaluated against the requested absolute time, not a possibly stale
+  // persisted phase left from a previous Runtime cycle. advanceAiWorldData is pure here: it
+  // derives the current deterministic P3 phase without introducing a persistence write.
+  const effectiveAiWorld = advanceAiWorldData(snapshot.aiWorld, asOf).data;
+  if (effectiveAiWorld.state.currentActivity !== "free_time") {
     return { status: "not_free_time", attempted: false };
   }
 
@@ -278,7 +282,7 @@ export async function runAiWorldExplorationCycle(
     topic: structuredClone(topic),
     aiWorld: {
       observedAt: asOf,
-      state: structuredClone(snapshot.aiWorld.state),
+      state: structuredClone(effectiveAiWorld.state),
     },
     capability: {
       publicWebOnly: true,
