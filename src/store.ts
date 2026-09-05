@@ -31,6 +31,7 @@ import type {
 import { deriveLifeState } from "./life-state.js";
 import { deriveWakeEventDrafts } from "./wake-engine.js";
 import { assertValidObservationBoundary, resolveObservationBoundary } from "./world-boundary.js";
+import { assertValidRecordBoundary } from "./record-boundary.js";
 import { VISUAL_REQUEST_TTL_MS, type VisualOpportunity } from "./visual-request.js";
 
 const now = () => new Date().toISOString();
@@ -44,8 +45,11 @@ function appendActivity(
     title: string;
     summary?: string;
     source: "AGENT_LIFE" | "RELATIONSHIP" | "HOME_STATE";
+    world: ObservationWorld;
+    provenance: ObservationProvenance;
   },
 ): void {
+  assertValidRecordBoundary(input);
   data.activities.unshift({
     id: randomUUID(),
     ...input,
@@ -113,6 +117,8 @@ function seedData(): OurHomeData {
     diaries: [
       {
         id: "diary_seed_welcome",
+        world: "FICTION",
+        provenance: "authored",
         title: "第一份记录",
         body: "这是 Our Home 的本地示例数据。它不是 Hermes 的真实活动，也不是关系事实。",
         author: "agent",
@@ -126,6 +132,8 @@ function seedData(): OurHomeData {
     actions: [
       {
         id: "action_seed_review",
+        world: "FICTION",
+        provenance: "authored",
         title: "确认 Our Home 的第一版边界",
         description: "确认哪些数据属于 Hermes，哪些数据属于 Our Home。",
         status: "in_progress",
@@ -137,6 +145,8 @@ function seedData(): OurHomeData {
     activities: [
       {
         id: "activity_seed_started",
+        world: "FICTION",
+        provenance: "simulated",
         kind: "system",
         title: "Our Home MCP 已初始化",
         summary: "当前使用本地 Mock 数据层。",
@@ -532,7 +542,10 @@ export class JsonStore {
     body: string;
     author: Actor;
     visibility: DiaryVisibility;
+    world: ObservationWorld;
+    provenance: ObservationProvenance;
   }): Promise<DiaryEntry> {
+    assertValidRecordBoundary(input);
     const timestamp = now();
     const entry: DiaryEntry = {
       id: randomUUID(),
@@ -548,6 +561,8 @@ export class JsonStore {
         title: "写入一篇日记",
         summary: entry.title,
         source: entry.source,
+        world: entry.world,
+        provenance: entry.provenance,
       });
     });
     return entry;
@@ -567,6 +582,8 @@ export class JsonStore {
         title: "留下主动留言",
         summary: "一条新的 AGENT_LIFE 留言已进入 Our Home。",
         source: "AGENT_LIFE",
+        world: "EARTH",
+        provenance: "model_generated",
       });
     });
     return entry;
@@ -621,6 +638,8 @@ export class JsonStore {
         title: "记录一条生活观察",
         summary: observation.label,
         source: "HOME_STATE",
+        world: observation.world,
+        provenance: observation.provenance,
       });
       result = observation;
     });
@@ -651,6 +670,8 @@ export class JsonStore {
         title: "建立一段生活时间表",
         summary: routine.label,
         source: "HOME_STATE",
+        world: "EARTH",
+        provenance: "user_declared",
       });
     });
     return routine;
@@ -706,6 +727,8 @@ export class JsonStore {
         title: "安排一条主动消息",
         summary: candidate.title,
         source: "AGENT_LIFE",
+        world: "EARTH",
+        provenance: "model_generated",
       });
     });
     if (!candidate) throw new Error("Proactive candidate was not created");
@@ -748,7 +771,10 @@ export class JsonStore {
     title: string;
     description?: string;
     dueAt?: string;
+    world: ObservationWorld;
+    provenance: ObservationProvenance;
   }): Promise<ActionItem> {
+    assertValidRecordBoundary(input);
     const action: ActionItem = {
       id: randomUUID(),
       ...input,
@@ -764,6 +790,8 @@ export class JsonStore {
         title: "创建一项行动",
         summary: action.title,
         source: "AGENT_LIFE",
+        world: action.world,
+        provenance: action.provenance,
       });
     });
     return action;
@@ -781,6 +809,8 @@ export class JsonStore {
         title: "更新行动状态",
         summary: `${result.title} → ${status}`,
         source: "AGENT_LIFE",
+        world: result.world,
+        provenance: result.provenance,
       });
     });
     if (!result) throw new Error(`Action not found: ${id}`);
@@ -810,6 +840,8 @@ export class JsonStore {
         title: "提出一项关系事件提案",
         summary: event.title,
         source: "RELATIONSHIP",
+        world: "EARTH",
+        provenance: event.proposedBy === "user" ? "user_declared" : "model_generated",
       });
     });
     return event;
@@ -834,6 +866,8 @@ export class JsonStore {
         title: fullyApproved ? "关系事件已批准" : "记录关系事件批准",
         summary: result.title,
         source: "RELATIONSHIP",
+        world: "EARTH",
+        provenance: approvedBy === "user" ? "user_declared" : "model_generated",
       });
     });
     if (!result) throw new Error(`Relationship event not found: ${id}`);
