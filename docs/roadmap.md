@@ -300,21 +300,40 @@ P4 is complete at the defined phase boundary. Automatic like/reply/ignore/accept
 
 ## OH-P5 — Autonomous Exploration
 
-AI may spend bounded virtual free time on approved web exploration.
+**Status: COMPLETE. Acceptance: `docs/OH_P5_ACCEPTANCE.md`. Final review issue #56.**
 
-Implement:
+P5 proves that AI World can spend bounded virtual free time on approved public-Web exploration, persist what it encountered, revisit it through bounded reflection, and form an internal `maybe_share` intent without silently performing Earth-side actions.
 
-- topic selection;
-- search/fetch adapter;
-- web reading;
-- collection/bookmarking;
-- structured reflection;
-- `maybe_share` intent;
-- resource budget and frequency limits.
+Implemented:
 
-Do not automate logged-in mobile apps such as Xiaohongshu in this Phase.
+- deterministic topic selection from active AI World questions/interests/hobbies/ideas and Thought Thread open questions;
+- current-phase free-time eligibility that cannot be bypassed by stale persisted state;
+- provider-neutral exploration adapter and concrete read-only public-Web search-gateway adapter;
+- GET-only network requests with no cookies/authenticated sessions, rejected redirects, bounded timeout/response bytes/results;
+- no arbitrary Runtime fetch of result URLs;
+- traceable `AI_WORLD/model_generated` Experience + Collection persistence with exact topic/public-Web evidence refs;
+- deterministic retry/restart dedupe for exploration memory;
+- 12-hour Continuity maturity before explored material can enter the existing P4 reflection gate;
+- exploration inside the existing single-owner Runtime Life Loop, default disabled and failure-isolated from Earth Care/Delivery;
+- internal `maybe_share` intent with strict traceable basis, same-basis dedupe, terminal lifecycle and maximum five pending intents;
+- automatic reflection → internal `maybe_share` handoff for recorded/reconciled reflection only;
+- resource budgets: six-hour exploration success cooldown, one-hour failure backoff, two attempts per UTC day, existing P4 reflection budget, and no second scheduler.
 
-P5 must build on P4 Continuity/Soul rather than bypass it: exploration should produce traceable AI World records, not hidden context or direct Earth side effects.
+Accepted autonomous chain:
+
+```text
+AI World free time
+→ deterministic topic
+→ bounded public-Web search gateway
+→ Experience / Collection
+→ 12h Continuity maturity
+→ bounded reflection
+→ internal maybe_share
+```
+
+P5 deliberately stops before Earth delivery. There is no automatic `maybe_share → proactiveQueue/FCM` transition, no logged-in mobile-App automation, no purchases/publishing/account actions, and no arbitrary result-URL fetcher.
+
+Final validated code baseline: `64f7d70fe9e066cd670a9098611f624e9dca3500`; Runtime CI `33970480832` success; Android CI `33970480820` success (`test + lint + assembleDebug`).
 
 ---
 
