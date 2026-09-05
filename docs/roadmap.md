@@ -183,7 +183,7 @@ Implemented:
 
 - structured `AiWorldInterestEvidence`;
 - one canonical `AiWorldPreferenceState` per interest;
-- `(interestKey, evidenceKey)` dedupe;
+- `(interestKey,evidenceKey)` dedupe;
 - hard per-evidence score delta cap of `0.05`;
 - score bounded to `[-1,1]`;
 - deterministic time decay toward neutral (`0.005` per 24 hours);
@@ -339,16 +339,34 @@ Final validated code baseline: `64f7d70fe9e066cd670a9098611f624e9dca3500`; Runti
 
 ## OH-P6 — Relationship Feedback Loop
 
-Implement user feedback signals:
+**Status: IN PROGRESS. P6.1 COMPLETE. Issue #57. See `docs/P6_RELATIONSHIP_FEEDBACK_V01.md`.**
 
-- like;
-- reply;
-- ignore;
-- accept/reject suggestion;
-- correction of inference;
-- review of learned preference.
+P6 turns real user/product interaction into traceable relationship evidence while preserving the slow P4 learning boundary.
 
-P6 should produce real product/relationship feedback records into the already-bounded P4.5 substrate. Feedback influences future behavior but does not directly overwrite Soul.
+### P6.1 — Delivered-message relationship signals
+
+Implemented:
+
+- durable Earth relationship feedback bound to one exact delivered proactive message;
+- signals: `like`, `dislike`, `reply`, `ignore`, `accept_suggestion`, `reject_suggestion`;
+- stable client `signalKey` replay idempotency and collision rejection;
+- feedback timestamps cannot precede actual message delivery;
+- `like` / `dislike` map to the fixed `relationship:proactive_messages` strategy key;
+- `accept_suggestion` / `reject_suggestion` map to the fixed `relationship:suggestions` strategy key;
+- those explicit valenced signals reuse the P4.5 Feedback Bridge and cannot supply arbitrary learning strength/Preference/Soul values;
+- `reply` and `ignore` remain `EARTH/observed` interaction evidence only and do not automatically create Preference evidence;
+- capture is zero-model-cost and cannot mutate delivery state, observations, Android state, notifications or external systems;
+- no relationship signal directly changes Soul.
+
+Validated code/test baseline: `5d5ab419bdcce7082d1ff30a8cf52294081ee7a8`; Runtime CI `33971095475` success; Android CI `33971095486` success (`test + lint + assembleDebug`).
+
+Remaining P6:
+
+- bounded handling of reply content/corrections without inferring hidden valence;
+- user-visible review/correction/revocation of learned relationship strategy where required by OH-41;
+- final P6 Phase Review.
+
+Absence of interaction must not be automatically interpreted as dislike.
 
 ---
 
