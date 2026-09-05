@@ -1,4 +1,5 @@
-import { isEarthEvidence } from "./world-boundary.js";\nimport type {
+import { isEarthEvidence } from "./world-boundary.js";
+import type {
   ConnectivityState,
   DevicePresence,
   LifeActivity,
