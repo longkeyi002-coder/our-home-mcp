@@ -7,6 +7,8 @@ function dwell(minutes: number, stage: string, observedAt: string): LifeObservat
   return {
     id: `dwell-${stage}`,
     kind: "presence_app_dwell",
+    world: "EARTH",
+    provenance: "observed",
     label: "com.example.game",
     value: `${minutes}m`,
     observedAt,
@@ -26,6 +28,8 @@ function declaration(at: string, activity?: string): LifeObservation {
   return {
     id: `declared-${at}`,
     kind: "manual_status",
+    world: "EARTH",
+    provenance: "user_declared",
     label: "user status",
     value: "我在打游戏",
     observedAt: at,
@@ -40,6 +44,8 @@ function visual(at: string, activity: string, confidence: number | string = 0.9)
   return {
     id: `visual-${at}-${activity}`,
     kind: "visual_observation_summary",
+    world: "EARTH",
+    provenance: "observed",
     label: activity,
     value: `${activity} activity`,
     observedAt: at,
@@ -62,6 +68,8 @@ function captureAudit(id: string, at: string): LifeObservation {
   return {
     id,
     kind: "visual_policy_audit",
+    world: "EARTH",
+    provenance: "observed",
     label: "capture_succeeded",
     value: "CAPTURED_EPHEMERAL",
     observedAt: at,
