@@ -15,7 +15,7 @@ import {
 } from "../src/ai-world-exploration.js";
 import { JsonStore } from "../src/store.js";
 
-const FREE_TIME = "2026-09-05T20:00:00.000Z";
+const FREE_TIME = "2026-09-05T18:00:00.000Z";
 
 async function createStore(at = FREE_TIME) {
   const directory = await mkdtemp(join(tmpdir(), "our-home-exploration-"));
@@ -64,7 +64,7 @@ test("OH-50/OH-65/P5.1: disabled or topic-less exploration makes zero provider c
   assert.equal(calls.length, 0);
 });
 
-test("OH-20/OH-50/P5.1: exploration is eligible only during AI World free time", async () => {
+test("OH-20/OH-50/P5.1: exploration is eligible only during current AI World free time", async () => {
   const focusedAt = "2026-09-05T10:00:00.000Z";
   const { store } = await createStore(focusedAt);
   await addQuestion(store, focusedAt);
@@ -74,6 +74,27 @@ test("OH-20/OH-50/P5.1: exploration is eligible only during AI World free time",
   assert.equal(result.status, "not_free_time");
   assert.equal(result.attempted, false);
   assert.equal(calls.length, 0);
+});
+
+test("OH-20/OH-64/P5.1: stale persisted free-time state cannot authorize later-night exploration", async () => {
+  const { store } = await createStore();
+  await addQuestion(store);
+  const calls: unknown[] = [];
+
+  // The store still physically contains the 18:00 free-time phase here. The exploration gate
+  // must derive the deterministic phase at 22:00 instead of trusting that stale snapshot.
+  assert.equal(store.snapshot().aiWorld?.state.currentActivity, "free_time");
+  const result = await runAiWorldExplorationCycle(
+    store,
+    successfulAdapter(calls),
+    "2026-09-05T22:00:00.000Z",
+    true,
+  );
+  assert.equal(result.status, "not_free_time");
+  assert.equal(result.attempted, false);
+  assert.equal(calls.length, 0);
+  // Pure eligibility derivation must not silently advance the persisted world itself.
+  assert.equal(store.snapshot().aiWorld?.state.currentActivity, "free_time");
 });
 
 test("OH-30/OH-50/P5.1: Runtime binds one AI World topic and supplies no Earth Life context", async () => {
@@ -177,21 +198,28 @@ test("OH-64/OH-65/OH-67/P5.1: provider failure backoff and daily budget survive 
   assert.equal(calls, 2);
 });
 
-test("OH-64/OH-65/P5.1: successful exploration enforces a persisted six-hour cooldown", async () => {
+test("OH-64/OH-65/P5.1: successful exploration cooldown persists without overriding the free-time gate", async () => {
   const { store, filePath } = await createStore();
   await addQuestion(store);
   const calls: unknown[] = [];
   const adapter = successfulAdapter(calls);
 
+  assert.equal(EXPLORATION_SUCCESS_COOLDOWN_MS, 6 * 60 * 60_000);
   assert.equal((await runAiWorldExplorationCycle(store, adapter, FREE_TIME, true)).status, "completed");
   assert.equal(calls.length, 1);
 
-  const beforeCooldown = new Date(Date.parse(FREE_TIME) + EXPLORATION_SUCCESS_COOLDOWN_MS - 1).toISOString();
-  assert.equal((await runAiWorldExplorationCycle(store, adapter, beforeCooldown, true)).status, "cooldown");
+  const threeHoursLater = new Date(Date.parse(FREE_TIME) + 3 * 60 * 60_000).toISOString();
+  assert.equal((await runAiWorldExplorationCycle(store, adapter, threeHoursLater, true)).status, "cooldown");
+  assert.equal(calls.length, 1);
+
+  // Six hours later the cost cooldown is over, but midnight is not free time and therefore still
+  // cannot authorize an exploration call.
+  const exactCooldown = new Date(Date.parse(FREE_TIME) + EXPLORATION_SUCCESS_COOLDOWN_MS).toISOString();
+  assert.equal((await runAiWorldExplorationCycle(store, adapter, exactCooldown, true)).status, "not_free_time");
   assert.equal(calls.length, 1);
 
   const reopened = await JsonStore.open(filePath, false);
-  const exactCooldown = new Date(Date.parse(FREE_TIME) + EXPLORATION_SUCCESS_COOLDOWN_MS).toISOString();
-  assert.equal((await runAiWorldExplorationCycle(reopened, adapter, exactCooldown, true)).status, "completed");
+  const nextFreeTime = "2026-09-06T18:00:00.000Z";
+  assert.equal((await runAiWorldExplorationCycle(reopened, adapter, nextFreeTime, true)).status, "completed");
   assert.equal(calls.length, 2);
 });
