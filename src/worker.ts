@@ -26,6 +26,11 @@ import {
   selectAiWorldExplorationAdapter,
 } from "./ai-world-exploration-runtime.js";
 import { createAiWorldShareIntent } from "./ai-world-share-intent.js";
+import {
+  runRelationshipReplyReviewCycle,
+  WebhookRelationshipReplyReviewEngine,
+  type RelationshipReplyReviewAdapter,
+} from "./relationship-reply-review.js";
 import { enqueueVisualResultWakeEvents, visualResultWakeExpired } from "./visual-result-wake.js";
 import {
   claimDueProactiveMessages,
@@ -130,6 +135,7 @@ export async function runProactiveCycle(
   aiWorldTimezone = "UTC",
   reflectionEngine?: AiWorldReflectionAdapter,
   explorationAdapter?: AiWorldExplorationAdapter,
+  relationshipReplyReviewEngine?: RelationshipReplyReviewAdapter,
 ): Promise<{ heartbeatId: string; wakeEventCount: number; dueCount: number; deliveredCount: number; failedCount: number }> {
   const observedAt = asOf.toISOString();
 
@@ -197,6 +203,22 @@ export async function runProactiveCycle(
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown AI World exploration error";
       process.stderr.write(`[our-home] ai-world exploration failed: ${message}\n`);
+    }
+  }
+
+  // OH-P6.2: reply interpretation is a bounded inferred-proposal path. It can read only the
+  // exact reply/message pair and cannot directly write Preference/Soul or create a delivery.
+  if (relationshipReplyReviewEngine) {
+    try {
+      const review = await runRelationshipReplyReviewCycle(store, relationshipReplyReviewEngine, observedAt);
+      if (review.attempted || review.status === "reconciled") {
+        process.stderr.write(
+          `[our-home] relationship reply review=${review.status} content=${review.replyContentId ?? "none"}\n`,
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown relationship reply review error";
+      process.stderr.write(`[our-home] relationship reply review failed: ${message}\n`);
     }
   }
 
@@ -318,6 +340,9 @@ const decisionToken = process.env.OUR_HOME_DECISION_WEBHOOK_TOKEN;
 const reflectionEnabled = process.env.OUR_HOME_REFLECTION_ENABLED === "true";
 const reflectionUrl = process.env.OUR_HOME_REFLECTION_WEBHOOK_URL;
 const reflectionToken = process.env.OUR_HOME_REFLECTION_WEBHOOK_TOKEN;
+const relationshipReplyReviewEnabled = process.env.OUR_HOME_RELATIONSHIP_REPLY_REVIEW_ENABLED === "true";
+const relationshipReplyReviewUrl = process.env.OUR_HOME_RELATIONSHIP_REPLY_REVIEW_WEBHOOK_URL;
+const relationshipReplyReviewToken = process.env.OUR_HOME_RELATIONSHIP_REPLY_REVIEW_WEBHOOK_TOKEN;
 const hermesApiUrl = process.env.OUR_HOME_HERMES_API_URL;
 const hermesApiKey = process.env.OUR_HOME_HERMES_API_KEY;
 const hermesConversation = process.env.OUR_HOME_HERMES_CONVERSATION;
@@ -360,6 +385,9 @@ export function startRuntimeWorker(store: JsonStore): RuntimeWorkerHandle {
   if (!Number.isInteger(externalTimeoutMs) || externalTimeoutMs < 1_000 || externalTimeoutMs > 120_000) {
     throw new Error("OUR_HOME_EXTERNAL_TIMEOUT_MS must be an integer between 1000 and 120000ms");
   }
+  if (relationshipReplyReviewEnabled && !relationshipReplyReviewUrl) {
+    throw new Error("OUR_HOME_RELATIONSHIP_REPLY_REVIEW_WEBHOOK_URL is required when relationship reply review is enabled");
+  }
 
   const quietHoursPolicy = quietHoursPolicyFromEnv(process.env);
   const aiWorldTimezone = aiWorldTimezoneFromEnv(process.env);
@@ -398,6 +426,13 @@ export function startRuntimeWorker(store: JsonStore): RuntimeWorkerHandle {
     ...aiWorldExplorationConfigFromEnv(process.env),
     timeoutMs: externalTimeoutMs,
   });
+  const relationshipReplyReviewEngine: RelationshipReplyReviewAdapter | undefined = relationshipReplyReviewEnabled
+    ? new WebhookRelationshipReplyReviewEngine(
+      relationshipReplyReviewUrl!,
+      relationshipReplyReviewToken,
+      externalTimeoutMs,
+    )
+    : undefined;
 
   const controller = new AbortController();
   const done = (async () => {
@@ -413,6 +448,7 @@ export function startRuntimeWorker(store: JsonStore): RuntimeWorkerHandle {
           aiWorldTimezone,
           reflectionEngine,
           explorationAdapter,
+          relationshipReplyReviewEngine,
         );
         process.stderr.write(
           `[our-home] heartbeat=${result.heartbeatId} due=${result.dueCount} delivered=${result.deliveredCount} failed=${result.failedCount}\n`,
