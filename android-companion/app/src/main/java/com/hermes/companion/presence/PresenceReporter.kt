@@ -4,6 +4,7 @@ import android.content.Context
 import com.hermes.companion.data.ObservationRequest
 import com.hermes.companion.data.QueueRepository
 import com.hermes.companion.data.SettingsRepository
+import com.hermes.companion.privacy.PresencePrivacyStore
 import java.time.Instant
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -14,25 +15,32 @@ class PresenceReporter(context: Context) {
     private val appContext = context.applicationContext
     private val queue = QueueRepository.create(appContext)
     private val settings = SettingsRepository(appContext)
+    private val privacy = PresencePrivacyStore(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun reportTransition(value: AppTransition) {
         val deviceId = settings.deviceId()
+        val exposeTo = privacy.exposesIdentity(value.toPackage)
+        val exposeFrom = value.fromPackage?.let(privacy::exposesIdentity) == true
+        val toPackage = if (exposeTo) value.toPackage else PRIVATE_APP_LABEL
+        val fromPackage = if (exposeFrom) value.fromPackage.orEmpty() else if (value.fromPackage != null) PRIVATE_APP_LABEL else ""
         scope.launch {
             queue.enqueueObservation(
                 ObservationRequest(
                     kind = "presence_app_transition",
-                    label = value.toPackage,
-                    value = value.toPackage,
+                    label = toPackage,
+                    value = toPackage,
                     observedAt = Instant.ofEpochMilli(value.observedAtMs).toString(),
                     deviceId = deviceId,
                     metadata = mapOf(
-                        "fromPackage" to value.fromPackage.orEmpty(),
-                        "toPackage" to value.toPackage,
+                        "fromPackage" to fromPackage,
+                        "toPackage" to toPackage,
+                        "identityHidden" to (!exposeTo).toString(),
+                        "previousIdentityHidden" to (value.fromPackage != null && !exposeFrom).toString(),
                         "previousStartedAt" to value.previousStartedAtMs.takeIf { it > 0L }?.let { Instant.ofEpochMilli(it).toString() }.orEmpty(),
                         "previousDurationMs" to value.previousDurationMs.toString(),
                     ),
-                    clientEventId = "presence-app:$deviceId:${value.observedAtMs}:${value.toPackage}",
+                    clientEventId = "presence-app:$deviceId:${value.observedAtMs}:$toPackage",
                 ),
             )
         }
@@ -40,21 +48,24 @@ class PresenceReporter(context: Context) {
 
     fun reportSessionEnd(value: AppSessionEnd) {
         val deviceId = settings.deviceId()
+        val expose = privacy.exposesIdentity(value.packageName)
+        val exposedPackage = if (expose) value.packageName else PRIVATE_APP_LABEL
         scope.launch {
             queue.enqueueObservation(
                 ObservationRequest(
                     kind = "presence_app_session_end",
-                    label = value.packageName,
+                    label = exposedPackage,
                     value = value.reason,
                     observedAt = Instant.ofEpochMilli(value.endedAtMs).toString(),
                     deviceId = deviceId,
                     metadata = mapOf(
-                        "packageName" to value.packageName,
+                        "packageName" to exposedPackage,
+                        "identityHidden" to (!expose).toString(),
                         "startedAt" to value.startedAtMs.takeIf { it > 0L }?.let { Instant.ofEpochMilli(it).toString() }.orEmpty(),
                         "durationMs" to value.durationMs.toString(),
                         "reason" to value.reason,
                     ),
-                    clientEventId = "presence-end:$deviceId:${value.endedAtMs}:${value.packageName}:${value.reason}",
+                    clientEventId = "presence-end:$deviceId:${value.endedAtMs}:$exposedPackage:${value.reason}",
                 ),
             )
         }
@@ -63,22 +74,25 @@ class PresenceReporter(context: Context) {
     fun reportDwell(packageName: String, startedAtMs: Long, durationMs: Long, stage: Int, atMs: Long) {
         val deviceId = settings.deviceId()
         val label = PresenceDwellPolicy.stageLabel(stage)
+        val expose = privacy.exposesIdentity(packageName)
+        val exposedPackage = if (expose) packageName else PRIVATE_APP_LABEL
         scope.launch {
             queue.enqueueObservation(
                 ObservationRequest(
                     kind = "presence_app_dwell",
-                    label = packageName,
+                    label = exposedPackage,
                     value = label,
                     observedAt = Instant.ofEpochMilli(atMs).toString(),
                     deviceId = deviceId,
                     metadata = mapOf(
-                        "packageName" to packageName,
+                        "packageName" to exposedPackage,
+                        "identityHidden" to (!expose).toString(),
                         "startedAt" to Instant.ofEpochMilli(startedAtMs).toString(),
                         "durationMs" to durationMs.toString(),
                         "stage" to stage.toString(),
                         "stageLabel" to label,
                     ),
-                    clientEventId = "presence-dwell:$deviceId:$startedAtMs:$stage",
+                    clientEventId = "presence-dwell:$deviceId:$startedAtMs:$stage:$exposedPackage",
                 ),
             )
         }
@@ -103,5 +117,9 @@ class PresenceReporter(context: Context) {
                 ),
             )
         }
+    }
+
+    companion object {
+        private const val PRIVATE_APP_LABEL = "private_app_active"
     }
 }

@@ -1,6 +1,7 @@
 package com.hermes.companion.vision
 
 import com.hermes.companion.presence.PresenceAccessibilityService
+import com.hermes.companion.privacy.PresencePrivacyStore
 import java.lang.ref.WeakReference
 
 sealed interface VisualCaptureOutcome {
@@ -27,6 +28,11 @@ object VisualCaptureBridge {
 
     fun request(request: VisualCaptureRequest, callback: (VisualCaptureOutcome) -> Unit): Boolean {
         val service = serviceRef.get() ?: return false
+        val presencePrivacy = PresencePrivacyStore(service.applicationContext)
+        if (!presencePrivacy.exposesIdentity(request.packageName)) {
+            callback(VisualCaptureOutcome.Blocked("PRESENCE_HIDDEN"))
+            return true
+        }
         service.captureVisual(request, callback)
         return true
     }

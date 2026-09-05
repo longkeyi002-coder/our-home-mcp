@@ -12,12 +12,15 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.hermes.companion.BuildConfig
+import com.hermes.companion.platform.UsagePrivacyFilter
+import com.hermes.companion.privacy.PresencePrivacyStore
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 
 class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
     override suspend fun doWork(): Result {
         val settings = SettingsRepository(applicationContext)
+        val presencePrivacy = PresencePrivacyStore(applicationContext)
         val workerStartedAt = System.currentTimeMillis()
         settings.recordWorkerRun(workerStartedAt)
         if (!TelemetryPolicy.isConfigured(settings.serverUrl(), settings.bootstrapToken(), settings.deviceToken())) {
@@ -37,7 +40,10 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 charging = status.charging,
                 appVersion = BuildConfig.VERSION_NAME,
                 connectivityState = if (status.online) "online" else "offline",
-                foregroundPackage = status.foregroundPackage,
+                foregroundPackage = UsagePrivacyFilter.redactCurrentPackage(
+                    status.foregroundPackage,
+                    presencePrivacy::exposesIdentity,
+                ),
                 observedAt = Instant.ofEpochMilli(now).toString(),
                 clientEventId = TelemetryPolicy.periodicHeartbeatEventId(settings.deviceId(), now),
             ),
@@ -46,7 +52,11 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
 
         val usage = com.hermes.companion.platform.UsageTimelineReader.read(applicationContext)
         if (usage != null) {
-            queue.enqueueUsageSummary(usage, settings.deviceId(), scheduleUpload = false)
+            queue.enqueueUsageSummary(
+                UsagePrivacyFilter.redact(usage, presencePrivacy::exposesIdentity),
+                settings.deviceId(),
+                scheduleUpload = false,
+            )
         }
 
         if (!status.online) {

@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.hermes.companion.BuildConfig
 import com.hermes.companion.platform.UsageTimelineSummary
+import com.hermes.companion.privacy.PresencePrivacyStore
 import com.hermes.companion.push.PushRegistration
 import com.hermes.companion.vision.VisualObservationWorker
 import java.time.LocalDate
@@ -18,6 +19,7 @@ class QueueRepository private constructor(
     private val apiFactory: (String) -> HermesApi = ApiClient::create,
     private val visualRequestEnqueuer: (VisualRequestAck) -> Unit = {},
     private val pushRefresher: () -> Unit = {},
+    private val outboundPrivacy: OutboundTelemetryPrivacy = OutboundTelemetryPrivacy { true },
 ) {
     private val json = WireJson
 
@@ -121,11 +123,13 @@ class QueueRepository private constructor(
         var firstError: String? = null
         for (event in dao.ready(now, 20)) {
             try {
-                val ack = send(api, authorization, event)
+                val outcome = send(api, authorization, event)
                 dao.delete(event.id)
-                uploaded += 1
-                settings.recordSuccessfulUpload(System.currentTimeMillis())
-                enqueueVisualAck(ack)
+                if (outcome.sent) {
+                    uploaded += 1
+                    settings.recordSuccessfulUpload(System.currentTimeMillis())
+                    enqueueVisualAck(outcome.ack)
+                }
             } catch (error: Throwable) {
                 if (error is HttpException && error.code() == 401 && settings.hasDeviceToken()) {
                     settings.clearDeviceToken()
@@ -138,11 +142,13 @@ class QueueRepository private constructor(
                         continue
                     }
                     try {
-                        val ack = send(api, retryAuthorization, event)
+                        val outcome = send(api, retryAuthorization, event)
                         dao.delete(event.id)
-                        uploaded += 1
-                        settings.recordSuccessfulUpload(System.currentTimeMillis())
-                        enqueueVisualAck(ack)
+                        if (outcome.sent) {
+                            uploaded += 1
+                            settings.recordSuccessfulUpload(System.currentTimeMillis())
+                            enqueueVisualAck(outcome.ack)
+                        }
                     } catch (retryError: Throwable) {
                         val message = describeApiError("upload after re-registration", retryError)
                         firstError = firstError ?: message
@@ -182,9 +188,23 @@ class QueueRepository private constructor(
         pushToken = settings.pushToken(),
     )
 
-    private suspend fun send(api: HermesApi, authorization: String, event: PendingEvent): ApiAck = when (event.type) {
-        TYPE_HEARTBEAT -> api.heartbeat(authorization, json.decodeFromString(HeartbeatRequest.serializer(), event.payload))
-        TYPE_OBSERVATION -> api.observation(authorization, json.decodeFromString(ObservationRequest.serializer(), event.payload))
+    /**
+     * Last privacy checkpoint before any queued payload crosses the network. This deliberately
+     * re-evaluates CURRENT per-App policy instead of trusting policy that existed when the event
+     * was collected. A stale visual summary for a now-hidden App is consumed locally and dropped.
+     */
+    private suspend fun send(api: HermesApi, authorization: String, event: PendingEvent): SendOutcome = when (event.type) {
+        TYPE_HEARTBEAT -> {
+            val decoded = json.decodeFromString(HeartbeatRequest.serializer(), event.payload)
+            val safe = outboundPrivacy.sanitizeHeartbeat(decoded)
+            SendOutcome(api.heartbeat(authorization, safe), sent = true)
+        }
+        TYPE_OBSERVATION -> {
+            val decoded = json.decodeFromString(ObservationRequest.serializer(), event.payload)
+            val safe = outboundPrivacy.sanitizeObservation(decoded)
+            if (safe == null) SendOutcome(ApiAck(), sent = false)
+            else SendOutcome(api.observation(authorization, safe), sent = true)
+        }
         else -> throw IllegalArgumentException("Unknown event type")
     }
 
@@ -215,6 +235,8 @@ class QueueRepository private constructor(
         if (scheduleUpload) UploadWorker.enqueue(settings.context)
     }
 
+    private data class SendOutcome(val ack: ApiAck, val sent: Boolean)
+
     data class UploadResult(val uploaded: Int, val error: String?)
 
     companion object {
@@ -228,11 +250,13 @@ class QueueRepository private constructor(
             val appContext = context.applicationContext
             val database = Room.databaseBuilder(appContext, AppDatabase::class.java, "hermes-companion.db").build()
             val settings = SettingsRepository(appContext)
+            val presencePrivacy = PresencePrivacyStore(appContext)
             return QueueRepository(
                 dao = database.pendingEventDao(),
                 settings = settings,
                 visualRequestEnqueuer = { VisualObservationWorker.enqueue(appContext, it) },
                 pushRefresher = { PushRegistration.refresh(appContext) },
+                outboundPrivacy = OutboundTelemetryPrivacy(presencePrivacy::exposesIdentity),
             )
         }
 
@@ -242,7 +266,15 @@ class QueueRepository private constructor(
             apiFactory: (String) -> HermesApi,
             visualRequestEnqueuer: (VisualRequestAck) -> Unit = {},
             pushRefresher: () -> Unit = {},
-        ) = QueueRepository(dao, settings, apiFactory, visualRequestEnqueuer, pushRefresher)
+            identityExposure: (String) -> Boolean = { true },
+        ) = QueueRepository(
+            dao,
+            settings,
+            apiFactory,
+            visualRequestEnqueuer,
+            pushRefresher,
+            OutboundTelemetryPrivacy(identityExposure),
+        )
     }
 }
 

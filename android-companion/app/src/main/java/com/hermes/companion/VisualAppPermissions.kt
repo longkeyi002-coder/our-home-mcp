@@ -1,6 +1,5 @@
 package com.hermes.companion
 
-import android.content.pm.PackageManager
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -19,6 +18,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,6 +36,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.hermes.companion.data.SettingsRepository
 import com.hermes.companion.privacy.AppSensitivityClassifier
+import com.hermes.companion.privacy.PresenceAppPolicy
+import com.hermes.companion.privacy.PresencePrivacyStore
 import com.hermes.companion.privacy.SensitivityClass
 import com.hermes.companion.privacy.VisualAppPolicy
 import com.hermes.companion.privacy.VisualPrivacyStore
@@ -45,7 +47,8 @@ private data class VisualAppEntry(
     val packageName: String,
     val label: String,
     val sensitivity: SensitivityClass,
-    val policy: VisualAppPolicy?,
+    val visualPolicy: VisualAppPolicy?,
+    val presencePolicy: PresenceAppPolicy,
     val isCurrent: Boolean,
     val usageMs: Long,
 )
@@ -54,44 +57,40 @@ private data class VisualAppEntry(
 @Composable
 internal fun VisualAppPermissionsSection(state: CompanionUiState) {
     val context = LocalContext.current
-    val privacy = remember(context) { VisualPrivacyStore(context.applicationContext) }
+    val visualPrivacy = remember(context) { VisualPrivacyStore(context.applicationContext) }
+    val presencePrivacy = remember(context) { PresencePrivacyStore(context.applicationContext) }
+    val inventory = remember(context) { LocalAppInventory(context.applicationContext) }
     val settings = remember(context) { SettingsRepository(context.applicationContext) }
     var revision by remember { mutableIntStateOf(0) }
     var notificationMode by remember { mutableStateOf(settings.notificationPrivacyMode()) }
     var showAppPermissions by remember { mutableStateOf(false) }
     var showNotificationPrivacy by remember { mutableStateOf(false) }
     val now = System.currentTimeMillis()
-    privacy.pruneExpiredGrant(now)
+    visualPrivacy.pruneExpiredGrant(now)
 
     val currentPackage = state.presence?.currentPackage
     val usageTotals = state.usage?.appTotalsMs.orEmpty()
-    val packages = linkedSetOf<String>().apply {
-        currentPackage?.takeIf { it != BuildConfig.APPLICATION_ID }?.let(::add)
-        state.presence?.lastToPackage?.takeIf { it != BuildConfig.APPLICATION_ID }?.let(::add)
-        state.presence?.lastFromPackage?.takeIf { it != BuildConfig.APPLICATION_ID }?.let(::add)
-        state.usage?.currentPackageName?.takeIf { it != BuildConfig.APPLICATION_ID }?.let(::add)
-        usageTotals.entries
-            .sortedByDescending { it.value }
-            .take(MAX_VISIBLE_APPS)
-            .mapTo(this) { it.key }
+    val launchableApps = remember(state.presence, state.usage, revision) {
+        inventory.launchableApps()
     }
 
-    val entries = remember(state.presence, state.usage, revision) {
-        packages
-            .map { packageName ->
+    val entries = remember(launchableApps, state.presence, state.usage, revision) {
+        launchableApps
+            .map { app ->
                 VisualAppEntry(
-                    packageName = packageName,
-                    label = appLabel(context.packageManager, packageName),
-                    sensitivity = AppSensitivityClassifier.classify(packageName),
-                    policy = privacy.policyFor(packageName),
-                    isCurrent = packageName == currentPackage,
-                    usageMs = usageTotals[packageName] ?: 0L,
+                    packageName = app.packageName,
+                    label = app.label,
+                    sensitivity = AppSensitivityClassifier.classify(app.packageName),
+                    visualPolicy = visualPrivacy.policyFor(app.packageName),
+                    presencePolicy = presencePrivacy.policyFor(app.packageName),
+                    isCurrent = app.packageName == currentPackage,
+                    usageMs = usageTotals[app.packageName] ?: 0L,
                 )
             }
             .sortedWith(
                 compareByDescending<VisualAppEntry> { it.isCurrent }
                     .thenByDescending { it.usageMs }
-                    .thenBy { it.label },
+                    .thenBy { it.label.lowercase() },
             )
     }
 
@@ -120,11 +119,19 @@ internal fun VisualAppPermissionsSection(state: CompanionUiState) {
             AppObservationSheet(
                 entries = entries,
                 onDone = { showAppPermissions = false },
-                onPolicy = { entry, policy ->
-                    privacy.setPolicy(entry.packageName, policy)
+                onPresencePolicy = { entry, policy ->
+                    presencePrivacy.setPolicy(entry.packageName, policy)
+                    if (policy == PresenceAppPolicy.HIDE_IDENTITY) {
+                        if (visualPrivacy.armedGrant()?.packageName == entry.packageName) visualPrivacy.clearArmedGrant()
+                        if (visualPrivacy.temporaryGrant()?.packageName == entry.packageName) visualPrivacy.clearTemporaryGrant()
+                    }
+                    revision += 1
+                },
+                onVisualPolicy = { entry, policy ->
+                    visualPrivacy.setPolicy(entry.packageName, policy)
                     if (policy == VisualAppPolicy.NEVER) {
-                        if (privacy.armedGrant()?.packageName == entry.packageName) privacy.clearArmedGrant()
-                        if (privacy.temporaryGrant()?.packageName == entry.packageName) privacy.clearTemporaryGrant()
+                        if (visualPrivacy.armedGrant()?.packageName == entry.packageName) visualPrivacy.clearArmedGrant()
+                        if (visualPrivacy.temporaryGrant()?.packageName == entry.packageName) visualPrivacy.clearTemporaryGrant()
                     }
                     revision += 1
                 },
@@ -151,7 +158,7 @@ private fun SettingsGroup(
         )
         HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
         SettingsNavigationRow(
-            title = "应用观察权限",
+            title = "应用感知权限",
             value = if (entries.isEmpty()) "未发现 App" else "${entries.size} 个 App",
             onClick = onAppPermissions,
         )
@@ -233,21 +240,53 @@ private fun NotificationPrivacyRow(
 private fun AppObservationSheet(
     entries: List<VisualAppEntry>,
     onDone: () -> Unit,
-    onPolicy: (VisualAppEntry, VisualAppPolicy) -> Unit,
+    onPresencePolicy: (VisualAppEntry, PresenceAppPolicy) -> Unit,
+    onVisualPolicy: (VisualAppEntry, VisualAppPolicy) -> Unit,
 ) {
-    SheetHeader(title = "应用观察", onDone = onDone)
+    var query by remember { mutableStateOf("") }
+    var expandedPackage by remember { mutableStateOf<String?>(null) }
+    val normalizedQuery = query.trim()
+    val filteredEntries = if (normalizedQuery.isBlank()) {
+        entries
+    } else {
+        entries.filter {
+            it.label.contains(normalizedQuery, ignoreCase = true) ||
+                it.packageName.contains(normalizedQuery, ignoreCase = true)
+        }
+    }
+
+    SheetHeader(title = "应用感知", onDone = onDone)
     Text(
-        "开关表示允许哥哥自动观察；关闭后需要你再次允许。受保护 App 不能开启。",
+        "选择哥哥可以知道你正在使用哪些 App。点应用可设置屏幕观察。",
         modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
+    OutlinedTextField(
+        value = query,
+        onValueChange = { query = it },
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        singleLine = true,
+        placeholder = { Text("搜索应用") },
+    )
 
     if (entries.isEmpty()) {
         Text(
-            "使用几个 App 后再回来，这里会自动出现。",
+            "未找到可启动的 App。",
             modifier = Modifier.padding(20.dp),
             style = MaterialTheme.typography.bodyMedium,
+        )
+        return
+    }
+
+    if (filteredEntries.isEmpty()) {
+        Text(
+            "没有匹配的应用。",
+            modifier = Modifier.padding(20.dp),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         return
     }
@@ -256,16 +295,22 @@ private fun AppObservationSheet(
         modifier = Modifier
             .fillMaxWidth()
             .heightIn(max = 520.dp)
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(horizontal = 16.dp, vertical = 4.dp),
     ) {
-        items(entries, key = { it.packageName }) { entry ->
+        items(filteredEntries, key = { it.packageName }) { entry ->
             AppObservationRow(
                 entry = entry,
-                onAutomaticChange = { enabled ->
-                    if (entry.sensitivity != SensitivityClass.PROTECTED) {
-                        onPolicy(entry, if (enabled) VisualAppPolicy.AUTO else VisualAppPolicy.ASK_ONLY)
-                    }
+                expanded = expandedPackage == entry.packageName,
+                onExpand = {
+                    expandedPackage = if (expandedPackage == entry.packageName) null else entry.packageName
                 },
+                onPresenceChange = { allowed ->
+                    onPresencePolicy(
+                        entry,
+                        if (allowed) PresenceAppPolicy.ALLOW else PresenceAppPolicy.HIDE_IDENTITY,
+                    )
+                },
+                onVisualPolicy = { policy -> onVisualPolicy(entry, policy) },
             )
             HorizontalDivider(modifier = Modifier.padding(start = 52.dp))
         }
@@ -275,56 +320,140 @@ private fun AppObservationSheet(
 @Composable
 private fun AppObservationRow(
     entry: VisualAppEntry,
-    onAutomaticChange: (Boolean) -> Unit,
+    expanded: Boolean,
+    onExpand: () -> Unit,
+    onPresenceChange: (Boolean) -> Unit,
+    onVisualPolicy: (VisualAppPolicy) -> Unit,
 ) {
-    val effective = entry.policy ?: VisualAppPolicy.ASK_ONLY
+    val presenceAllowed = entry.presencePolicy == PresenceAppPolicy.ALLOW
+    val effectiveVisual = entry.visualPolicy ?: VisualAppPolicy.ASK_ONLY
     val protected = entry.sensitivity == SensitivityClass.PROTECTED
-    val automatic = effective == VisualAppPolicy.AUTO && !protected
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 4.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    Column(
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        Box(
+        Row(
             modifier = Modifier
-                .size(36.dp)
-                .clip(RoundedCornerShape(9.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant),
-            contentAlignment = Alignment.Center,
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                entry.label.take(1).ifBlank { "·" },
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium,
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    entry.label.take(1).ifBlank { "·" },
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(onClick = onExpand),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
+                Text(
+                    if (entry.isCurrent) "${entry.label} · 当前" else entry.label,
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                Text(
+                    appPermissionSummary(presenceAllowed, protected, effectiveVisual),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            Switch(
+                checked = presenceAllowed,
+                onCheckedChange = onPresenceChange,
             )
         }
 
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Text(
-                if (entry.isCurrent) "${entry.label} · 当前" else entry.label,
-                style = MaterialTheme.typography.bodyLarge,
+        if (expanded) {
+            VisualPolicyEditor(
+                presenceAllowed = presenceAllowed,
+                protected = protected,
+                policy = effectiveVisual,
+                onPolicy = onVisualPolicy,
             )
+        }
+    }
+}
+
+@Composable
+private fun VisualPolicyEditor(
+    presenceAllowed: Boolean,
+    protected: Boolean,
+    policy: VisualAppPolicy,
+    onPolicy: (VisualAppPolicy) -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 52.dp, end = 8.dp, bottom = 10.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            "屏幕观察",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Medium,
+        )
+        if (!presenceAllowed) {
             Text(
-                when {
-                    protected -> "受保护"
-                    automatic -> "可自动观察"
-                    effective == VisualAppPolicy.NEVER -> "永不看"
-                    else -> "需要询问"
-                },
+                "此 App 不会向哥哥透露身份，屏幕也不会被观察。",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            return
+        }
+        if (protected) {
+            Text(
+                "受保护 App 不能自动观察。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
-
-        Switch(
-            checked = automatic,
-            onCheckedChange = onAutomaticChange,
-            enabled = !protected,
-        )
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            if (!protected) {
+                VisualPolicyChoice("自动", policy == VisualAppPolicy.AUTO) { onPolicy(VisualAppPolicy.AUTO) }
+            }
+            VisualPolicyChoice("询问", policy == VisualAppPolicy.ASK_ONLY) { onPolicy(VisualAppPolicy.ASK_ONLY) }
+            VisualPolicyChoice("永不看", policy == VisualAppPolicy.NEVER) { onPolicy(VisualAppPolicy.NEVER) }
+        }
     }
+}
+
+@Composable
+private fun VisualPolicyChoice(
+    title: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    TextButton(onClick = onClick) {
+        Text(if (selected) "✓ $title" else title)
+    }
+}
+
+private fun appPermissionSummary(
+    presenceAllowed: Boolean,
+    protected: Boolean,
+    visualPolicy: VisualAppPolicy,
+): String {
+    if (!presenceAllowed) return "不透露此 App · 屏幕不观察"
+    val visual = when {
+        protected -> "屏幕受保护"
+        visualPolicy == VisualAppPolicy.AUTO -> "屏幕可自动观察"
+        visualPolicy == VisualAppPolicy.NEVER -> "屏幕永不看"
+        else -> "屏幕需询问"
+    }
+    return "可感知 · $visual"
 }
 
 @Composable
@@ -352,10 +481,3 @@ private fun notificationModeLabel(mode: NotificationPrivacyMode): String = when 
     NotificationPrivacyMode.GENERIC -> "仅提示"
     NotificationPrivacyMode.FULL -> "完整显示"
 }
-
-private fun appLabel(packageManager: PackageManager, packageName: String): String = runCatching {
-    val info = packageManager.getApplicationInfo(packageName, 0)
-    packageManager.getApplicationLabel(info).toString().ifBlank { packageName }
-}.getOrDefault(packageName)
-
-private const val MAX_VISIBLE_APPS = 12
