@@ -82,12 +82,6 @@ function isScreenOffObservation(item: LifeObservation): boolean {
     || item.kind === "device_presence" && item.value === "screen_off";
 }
 
-function isPhoneActivity(item: LifeObservation): boolean {
-  return isForegroundObservation(item)
-    || item.kind === "device_presence" && item.value === "screen_on"
-    || item.kind === "presence_screen" && (item.value === "on" || metadataBoolean(item, "interactive") === true);
-}
-
 function foregroundPackage(item: LifeObservation | undefined): string | null {
   if (!item) return null;
   if (item.kind === "usage_summary") return metadataString(item, "currentPackage") ?? item.value?.trim() ?? null;
@@ -149,10 +143,9 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
     (item) => item.kind === "presence_app_transition" || item.kind === "presence_app_session_end" || isScreenOffObservation(item),
   );
   const latestConnectivity = newest(usable, (item) => item.metadata?.connectivityState !== undefined);
-  const latestActivity = newest(historical, isPhoneActivity);
-
   const lastObservedAt = latestAny?.observedAt ?? null;
-  const lastPhoneActivityAt = latestActivity?.observedAt ?? null;
+  // screen_on only proves that the display woke up; it cannot refresh the old foreground App/session.
+  const lastPhoneActivityAt = latestForeground?.observedAt ?? null;
   const devicePresence = devicePresenceFromObservation(latestPresence);
   // Lock/screen-off terminates knowledge about the old foreground session. A later screen-on
   // is not enough to resurrect that package; a new transition/dwell/usage observation must
@@ -172,7 +165,7 @@ export function deriveLifeState(observations: LifeObservation[], observedAt: str
   const batteryPercent = metadataNumber(latestDeviceMetrics, "batteryPercent");
   const charging = metadataBoolean(latestDeviceMetrics, "charging");
   const connectivityState = asConnectivity(latestConnectivity?.metadata?.connectivityState);
-  const activityAgeMs = lastPhoneActivityAt ? asOfMs - timestamp(lastPhoneActivityAt) : Number.POSITIVE_INFINITY;
+  const activityAgeMs = latestForeground ? asOfMs - timestamp(latestForeground.observedAt) : Number.POSITIVE_INFINITY;
   const hasRecentActivity = Boolean(currentForegroundPackage) && activityAgeMs <= LIFE_STATE_ACTIVITY_WINDOW_MS;
   const hasRecentDevice = Boolean(latestPresence || latestDeviceMetrics);
   const reasons: string[] = [];
