@@ -23,6 +23,7 @@ function observed(
     deviceId: "android-presence",
     metadata,
   };
+}
 
 test("realtime app transition becomes the current foreground package", () => {
   const state = deriveLifeState([
