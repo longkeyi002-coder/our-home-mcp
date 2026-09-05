@@ -353,10 +353,11 @@ export class JsonStore {
         && item.status === "pending"
         && item.visualContext?.sessionId === opportunity.sessionId,
       );
-      if (existing) {
+      if (existing && existing.visualContext!.expiresAt > opportunity.observedAt) {
         result = existing;
         return;
       }
+      if (existing) existing.status = "dismissed";
       const event: WakeEvent = {
         id: randomUUID(),
         type: "visual_opportunity",
