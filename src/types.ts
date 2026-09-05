@@ -24,6 +24,8 @@ export type ObservationKind =
   | "visual_policy_audit"
   | "visual_observation_summary";
 export type ObservationSource = "user" | "phone" | "screen" | "calendar" | "system" | "mock";
+export type ObservationWorld = "EARTH" | "AI_WORLD" | "FICTION";
+export type ObservationProvenance = "observed" | "user_declared" | "inferred" | "simulated" | "authored" | "model_generated" | "legacy_unclassified";
 export type ObservationConfidence = "observed" | "declared" | "inferred";
 export type ProactiveCandidateStatus = "pending" | "delivered" | "dismissed";
 export type LifeActivity = "active_on_phone" | "probably_idle" | "charging" | "offline" | "unknown";
@@ -204,7 +206,7 @@ export interface LifeContext {
 }
 
 export interface OurHomeData {
-  schemaVersion: 2;
+  schemaVersion: 3;
   diaries: DiaryEntry[];
   relationshipEvents: RelationshipEvent[];
   actions: ActionItem[];
