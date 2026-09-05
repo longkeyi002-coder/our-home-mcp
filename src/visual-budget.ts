@@ -64,7 +64,7 @@ export function decideVisualBudget(
       reason: "daily_budget_exhausted",
       usedInHour: hourly.length,
       usedInDay: daily.length,
-      nextAvailableAtMs: daily[0] + VISUAL_BUDGET_DAILY_WINDOW_MS,
+      nextAvailableAtMs: daily[0]! + VISUAL_BUDGET_DAILY_WINDOW_MS,
     };
   }
 
@@ -74,7 +74,7 @@ export function decideVisualBudget(
       reason: "hourly_budget_exhausted",
       usedInHour: hourly.length,
       usedInDay: daily.length,
-      nextAvailableAtMs: hourly[0] + VISUAL_BUDGET_HOURLY_WINDOW_MS,
+      nextAvailableAtMs: hourly[0]! + VISUAL_BUDGET_HOURLY_WINDOW_MS,
     };
   }
 
