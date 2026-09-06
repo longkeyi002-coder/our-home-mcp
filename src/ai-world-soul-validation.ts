@@ -3,9 +3,26 @@ import type { AiWorldContinuityData, AiWorldInterestEvidence } from "./types.js"
 const MAX_SOUL_EVIDENCE_IDS = 100;
 const MAX_SOUL_DELTA = 0.02;
 const SOUL_REASONS = new Set(["preference_evidence", "time_decay"] as const);
+const EVIDENCE_PROVENANCES = new Set(["inferred", "simulated", "authored", "model_generated"] as const);
+const EVIDENCE_DIRECTIONS = new Set(["support", "counter"] as const);
+
+interface PersistedInterestEvidenceRevocation {
+  id: string;
+  world: "AI_WORLD";
+  provenance: "inferred";
+  source: "AGENT_LIFE";
+  revocationKey: string;
+  feedbackId: string;
+  evidenceId: string;
+  interestKey: string;
+  occurredAt: string;
+  createdAt: string;
+  evidenceRefs: string[];
+}
 
 type RevocationContinuity = AiWorldContinuityData & {
   revokedInterestEvidence?: AiWorldInterestEvidence[];
+  interestEvidenceRevocations?: PersistedInterestEvidenceRevocation[];
 };
 
 function timestamp(value: string, label: string): number {
@@ -18,25 +35,115 @@ function closeEnough(left: number, right: number): boolean {
   return Math.abs(left - right) <= 0.000001;
 }
 
+function assertEvidenceRefs(refs: string[] | undefined, label: string): void {
+  if (refs === undefined) return;
+  if (!Array.isArray(refs) || refs.length > 50) throw new Error(`${label} evidenceRefs must be a bounded array`);
+  for (const ref of refs) {
+    if (typeof ref !== "string" || !ref.trim() || ref.length > 500) {
+      throw new Error(`${label} evidenceRefs contains an invalid reference`);
+    }
+  }
+}
+
+function assertArchivedEvidence(record: AiWorldInterestEvidence): void {
+  if (record.world !== "AI_WORLD" || record.source !== "AGENT_LIFE" || !EVIDENCE_PROVENANCES.has(record.provenance)) {
+    throw new Error("Revoked AI World interest evidence has an invalid world boundary");
+  }
+  if (!record.id || !record.interestKey?.trim() || !record.evidenceKey?.trim()
+    || !EVIDENCE_DIRECTIONS.has(record.direction) || !record.reason?.trim()) {
+    throw new Error("Revoked AI World interest evidence has invalid structured fields");
+  }
+  if (!Number.isFinite(record.strength) || record.strength < 0 || record.strength > 1) {
+    throw new Error("Revoked AI World interest evidence strength must be between 0 and 1");
+  }
+  if (timestamp(record.occurredAt, "revoked evidence occurredAt") > timestamp(record.createdAt, "revoked evidence createdAt")) {
+    throw new Error("Revoked AI World interest evidence cannot occur after creation");
+  }
+  assertEvidenceRefs(record.evidenceRefs, "Revoked AI World interest evidence");
+}
+
+function assertRevocationMemory(
+  continuity: AiWorldContinuityData,
+  activeEvidence: AiWorldInterestEvidence[],
+): {
+  revokedEvidence: AiWorldInterestEvidence[];
+  allEvidence: AiWorldInterestEvidence[];
+  revokedEvidenceIds: Set<string>;
+} {
+  const revocationContinuity = continuity as RevocationContinuity;
+  const revokedEvidence = revocationContinuity.revokedInterestEvidence ?? [];
+  const revocations = revocationContinuity.interestEvidenceRevocations ?? [];
+  if (!Array.isArray(revokedEvidence)) throw new Error("AI World revoked interest evidence archive must be an array");
+  if (!Array.isArray(revocations)) throw new Error("AI World interest evidence revocations must be an array");
+
+  const activeIds = new Set<string>();
+  for (const item of activeEvidence) {
+    if (!item?.id || activeIds.has(item.id)) throw new Error("Duplicate active AI World evidence id");
+    activeIds.add(item.id);
+  }
+
+  const revokedById = new Map<string, AiWorldInterestEvidence>();
+  for (const item of revokedEvidence) {
+    assertArchivedEvidence(item);
+    if (activeIds.has(item.id)) throw new Error("Revoked AI World evidence cannot remain in the active evidence set");
+    if (revokedById.has(item.id)) throw new Error("Duplicate revoked AI World evidence id");
+    revokedById.set(item.id, item);
+  }
+
+  const revocationIds = new Set<string>();
+  const revocationKeys = new Set<string>();
+  const feedbackIds = new Set<string>();
+  const targetEvidenceIds = new Set<string>();
+  for (const revocation of revocations) {
+    if (revocation.world !== "AI_WORLD" || revocation.provenance !== "inferred" || revocation.source !== "AGENT_LIFE") {
+      throw new Error("AI World evidence revocation has an invalid world boundary");
+    }
+    if (!revocation.id || !revocation.revocationKey?.trim() || !revocation.feedbackId?.trim()
+      || !revocation.evidenceId?.trim() || !revocation.interestKey?.trim()) {
+      throw new Error("AI World evidence revocation has invalid structured fields");
+    }
+    if (timestamp(revocation.occurredAt, "evidence revocation occurredAt") > timestamp(revocation.createdAt, "evidence revocation createdAt")) {
+      throw new Error("AI World evidence revocation cannot occur after creation");
+    }
+    assertEvidenceRefs(revocation.evidenceRefs, "AI World evidence revocation");
+    if (!revocation.evidenceRefs.includes(`ai-world-interest-evidence:${revocation.evidenceId}`)) {
+      throw new Error("AI World evidence revocation is missing its target evidence reference");
+    }
+    const target = revokedById.get(revocation.evidenceId);
+    if (!target || target.interestKey !== revocation.interestKey) {
+      throw new Error("AI World evidence revocation targets missing or unrelated archived evidence");
+    }
+    if (revocationIds.has(revocation.id) || revocationKeys.has(revocation.revocationKey)
+      || feedbackIds.has(revocation.feedbackId) || targetEvidenceIds.has(revocation.evidenceId)) {
+      throw new Error("Duplicate AI World evidence revocation identity");
+    }
+    revocationIds.add(revocation.id);
+    revocationKeys.add(revocation.revocationKey);
+    feedbackIds.add(revocation.feedbackId);
+    targetEvidenceIds.add(revocation.evidenceId);
+  }
+
+  for (const evidenceId of revokedById.keys()) {
+    if (!targetEvidenceIds.has(evidenceId)) {
+      throw new Error("Revoked AI World evidence archive contains evidence without a revocation record");
+    }
+  }
+
+  return {
+    revokedEvidence,
+    allEvidence: [...activeEvidence, ...revokedEvidence],
+    revokedEvidenceIds: new Set(revokedById.keys()),
+  };
+}
+
 /**
- * P4.3 persisted-memory guard. It is deliberately independent from the Soul reducer so
- * generic AI World validation can call it without introducing a circular runtime import.
- * P6.4 keeps revoked evidence in an immutable audit archive: historical Soul audit may
- * continue to reference that evidence, while active Preference reducers do not.
+ * P4.3/P6.4 persisted-memory guard. Generic AI World validation calls this function, so
+ * both active Soul memory and the evidence-revocation audit structure fail closed here.
  */
 export function assertValidAiWorldSoulMemory(continuity: AiWorldContinuityData): void {
   const activeEvidence = continuity.interestEvidence ?? [];
-  const revokedEvidence = (continuity as RevocationContinuity).revokedInterestEvidence ?? [];
-  if (!Array.isArray(revokedEvidence)) {
-    throw new Error("AI World revoked interest evidence archive must be an array");
-  }
-  const evidence = [...activeEvidence, ...revokedEvidence];
-  const evidenceIds = new Set<string>();
-  for (const item of evidence) {
-    if (!item?.id || evidenceIds.has(item.id)) throw new Error("Duplicate AI World evidence id across active and revoked memory");
-    evidenceIds.add(item.id);
-  }
-
+  const revocationMemory = assertRevocationMemory(continuity, activeEvidence);
+  const evidence = revocationMemory.allEvidence;
   const preferences = continuity.preferences ?? [];
   const tendencies = continuity.soulTendencies ?? [];
   const changes = continuity.soulChanges ?? [];
@@ -136,8 +243,11 @@ export function assertValidAiWorldSoulMemory(continuity: AiWorldContinuityData):
         throw new Error("AI World Soul preference change is missing its evidence basis");
       }
       const preference = preferenceById.get(change.basisPreferenceId);
-      if (!preference || preference.interestKey !== change.interestKey) {
+      if (preference && preference.interestKey !== change.interestKey) {
         throw new Error("AI World Soul change references an unrelated preference");
+      }
+      if (!preference && !change.basisEvidenceIds.some((id) => revocationMemory.revokedEvidenceIds.has(id))) {
+        throw new Error("AI World Soul change references a missing active preference without revoked historical basis");
       }
       for (const evidenceId of change.basisEvidenceIds) {
         const item = evidenceById.get(evidenceId);
