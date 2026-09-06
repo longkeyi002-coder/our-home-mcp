@@ -9,12 +9,13 @@ class RelayProtocolTest {
     @Test
     fun `accepts only bounded mcp path requests`() {
         val parsed = RelayProtocol.parseRequest(
-            """{"id":"req-1","method":"mcp","path":"/mcp","body":"{\\"jsonrpc\\":\\"2.0\\"}"}""",
+            """{"id":"req-1","method":"mcp","path":"/mcp","body":"{}"}""",
         )
         requireNotNull(parsed)
         assertEquals("req-1", parsed.id)
         assertEquals("mcp", parsed.method)
         assertEquals("/mcp", parsed.path)
+        assertEquals("{}", parsed.body)
     }
 
     @Test
