@@ -2,26 +2,31 @@ package com.hermes.companion.privacy
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class VisualPolicyRulesTest {
     @Test
-    fun `protected AUTO is never a durable policy`() {
+    fun `protected AUTO remains durable enabled policy`() {
         assertEquals(
-            VisualAppPolicy.ASK_ONLY,
+            VisualAppPolicy.AUTO,
             VisualPolicyRules.normalizePersistentPolicy(SensitivityClass.PROTECTED, VisualAppPolicy.AUTO),
         )
-        assertFailsWith<IllegalArgumentException> {
-            VisualPolicyRules.requirePersistable(SensitivityClass.PROTECTED, VisualAppPolicy.AUTO)
-        }
+        VisualPolicyRules.requirePersistable(SensitivityClass.PROTECTED, VisualAppPolicy.AUTO)
     }
 
     @Test
-    fun `protected ASK_ONLY and NEVER remain valid`() {
+    fun `legacy ASK_ONLY and unset migrate to enabled while NEVER stays disabled`() {
         assertEquals(
-            VisualAppPolicy.ASK_ONLY,
+            VisualAppPolicy.AUTO,
             VisualPolicyRules.normalizePersistentPolicy(SensitivityClass.PROTECTED, VisualAppPolicy.ASK_ONLY),
+        )
+        assertEquals(
+            VisualAppPolicy.AUTO,
+            VisualPolicyRules.normalizePersistentPolicy(SensitivityClass.NORMAL, null),
+        )
+        assertEquals(
+            VisualAppPolicy.NEVER,
+            VisualPolicyRules.normalizePersistentPolicy(SensitivityClass.PROTECTED, VisualAppPolicy.NEVER),
         )
         VisualPolicyRules.requirePersistable(SensitivityClass.PROTECTED, VisualAppPolicy.ASK_ONLY)
         VisualPolicyRules.requirePersistable(SensitivityClass.PROTECTED, VisualAppPolicy.NEVER)
