@@ -1,26 +1,24 @@
 package com.hermes.companion.privacy
 
 /**
- * Persistent visual policy invariants. PROTECTED apps may never receive a durable AUTO grant.
- * A legacy/invalid AUTO value is interpreted conservatively as ASK_ONLY.
+ * Persistent visual policy invariants.
+ *
+ * App observation now uses a binary user-controlled permission model:
+ * AUTO means enabled and NEVER means disabled. AppSensitivityClassifier may describe
+ * an App, but it must not silently downgrade the user's durable permission.
+ * Android secure-window and screen-state restrictions are enforced separately at capture time.
  */
 object VisualPolicyRules {
     fun normalizePersistentPolicy(
         sensitivity: SensitivityClass,
         policy: VisualAppPolicy?,
-    ): VisualAppPolicy? =
-        if (sensitivity == SensitivityClass.PROTECTED && policy == VisualAppPolicy.AUTO) {
-            VisualAppPolicy.ASK_ONLY
-        } else {
-            policy
-        }
+    ): VisualAppPolicy? = policy
 
     fun requirePersistable(
         sensitivity: SensitivityClass,
         policy: VisualAppPolicy?,
     ) {
-        require(!(sensitivity == SensitivityClass.PROTECTED && policy == VisualAppPolicy.AUTO)) {
-            "protected apps cannot be granted persistent AUTO visual access"
-        }
+        // All persistent policies are valid. System-level screenshot restrictions are
+        // enforced by capture preflight/AccessibilityService rather than by App category.
     }
 }
