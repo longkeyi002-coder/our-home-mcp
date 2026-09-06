@@ -23,9 +23,38 @@ function proactiveRetryReady(candidate: ProactiveCandidate, asOfMs: number): boo
   return asOfMs - lastAttemptAt >= proactiveRetryDelayMs(candidate.attempts);
 }
 
+function supersedeStaleVisualOpportunities(events: WakeEvent[], asOf: string): void {
+  const latestByDevice = new Map<string, WakeEvent>();
+
+  for (const event of events) {
+    if (event.status !== "pending" || event.type !== "visual_opportunity" || !event.visualContext) continue;
+    if (event.visualContext.expiresAt <= asOf) {
+      event.status = "dismissed";
+      event.processingAt = undefined;
+      continue;
+    }
+    const deviceId = event.visualContext.deviceId;
+    const existing = latestByDevice.get(deviceId);
+    if (!existing || event.observedAt > existing.observedAt) {
+      latestByDevice.set(deviceId, event);
+    }
+  }
+
+  for (const event of events) {
+    if (event.status !== "pending" || event.type !== "visual_opportunity" || !event.visualContext) continue;
+    const latest = latestByDevice.get(event.visualContext.deviceId);
+    if (latest && latest.id !== event.id) {
+      event.status = "dismissed";
+      event.processingAt = undefined;
+    }
+  }
+}
+
 /**
  * V0.1 has one Runtime process and one JsonStore instance. Claims are persisted in the
  * same Store so a future accidental concurrent cycle cannot evaluate the same wake event.
+ * For visual opportunities, only the newest still-live foreground session per device may
+ * reach Brain; an older App transition is stale as soon as a newer session exists.
  */
 export async function claimPendingWakeEvents(
   store: JsonStore,
@@ -35,6 +64,7 @@ export async function claimPendingWakeEvents(
   const asOfMs = Date.parse(asOf);
   const claimedIds: string[] = [];
   const data = await store.update((draft) => {
+    supersedeStaleVisualOpportunities(draft.wakeEvents, asOf);
     for (const event of draft.wakeEvents) {
       if (event.status !== "pending") continue;
       if (activeClaim(event.processingAt, asOfMs)) continue;
