@@ -6,6 +6,7 @@ import com.hermes.companion.BuildConfig
 import com.hermes.companion.platform.UsageTimelineSummary
 import com.hermes.companion.privacy.PresencePrivacyStore
 import com.hermes.companion.push.PushRegistration
+import com.hermes.companion.vision.ObservationStatusNotification
 import com.hermes.companion.vision.VisualObservationWorker
 import java.time.LocalDate
 import java.util.UUID
@@ -18,6 +19,7 @@ class QueueRepository private constructor(
     private val settings: SettingsRepository,
     private val apiFactory: (String) -> HermesApi = ApiClient::create,
     private val visualRequestEnqueuer: (VisualRequestAck) -> Unit = {},
+    private val visualDecisionPoller: () -> Unit = {},
     private val pushRefresher: () -> Unit = {},
     private val outboundPrivacy: OutboundTelemetryPrivacy = OutboundTelemetryPrivacy { true },
 ) {
@@ -121,6 +123,7 @@ class QueueRepository private constructor(
 
         var uploaded = 0
         var firstError: String? = null
+        var visualDecisionPending = false
         for (event in dao.ready(now, 20)) {
             try {
                 val outcome = send(api, authorization, event)
@@ -128,7 +131,7 @@ class QueueRepository private constructor(
                 if (outcome.sent) {
                     uploaded += 1
                     settings.recordSuccessfulUpload(System.currentTimeMillis())
-                    enqueueVisualAck(outcome.ack)
+                    visualDecisionPending = mergeVisualAck(outcome.ack, visualDecisionPending)
                 }
             } catch (error: Throwable) {
                 if (error is HttpException && error.code() == 401 && settings.hasDeviceToken()) {
@@ -147,7 +150,7 @@ class QueueRepository private constructor(
                         if (outcome.sent) {
                             uploaded += 1
                             settings.recordSuccessfulUpload(System.currentTimeMillis())
-                            enqueueVisualAck(outcome.ack)
+                            visualDecisionPending = mergeVisualAck(outcome.ack, visualDecisionPending)
                         }
                     } catch (retryError: Throwable) {
                         val message = describeApiError("upload after re-registration", retryError)
@@ -161,6 +164,7 @@ class QueueRepository private constructor(
                 }
             }
         }
+        if (visualDecisionPending) runCatching { visualDecisionPoller() }
         return UploadResult(uploaded, firstError)
     }
 
@@ -175,9 +179,23 @@ class QueueRepository private constructor(
     suspend fun registerPushAddress(pushFid: String?, pushToken: String) {
         settings.savePushAddress(pushFid, pushToken)
         val serverUrl = settings.serverUrl()
-        val bootstrap = settings.bootstrapToken() ?: throw IllegalStateException("Registration token is missing")
         require(serverUrl.isNotBlank()) { "Server URL is missing" }
-        val response = apiFactory(serverUrl).register("Bearer $bootstrap", registrationRequest())
+        val api = apiFactory(serverUrl)
+        val request = registrationRequest()
+        val deviceToken = settings.deviceToken()
+        val bootstrap = settings.bootstrapToken()
+
+        val response = if (!deviceToken.isNullOrBlank()) {
+            try {
+                api.register("Bearer $deviceToken", request)
+            } catch (error: HttpException) {
+                if (error.code() != 401 || bootstrap.isNullOrBlank()) throw error
+                api.register("Bearer $bootstrap", request)
+            }
+        } else {
+            val enrollment = bootstrap ?: throw IllegalStateException("Registration token is missing")
+            api.register("Bearer $enrollment", request)
+        }
         settings.saveDeviceToken(response.token)
     }
 
@@ -209,12 +227,19 @@ class QueueRepository private constructor(
     }
 
     /**
-     * ACK handling is enqueue-only. Screenshot/provider work happens in VisualObservationWorker,
-     * never on the telemetry upload coroutine.
+     * ACK handling stays enqueue-only. A real request supersedes any older pending marker from
+     * the same upload cycle, so Android cannot schedule a redundant follow-up after capture work
+     * has already been handed off. The user-visible status is advanced only after Runtime has
+     * actually returned a concrete visual request; local Presence alone never claims AI is looking.
      */
-    private fun enqueueVisualAck(ack: ApiAck) {
-        val visualRequest = ack.visualRequest ?: return
-        runCatching { visualRequestEnqueuer(visualRequest) }
+    private fun mergeVisualAck(ack: ApiAck, pendingSoFar: Boolean): Boolean {
+        val visualRequest = ack.visualRequest
+        if (visualRequest != null) {
+            runCatching { ObservationStatusNotification.markAiComing(settings.context, visualRequest.packageName) }
+            runCatching { visualRequestEnqueuer(visualRequest) }
+            return false
+        }
+        return pendingSoFar || ack.visualDecisionPending
     }
 
     private suspend fun recordFailure(event: PendingEvent, now: Long, message: String) {
@@ -255,6 +280,7 @@ class QueueRepository private constructor(
                 dao = database.pendingEventDao(),
                 settings = settings,
                 visualRequestEnqueuer = { VisualObservationWorker.enqueue(appContext, it) },
+                visualDecisionPoller = { UploadWorker.enqueueVisualDecisionPoll(appContext) },
                 pushRefresher = { PushRegistration.refresh(appContext) },
                 outboundPrivacy = OutboundTelemetryPrivacy(presencePrivacy::exposesIdentity),
             )
@@ -267,13 +293,15 @@ class QueueRepository private constructor(
             visualRequestEnqueuer: (VisualRequestAck) -> Unit = {},
             pushRefresher: () -> Unit = {},
             identityExposure: (String) -> Boolean = { true },
+            visualDecisionPoller: () -> Unit = {},
         ) = QueueRepository(
-            dao,
-            settings,
-            apiFactory,
-            visualRequestEnqueuer,
-            pushRefresher,
-            OutboundTelemetryPrivacy(identityExposure),
+            dao = dao,
+            settings = settings,
+            apiFactory = apiFactory,
+            visualRequestEnqueuer = visualRequestEnqueuer,
+            visualDecisionPoller = visualDecisionPoller,
+            pushRefresher = pushRefresher,
+            outboundPrivacy = OutboundTelemetryPrivacy(identityExposure),
         )
     }
 }

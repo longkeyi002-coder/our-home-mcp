@@ -30,12 +30,12 @@ const MINUTE = 60_000;
 export const VISUAL_COOLDOWN_MS = 20 * MINUTE;
 
 const THRESHOLD_MS: Record<ContextUnderstandingState, number> = {
-  // Unknown context deserves earlier curiosity: the device fact exists, but we do not yet
-  // understand what the user is doing.
-  UNKNOWN: 10 * MINUTE,
-  PARTIAL: 15 * MINUTE,
-  // A user declaration / known context lowers urgency but never means "never look again".
-  KNOWN: 25 * MINUTE,
+  // Give an ordinary active session a chance to reach Brain while the user is still using it.
+  // Brain still decides look/ignore, and Android remains the final privacy/session veto.
+  UNKNOWN: 5 * MINUTE,
+  PARTIAL: 10 * MINUTE,
+  // Known context is intentionally less urgent, but can still be rechecked during sustained use.
+  KNOWN: 20 * MINUTE,
   // A meaningful contradiction should be reviewed sooner, still without calling a model loop.
   CONFLICT: 5 * MINUTE,
   STALE: 10 * MINUTE,
@@ -51,7 +51,7 @@ const CURIOSITY_REASON: Record<ContextUnderstandingState, CuriosityReason> = {
 
 /**
  * OH-44/OH-64/OH-65: cheap deterministic policy. This function may create a visual
- * request candidate only. It does not capture a screen, call Vision/Brain, or send a
+ * opportunity candidate only. It does not capture a screen, call Vision/Brain, or send a
  * user-facing message. Android Sensitive Guard is still authoritative at capture time.
  */
 export function decideCuriosity(input: CuriosityInput): CuriosityDecision {

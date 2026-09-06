@@ -4,22 +4,112 @@ Design Reference: OH-30, OH-31, OH-32, OH-43, OH-44, OH-66; issue #26 and the OH
 
 ## Implemented
 
-- Integrates the observation-boundary work from `feat/world-provenance-boundary` at `86aeea9` into the latest app-privacy line without replacing the intervening privacy changes.
-- Observation schema v3 stores world, provenance and optional evidence references. Legacy v1/v2 data is migrated deterministically on load and saved as v3 on the next successful store mutation. Ambiguous system/mock records remain explicitly unclassified and cannot drive Earth facts. Existing files are not overwritten on a read-only open.
-- Invalid enum values, partial boundaries, illegal world/provenance pairs and contradictory Earth source/confidence combinations are rejected. V3 records missing the mandatory boundary are rejected rather than silently migrated.
-- Earth state, bounded Brain observation context, semantic understanding, visual request generation, visual budget and phone liveness isolate the world boundary. Earth inferences may enter the explicitly labeled Brain context but cannot become observed device facts.
+### Observation evidence boundary
+
+- Observation schema v3 stores `world`, `provenance` and optional evidence references.
+- Invalid enum values, partial boundaries, illegal world/provenance pairs and contradictory Earth source/confidence combinations are rejected.
+- Earth state, bounded Brain observation context, semantic understanding, visual opportunity/budget decisions and phone liveness consume only valid Earth evidence.
 - Deduplication and hourly usage compaction include world/provenance so virtual records cannot replace real phone evidence.
-- Phone HTTP routes reject explicit non-Earth payloads and stamp their own Earth/observed boundary. MCP accepts explicit valid worlds and rejects illegal pairs. Store-generated observation IDs cannot be overwritten by an extra input field.
-- Pending v2 wake decisions and their pending notification candidates are dismissed during migration because their old embedded state was derived before world filtering. History remains; ordinary manually scheduled candidates remain pending. The wake baseline resets for fresh derivation.
+- Phone HTTP routes reject explicit non-Earth payloads and stamp their own Earth/observed boundary.
+- MCP observation writes accept explicit valid worlds and reject illegal evidence pairs.
+- Ambiguous legacy observation evidence remains quarantined and cannot drive Earth facts.
+
+### Canonical long-lived semantic records
+
+`DiaryEntry`, `ActionItem`, `RelationshipEvent` and `AgentActivity` now persist explicit `world + provenance` fields.
+
+A separate long-lived-record validator is used instead of weakening the stricter Observation evidence rules. For example:
+
+- `EARTH/authored` is legal for a real-world plan or diary entry;
+- `EARTH/authored` is still not valid observed device evidence;
+- `EARTH/simulated` is rejected;
+- `AI_WORLD/observed` is rejected;
+- `FICTION/user_declared` is rejected.
+
+New diary/action/relationship write paths preserve this boundary. Generated activity records inherit the boundary of the record/event that created them rather than inventing a new world.
+
+Relationship approval changes approval state only. User or agent approval cannot rewrite an AI World relationship event into Earth or vice versa.
+
+Compatibility calls that omit both world and provenance are **not guessed into Earth**. They fail closed into `FICTION/authored`. Supplying only one half of the boundary remains an error. New MCP callers are instructed to provide the boundary explicitly.
+
+Seed/mock diary/action/activity data is explicitly classified as Fiction rather than looking like reality.
+
+MCP read surfaces for diary, action, relationship event and activity support an explicit `world` filter so Earth/AI World/Fiction reads can be mechanically isolated instead of relying only on prompt discipline.
+
+### Fixed Earth routine configuration
+
+`RoutineWindow` is explicitly typed and persisted as:
+
+- `world = EARTH`
+- `provenance = user_declared`
+
+This is not a free-world record: the existing product contract defines the routine feature as the user's real-life schedule/context. Older boundary-less routine records can therefore be deterministically normalized to the same pair without guessing an ambiguous world.
+
+AI World scheduling must use its own future world-bound model rather than reusing the Earth routine structure.
+
+### Runtime/control-plane classification
+
+`docs/LONG_LIVED_RECORD_BOUNDARY_CLASSIFICATION.md` now distinguishes semantic world records from persisted Runtime mechanics.
+
+The following are persisted for reliability/control flow and are explicitly **not** canonical world memory merely because they live in the store:
+
+- `WakeEvent`
+- `WakeEngineState`
+- `HeartbeatRecord`
+- `ProactiveCandidate`
+- `VisualRequestRecord`
+- `PhoneDeviceRegistration`
+
+`ProactiveMessage` is classified as a communication/inbox artifact: its existence records that a message was left for the user, but statements inside its body are not Earth evidence.
+
+`HomeState` is classified as a legacy mutable UI/placeholder projection. It is neither the canonical Earth Life State nor the future canonical AI World state and must not be silently promoted to either.
+
+### Other boundary-sensitive runtime behavior
+
+- Pending old wake decisions whose embedded life state predates world filtering are not reused as trusted Earth decisions.
+- Proactive notification, visual observation and Care work continue to use Earth Life State rather than AI World/Fiction observation evidence.
+- No AI World persistent state machine has been added ahead of this gate.
 
 ## Verification
 
-`npm test`: TypeScript build passed; 136 tests passed, zero failures. Tests cover actual compiled local HTTP ingest, MCP, persistence round trips, cross-world consumers, duplicate keys, unknown boundaries and legacy pending decisions. Dependencies match the lockfile versions: TypeScript 6.0.3, tsx 4.20.6, zod 4.5.4, MCP SDK 1.30.0.
+Automated coverage includes:
 
-Android app-permission/status changes are preserved from the parent branch. No APK release, production deployment or model/provider request is part of this phase. This submission skips GitHub CI at the user's request to defer APK building; backend checks were run locally.
+- Observation boundary validation and cross-world consumer isolation;
+- long-lived-record boundary validation separate from evidence validation;
+- AI World diary/action persistence without Earth contamination;
+- relationship event world/provenance persistence and approval-boundary preservation;
+- audit activity inheriting its source record/event boundary;
+- illegal long-lived-record pairs failing before persistence;
+- legacy/unbounded internal and MCP writes being quarantined as `FICTION/authored` rather than promoted to Earth;
+- MCP world-filtered diary/action/relationship/activity reads;
+- new RoutineWindow records fixed to `EARTH/user_declared`;
+- deterministic normalization of older boundary-less RoutineWindow records to their already-defined Earth/user-declared semantics.
 
-## Scope and remaining gate
+Runtime CI passed on the code head containing relationship and routine boundary coverage. Runtime CI is exposed through temporary validation-only PR #37 because the actual feature line remains stacked; #37 is never a merge target.
 
-This is the observation-data prerequisite for AI World, not a claim that OH-P3 is implemented or that issue #26 has been fully closed. Legacy diary/activity/action domains still use their older source labels; before admitting them to canonical AI World memory, give those records explicit provenance and a reviewed migration. No AI World persisted state has been added ahead of that requirement. Real-phone P1/P2 acceptance remains a separate outstanding gate.
+No user-installable APK release, production deployment, or provider call is part of this boundary step.
 
-The next bounded step is the legacy long-lived-record boundary review/migration required by OH-30/OH-31, followed by OH-P3's persistent world state and deterministic progression.
+## Issue #26 exit-criteria review
+
+1. **Persisted schema mechanically represents world + provenance where the record is canonical semantic/factual memory — satisfied.**
+   Observation evidence and canonical semantic records have explicit boundaries; fixed Earth routines have literal boundaries; operational state is explicitly classified outside canonical memory.
+
+2. **Existing data is handled deterministically and safely — satisfied for the data that exists in this development instance.**
+   Observation migration quarantines ambiguous legacy evidence rather than upgrading it to Earth. Old pending decisions derived before filtering are invalidated. RoutineWindow normalization is deterministic because the old feature contract was already Earth/user-declared. There is no meaningful corpus of old user diary/action/relationship/activity data requiring a standalone migration project; compatibility writes fail closed instead of manufacturing Earth truth.
+
+3. **Earth-state derivation consumes only valid Earth evidence — satisfied.**
+   AI World/Fiction and quarantined observation records cannot drive Earth Life State or its visual/phone consumers.
+
+4. **Tests prove AI World/Fiction cannot alter Earth facts — satisfied.**
+   Cross-world evidence, semantic record, read-filter and downstream-consumer tests cover the boundary.
+
+5. **AI World implementation did not start before the prerequisite was complete — satisfied.**
+   No canonical AI World state machine/progression has been introduced yet.
+
+## P3 start decision
+
+The world/provenance persistence prerequisite itself is now complete enough to remove the **world-boundary** blocker on OH-P3.
+
+This does **not** mean OH-P3 is implemented. P3 should start by introducing a new explicit `AI_WORLD` state/history model with deterministic time progression and restart persistence. It must not relabel `HomeState`, inbox messages, Wake events or other Runtime control structures as AI World memory.
+
+Real-device P1/P2 acceptance remains a separate outstanding gate and is not reclassified by this decision.

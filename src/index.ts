@@ -7,7 +7,7 @@ import { createOurHomeServer } from "./server.js";
 import { JsonStore, parseBoolean } from "./store.js";
 import { createDeviceToken, registerPhone } from "./phone-registration.js";
 import { derivePhoneTelemetryStatus } from "./phone-status.js";
-import { deriveVisualRequest } from "./visual-request.js";
+import { deriveVisualOpportunity, VISUAL_TRANSITION_REASON } from "./visual-request.js";
 import { startRuntimeWorker } from "./worker.js";
 import { listenOrThrow } from "./http-listen.js";
 import { deriveRuntimeMessagingStatus } from "./runtime-messaging-status.js";
@@ -227,6 +227,32 @@ async function startHttpServer(): Promise<void> {
   process.stderr.write(`Our Home MCP listening at http://${host}:${port}/mcp\n`);
 }
 
+function brainVisualDecisionConfigured(): boolean {
+  return Boolean(
+    (process.env.OUR_HOME_HERMES_API_URL && process.env.OUR_HOME_HERMES_API_KEY)
+    || process.env.OUR_HOME_DECISION_WEBHOOK_URL,
+  );
+}
+
+function visualAckFields(deviceId: string | undefined): Record<string, unknown> {
+  if (!deviceId) return {};
+  const asOf = new Date().toISOString();
+  const pendingRequest = store.getPendingVisualRequest(deviceId, asOf);
+  const visualRequest = pendingRequest ? {
+    requestId: pendingRequest.requestId,
+    packageName: pendingRequest.packageName,
+    sessionId: pendingRequest.sessionId,
+    reason: pendingRequest.reason,
+    issuedAt: pendingRequest.issuedAt,
+    expiresAt: pendingRequest.expiresAt,
+  } : undefined;
+  const visualDecisionPending = !visualRequest && store.hasPendingVisualDecision(deviceId, asOf);
+  return {
+    ...(visualRequest ? { visualRequest } : {}),
+    ...(visualDecisionPending ? { visualDecisionPending: true } : {}),
+  };
+}
+
 async function handlePhoneObservations(
   request: import("node:http").IncomingMessage,
   response: import("node:http").ServerResponse,
@@ -248,7 +274,6 @@ async function handlePhoneObservations(
       return;
     }
     const observations = [];
-    let visualRequest: ReturnType<typeof deriveVisualRequest> = null;
     for (const item of items) {
       const existing = item.clientEventId
         ? store.snapshot().observations.find((observation) => observation.world === "EARTH" && observation.provenance === "observed" && observation.deviceId === item.deviceId && observation.metadata?.clientEventId === item.clientEventId)
@@ -267,12 +292,31 @@ async function handlePhoneObservations(
         metadata: item.clientEventId ? { ...(item.metadata ?? {}), clientEventId: item.clientEventId } : item.metadata,
       });
       observations.push(observation);
-      if (!visualRequest) visualRequest = deriveVisualRequest(observation, store.snapshot().observations);
+
+      const opportunity = deriveVisualOpportunity(observation, store.snapshot().observations);
+      if (opportunity?.curiosityReason === VISUAL_TRANSITION_REASON) {
+        // App sensing and AI looking are separate layers. A real allowed foreground switch
+        // immediately hands the exact new session to the visual subsystem; do not wait for the
+        // generic Life Loop or spend a pre-look Brain call asking whether the required first look
+        // should happen. Android remains the final privacy/screen/session veto. The completed
+        // visual summary wakes Brain afterwards for interpretation and the separate speak/ignore choice.
+        const wake = await store.enqueueVisualOpportunity(opportunity);
+        await store.applyWakeDecision(
+          wake.id,
+          { action: "request_visual", reason: VISUAL_TRANSITION_REASON },
+          observation.observedAt,
+        );
+      } else if (opportunity && brainVisualDecisionConfigured()) {
+        // Sustained dwell/Curiosity remains optional Brain-directed observation.
+        await store.enqueueVisualOpportunity(opportunity);
+      }
     }
+    const deviceIds = [...new Set(items.map((item) => item.deviceId).filter((value): value is string => Boolean(value)))];
+    const ackDeviceId = deviceIds.length === 1 ? deviceIds[0] : undefined;
     response.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({
       observations,
       dataSource: "phone-ingest",
-      ...(visualRequest ? { visualRequest } : {}),
+      ...visualAckFields(ackDeviceId),
     }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Phone observation failed";
@@ -307,7 +351,12 @@ async function handlePhoneHeartbeat(
       const foregroundObservation = parsed.data.foregroundPackage
         ? store.snapshot().observations.find((item) => item.world === "EARTH" && item.provenance === "observed" && item.kind === "screen_app" && item.deviceId === parsed.data.deviceId && item.observedAt === observedAt && item.value === parsed.data.foregroundPackage)
         : undefined;
-      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ observation: existing, foregroundObservation, dataSource: "phone-ingest" }));
+      response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({
+        observation: existing,
+        foregroundObservation,
+        dataSource: "phone-ingest",
+        ...visualAckFields(parsed.data.deviceId),
+      }));
       return;
     }
     const metadata = {
@@ -344,7 +393,12 @@ async function handlePhoneHeartbeat(
         clientEventId: parsed.data.clientEventId ? `${parsed.data.clientEventId}:foreground` : undefined,
       });
     }
-    response.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({ observation, foregroundObservation, dataSource: "phone-ingest" }));
+    response.writeHead(201, { "content-type": "application/json" }).end(JSON.stringify({
+      observation,
+      foregroundObservation,
+      dataSource: "phone-ingest",
+      ...visualAckFields(parsed.data.deviceId),
+    }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Phone heartbeat failed";
     response.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: message }));
@@ -402,4 +456,3 @@ async function readJsonBody(request: import("node:http").IncomingMessage, maxByt
   const raw = Buffer.concat(chunks).toString("utf8");
   return JSON.parse(raw);
 }
-

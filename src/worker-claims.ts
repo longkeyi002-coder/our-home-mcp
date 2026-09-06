@@ -23,9 +23,38 @@ function proactiveRetryReady(candidate: ProactiveCandidate, asOfMs: number): boo
   return asOfMs - lastAttemptAt >= proactiveRetryDelayMs(candidate.attempts);
 }
 
+function supersedeStaleVisualOpportunities(events: WakeEvent[], asOf: string): void {
+  const latestByDevice = new Map<string, WakeEvent>();
+
+  for (const event of events) {
+    if (event.status !== "pending" || event.type !== "visual_opportunity" || !event.visualContext) continue;
+    if (event.visualContext.expiresAt <= asOf) {
+      event.status = "dismissed";
+      event.processingAt = undefined;
+      continue;
+    }
+    const deviceId = event.visualContext.deviceId;
+    const existing = latestByDevice.get(deviceId);
+    if (!existing || event.observedAt > existing.observedAt) {
+      latestByDevice.set(deviceId, event);
+    }
+  }
+
+  for (const event of events) {
+    if (event.status !== "pending" || event.type !== "visual_opportunity" || !event.visualContext) continue;
+    const latest = latestByDevice.get(event.visualContext.deviceId);
+    if (latest && latest.id !== event.id) {
+      event.status = "dismissed";
+      event.processingAt = undefined;
+    }
+  }
+}
+
 /**
  * V0.1 has one Runtime process and one JsonStore instance. Claims are persisted in the
  * same Store so a future accidental concurrent cycle cannot evaluate the same wake event.
+ * For visual opportunities, only the newest still-live foreground session per device may
+ * reach Brain; an older App transition is stale as soon as a newer session exists.
  */
 export async function claimPendingWakeEvents(
   store: JsonStore,
@@ -35,6 +64,7 @@ export async function claimPendingWakeEvents(
   const asOfMs = Date.parse(asOf);
   const claimedIds: string[] = [];
   const data = await store.update((draft) => {
+    supersedeStaleVisualOpportunities(draft.wakeEvents, asOf);
     for (const event of draft.wakeEvents) {
       if (event.status !== "pending") continue;
       if (activeClaim(event.processingAt, asOfMs)) continue;
@@ -97,7 +127,14 @@ export async function claimDueProactiveMessages(
 export async function releaseProactiveClaim(store: JsonStore, id: string): Promise<void> {
   await store.update((data) => {
     const candidate = data.proactiveQueue.find((item) => item.id === id);
-    if (candidate) candidate.processingAt = undefined;
+    if (!candidate) return;
+    // `processingAt` is stamped from the Runtime cycle's asOf clock. Store.recordProactiveAttempt
+    // still uses wall-clock time for backward-compatible direct callers, but Worker retry policy
+    // must remain in one clock domain for deterministic replay/catch-up and stable tests.
+    if (candidate.processingAt && candidate.attempts > 0) {
+      candidate.lastAttemptAt = candidate.processingAt;
+    }
+    candidate.processingAt = undefined;
   });
 }
 

@@ -50,4 +50,4 @@ jobs:
       # stable user signing identity, so it intentionally does not publish an APK.
       # User-installable builds come from android-stable-apk.yml.
       - name: Test, lint and assemble debug APK
-        run: ./gradlew :app:test :app:lint :app:assembleDebug --no-daemon --stacktrace
+        run: ./gradlew :app:test :app:lint :app:assembleDebug :app:compileDebugAndroidTestKotlin --no-daemon --stacktrace

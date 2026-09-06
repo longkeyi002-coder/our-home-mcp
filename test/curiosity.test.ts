@@ -5,23 +5,23 @@ import { decideCuriosity, VISUAL_COOLDOWN_MS } from "../src/curiosity.js";
 const minute = 60_000;
 const now = Date.parse("2026-09-05T00:00:00Z");
 
-test("unknown context becomes curious earlier than known context", () => {
+test("unknown active context becomes curious earlier than known context", () => {
   assert.deepEqual(
-    decideCuriosity({ understanding: "UNKNOWN", dwellMs: 10 * minute, screenUsable: true, nowMs: now }),
-    { requestVisual: true, reason: "unknown_dwell", thresholdMs: 10 * minute },
+    decideCuriosity({ understanding: "UNKNOWN", dwellMs: 5 * minute, screenUsable: true, nowMs: now }),
+    { requestVisual: true, reason: "unknown_dwell", thresholdMs: 5 * minute },
   );
-  const known = decideCuriosity({ understanding: "KNOWN", dwellMs: 10 * minute, screenUsable: true, nowMs: now });
+  const known = decideCuriosity({ understanding: "KNOWN", dwellMs: 5 * minute, screenUsable: true, nowMs: now });
   assert.equal(known.requestVisual, false);
   assert.equal(known.reason, "dwell_too_short");
-  assert.equal(known.thresholdMs, 25 * minute);
+  assert.equal(known.thresholdMs, 20 * minute);
 });
 
 test("user-declared or known context lowers urgency but never disables future recheck", () => {
-  const before = decideCuriosity({ understanding: "KNOWN", dwellMs: 24 * minute, screenUsable: true, nowMs: now });
+  const before = decideCuriosity({ understanding: "KNOWN", dwellMs: 19 * minute, screenUsable: true, nowMs: now });
   assert.equal(before.requestVisual, false);
   assert.equal(before.reason, "dwell_too_short");
 
-  const after = decideCuriosity({ understanding: "KNOWN", dwellMs: 25 * minute, screenUsable: true, nowMs: now });
+  const after = decideCuriosity({ understanding: "KNOWN", dwellMs: 20 * minute, screenUsable: true, nowMs: now });
   assert.equal(after.requestVisual, true);
   assert.equal(after.reason, "known_dwell_recheck");
 });

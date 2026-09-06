@@ -31,12 +31,27 @@ export type ProactiveCandidateStatus = "pending" | "delivered" | "dismissed";
 export type LifeActivity = "active_on_phone" | "probably_idle" | "charging" | "offline" | "unknown";
 export type DevicePresence = "online" | "screen_on" | "screen_off" | "idle" | "unknown";
 export type ConnectivityState = "online" | "offline" | "unknown";
-export type WakeEventType = "became_active" | "became_idle" | "device_offline" | "charging_started" | "battery_low" | "long_dwell";
+export type WakeEventType = "became_active" | "became_idle" | "device_offline" | "charging_started" | "battery_low" | "long_dwell" | "visual_opportunity" | "visual_result";
 export type WakeEventStatus = "pending" | "handled" | "dismissed";
 export type WakeEventPriority = "low" | "normal" | "high";
+export type VisualRequestStatus = "pending" | "observed";
+export type AiWorldWeather = "clear" | "cloudy" | "rain";
+export type AiWorldWorkState = "resting" | "preparing" | "working" | "off_duty";
+export type AiWorldActivity = "sleeping" | "morning_routine" | "focused_work" | "midday_break" | "free_time" | "winding_down";
+export type AiWorldRoom = "bedroom" | "study" | "living_room" | "kitchen";
+export type AiWorldLocation = "our_home";
+export type AiWorldItemKind = "task" | "waiting" | "plan" | "idea" | "question" | "hobby" | "interest" | "collection";
+export type AiWorldItemStatus = "active" | "completed" | "archived";
+export type AiWorldItemProvenance = "inferred" | "simulated" | "authored" | "model_generated";
+export type AiWorldNoteKind = "note" | "journal";
+export type AiWorldThoughtThreadStatus = "active" | "resolved" | "archived";
+export type AiWorldInterestEvidenceDirection = "support" | "counter";
+export type AiWorldSoulChangeReason = "preference_evidence" | "time_decay";
 
 export interface DiaryEntry {
   id: string;
+  world: ObservationWorld;
+  provenance: ObservationProvenance;
   title: string;
   body: string;
   author: Actor;
@@ -48,6 +63,8 @@ export interface DiaryEntry {
 
 export interface RelationshipEvent {
   id: string;
+  world: ObservationWorld;
+  provenance: ObservationProvenance;
   title: string;
   description?: string;
   occurredAt: string;
@@ -61,6 +78,8 @@ export interface RelationshipEvent {
 
 export interface ActionItem {
   id: string;
+  world: ObservationWorld;
+  provenance: ObservationProvenance;
   title: string;
   description?: string;
   status: ActionStatus;
@@ -72,6 +91,8 @@ export interface ActionItem {
 
 export interface AgentActivity {
   id: string;
+  world: ObservationWorld;
+  provenance: ObservationProvenance;
   kind: string;
   title: string;
   summary?: string;
@@ -126,6 +147,14 @@ export interface LifeState {
   reasons: string[];
 }
 
+export interface VisualWakeContext {
+  deviceId: string;
+  packageName: string;
+  sessionId: string;
+  curiosityReason: string;
+  expiresAt: string;
+}
+
 export interface WakeEvent {
   id: string;
   type: WakeEventType;
@@ -137,8 +166,23 @@ export interface WakeEvent {
   dedupeKey: string;
   lifeState: LifeState;
   previousLifeState: LifeState;
+  /** Present only for a bounded Brain decision about whether to request one visual observation. */
+  visualContext?: VisualWakeContext;
   /** Durable single-worker lease marker; cleared after success/failure or on owner restart. */
   processingAt?: string;
+}
+
+export interface VisualRequestRecord {
+  requestId: string;
+  deviceId: string;
+  packageName: string;
+  sessionId: string;
+  reason: string;
+  issuedAt: string;
+  expiresAt: string;
+  status: VisualRequestStatus;
+  wakeEventId: string;
+  observedAt?: string;
 }
 
 export interface WakeEngineState {
@@ -148,6 +192,8 @@ export interface WakeEngineState {
 
 export interface RoutineWindow {
   id: string;
+  world: "EARTH";
+  provenance: "user_declared";
   label: string;
   weekdays: number[];
   startLocal: string;
@@ -159,11 +205,207 @@ export interface RoutineWindow {
   updatedAt: string;
 }
 
+export interface AiWorldState {
+  world: "AI_WORLD";
+  provenance: "simulated";
+  timezone: string;
+  home: "our_home";
+  /** Current high-level virtual location. P3 V0.1 starts inside Our Home only. */
+  location: AiWorldLocation;
+  room: AiWorldRoom;
+  weather: AiWorldWeather;
+  workState: AiWorldWorkState;
+  currentActivity: AiWorldActivity;
+  /** Stable local-date/daypart key used for deterministic idempotency. */
+  phaseKey: string;
+  lastTransitionAt: string;
+  updatedAt: string;
+}
+
+export interface AiWorldHistoryEvent {
+  id: string;
+  world: "AI_WORLD";
+  provenance: "simulated";
+  kind: "initialized" | "state_transition";
+  occurredAt: string;
+  fromPhaseKey?: string;
+  toPhaseKey: string;
+  changes: Partial<Record<"location" | "room" | "weather" | "workState" | "currentActivity", string>>;
+}
+
+export interface AiWorldItem {
+  id: string;
+  world: "AI_WORLD";
+  provenance: AiWorldItemProvenance;
+  source: "AGENT_LIFE";
+  kind: AiWorldItemKind;
+  title: string;
+  note?: string;
+  status: AiWorldItemStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A reusable summary of something the AI experienced in its own world. */
+export interface AiWorldExperience {
+  id: string;
+  world: "AI_WORLD";
+  provenance: AiWorldItemProvenance;
+  source: "AGENT_LIFE";
+  summary: string;
+  occurredAt: string;
+  createdAt: string;
+  confidence?: number;
+  evidenceRefs?: string[];
+  lastReviewedAt?: string;
+  nextReviewAt?: string;
+}
+
+/** Public-style note/journal content, not hidden reasoning. */
+export interface AiWorldNote {
+  id: string;
+  world: "AI_WORLD";
+  provenance: AiWorldItemProvenance;
+  source: "AGENT_LIFE";
+  kind: AiWorldNoteKind;
+  title: string;
+  body: string;
+  evidenceRefs?: string[];
+  nextReviewAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Structured thought continuity only. This intentionally stores no reasoning steps or hidden
+ * chain-of-thought: only a reusable topic/summary plus optional conclusion/open question.
+ */
+export interface AiWorldThoughtThread {
+  id: string;
+  world: "AI_WORLD";
+  provenance: AiWorldItemProvenance;
+  source: "AGENT_LIFE";
+  title: string;
+  summary: string;
+  conclusion?: string;
+  openQuestion?: string;
+  status: AiWorldThoughtThreadStatus;
+  evidenceRefs?: string[];
+  nextReviewAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** One bounded, explicit piece of evidence about an AI World interest. */
+export interface AiWorldInterestEvidence {
+  id: string;
+  world: "AI_WORLD";
+  provenance: AiWorldItemProvenance;
+  source: "AGENT_LIFE";
+  interestKey: string;
+  evidenceKey: string;
+  direction: AiWorldInterestEvidenceDirection;
+  strength: number;
+  reason: string;
+  occurredAt: string;
+  createdAt: string;
+  evidenceRefs?: string[];
+}
+
+/** Derived preference precursor. This is not Soul and is always inferred from evidence. */
+export interface AiWorldPreferenceState {
+  id: string;
+  world: "AI_WORLD";
+  provenance: "inferred";
+  source: "AGENT_LIFE";
+  interestKey: string;
+  score: number;
+  evidenceCount: number;
+  /** Bounded trace of the most recent evidence records used by the reducer. */
+  evidenceIds: string[];
+  lastEvidenceAt: string;
+  lastEvaluatedAt: string;
+  /** Set only by the explicit deterministic preference-review lifecycle. */
+  lastReviewedAt?: string;
+  nextReviewAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Slow Soul tendency derived only from reviewed preference evidence. */
+export interface AiWorldSoulTendency {
+  id: string;
+  world: "AI_WORLD";
+  provenance: "inferred";
+  source: "AGENT_LIFE";
+  interestKey: string;
+  score: number;
+  /** Evidence represented by the latest accepted preference basis. */
+  evidenceCount: number;
+  evidenceIds: string[];
+  lastChangedAt: string;
+  lastReviewedAt?: string;
+  nextReviewAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Append-only audit of every accepted Soul reinforcement/correction or deterministic decay. */
+export interface AiWorldSoulChange {
+  id: string;
+  world: "AI_WORLD";
+  provenance: "inferred";
+  source: "AGENT_LIFE";
+  interestKey: string;
+  reason: AiWorldSoulChangeReason;
+  beforeScore: number;
+  afterScore: number;
+  delta: number;
+  occurredAt: string;
+  basisPreferenceId?: string;
+  /** Stable dedupe key for one canonical evidence set. */
+  basisKey?: string;
+  basisEvidenceIds?: string[];
+}
+
+export interface AiWorldContinuityData {
+  experiences: AiWorldExperience[];
+  notes: AiWorldNote[];
+  thoughtThreads: AiWorldThoughtThread[];
+  interestEvidence?: AiWorldInterestEvidence[];
+  preferences?: AiWorldPreferenceState[];
+  soulTendencies?: AiWorldSoulTendency[];
+  soulChanges?: AiWorldSoulChange[];
+}
+
+export interface AiWorldData {
+  state: AiWorldState;
+  history: AiWorldHistoryEvent[];
+  /** Structured P3 continuity collections. Missing means pre-P3.2 data and is treated as empty. */
+  items?: AiWorldItem[];
+  /** P4 reusable continuity; missing means pre-P4.1 data and is treated as empty. */
+  continuity?: AiWorldContinuityData;
+}
+
+export interface AiWorldSnapshot {
+  /** Computed current absolute clock; reading it does not require a persistence write. */
+  clockAt: string;
+  state: AiWorldState;
+  recentHistory: AiWorldHistoryEvent[];
+}
+
 export interface HeartbeatRecord {
   id: string;
   occurredAt: string;
   summary: string;
   source: "system";
+}
+
+export interface ProactiveDeliveryPolicyTrace {
+  evaluatedAt: string;
+  outcome: "deferred" | "suppressed";
+  reason: string;
+  nextAvailableAt?: string;
 }
 
 export interface ProactiveCandidate {
@@ -182,6 +424,8 @@ export interface ProactiveCandidate {
   source: "AGENT_LIFE" | "HOME_STATE";
   dedupeKey?: string;
   wakeEventId?: string;
+  /** Last deterministic Runtime policy decision that prevented immediate delivery. */
+  lastDeliveryPolicy?: ProactiveDeliveryPolicyTrace;
   /** Durable single-worker lease marker; not a user-visible state. */
   processingAt?: string;
 }
@@ -196,6 +440,7 @@ export interface PhoneDeviceRegistration {
 
 export type WakeDecision =
   | { action: "ignore" }
+  | { action: "request_visual"; reason: string }
   | { action: "proactive_message"; candidate: { title: string; message: string; reason: string; dueAt?: string; dedupeKey?: string } };
 
 export interface LifeContext {
@@ -223,6 +468,10 @@ export interface OurHomeData {
   wakeEvents: WakeEvent[];
   wakeEngineState: WakeEngineState;
   phoneDeviceRegistrations: PhoneDeviceRegistration[];
+  /** Runtime-issued requests awaiting or having completed one Android-local guarded capture. */
+  visualRequests?: VisualRequestRecord[];
+  /** Canonical AI World state/history + structured continuity, separate from legacy HomeState. */
+  aiWorld?: AiWorldData;
 }
 
 export interface DataStatus {
@@ -232,4 +481,3 @@ export interface DataStatus {
   fetchedAt: string;
   note?: string;
 }
-

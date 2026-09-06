@@ -59,20 +59,23 @@ export async function registerPhone(
   body: unknown,
   enrollmentToken?: string,
 ) {
+  const input = phoneRegisterSchema.parse(body);
   const presentedToken = authorization?.startsWith("Bearer ")
     ? authorization.slice("Bearer ".length)
     : undefined;
   const normalizedEnrollmentToken = normalizeEnrollmentToken(enrollmentToken);
 
-  // Accept the register-only enrollment token OR the existing ingest token.
-  // Whitespace around the enrollment token is ignored so deployment env-file
-  // formatting cannot cause a misleading registration 401.
-  const validTokens = normalizedEnrollmentToken
-    ? [ingestToken, normalizedEnrollmentToken]
-    : [ingestToken];
+  // Initial enrollment accepts the register-only credential (or the ingest secret for
+  // backward-compatible operations). Once enrolled, a phone may also use its own
+  // device-scoped token to refresh appVersion / FCM address for this exact deviceId.
+  // The device token is an HMAC bound to input.deviceId, so it cannot update another device.
+  const validTokens = [
+    ingestToken,
+    ...(normalizedEnrollmentToken ? [normalizedEnrollmentToken] : []),
+    createDeviceToken(ingestToken, input.deviceId),
+  ];
   if (!matchesAnyToken(presentedToken, validTokens)) throw new Error("Unauthorized");
 
-  const input = phoneRegisterSchema.parse(body);
   await store.registerPhoneDevice(input);
   return {
     deviceId: input.deviceId,

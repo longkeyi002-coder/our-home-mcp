@@ -2,10 +2,36 @@ import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
 import type { BrainAdapter } from "./brain.js";
 import type { JsonStore } from "./store.js";
-import type { LifeContext, ProactiveCandidate, WakeDecision, WakeEvent } from "./types.js";
+import type { LifeContext, ProactiveCandidate, WakeEvent } from "./types.js";
 import { HermesDecisionEngine } from "./hermes-decision.js";
 import { FcmHttpV1Sender, FcmNotifier } from "./fcm.js";
 import { decideCareDelivery } from "./care-delivery.js";
+import { quietHoursPolicyFromEnv, type QuietHoursPolicy } from "./quiet-hours.js";
+import { advancePersistedAiWorld } from "./ai-world-store.js";
+import { aiWorldTimezoneFromEnv } from "./ai-world.js";
+import { reviewDueAiWorldPreferences } from "./ai-world-preference.js";
+import { applyReviewedPreferenceToSoul, reviewDueAiWorldSoul } from "./ai-world-soul.js";
+import {
+  runAiWorldReflectionCycle,
+  WebhookReflectionEngine,
+  type AiWorldReflectionAdapter,
+} from "./ai-world-reflection.js";
+import { HermesReflectionEngine } from "./hermes-reflection.js";
+import {
+  runAiWorldExplorationCycle,
+  type AiWorldExplorationAdapter,
+} from "./ai-world-exploration.js";
+import {
+  aiWorldExplorationConfigFromEnv,
+  selectAiWorldExplorationAdapter,
+} from "./ai-world-exploration-runtime.js";
+import { createAiWorldShareIntent } from "./ai-world-share-intent.js";
+import {
+  runRelationshipReplyReviewCycle,
+  WebhookRelationshipReplyReviewEngine,
+  type RelationshipReplyReviewAdapter,
+} from "./relationship-reply-review.js";
+import { enqueueVisualResultWakeEvents, visualResultWakeExpired } from "./visual-result-wake.js";
 import {
   claimDueProactiveMessages,
   claimPendingWakeEvents,
@@ -25,6 +51,7 @@ export interface ProactiveNotifier {
 
 const decisionResponseSchema = z.discriminatedUnion("action", [
   z.object({ action: z.literal("ignore") }),
+  z.object({ action: z.literal("request_visual"), reason: z.string().trim().min(1).max(1_000) }),
   z.object({ action: z.literal("proactive_message"), candidate: z.object({
     title: z.string().trim().min(1).max(200),
     message: z.string().trim().min(1).max(5_000),
@@ -54,6 +81,12 @@ export class WebhookDecisionEngine implements BrainAdapter {
     if (!response.ok) throw new Error(`Decision engine returned HTTP ${response.status}`);
     const parsed = decisionResponseSchema.safeParse(await response.json());
     if (!parsed.success) throw new Error("Decision engine returned an invalid candidate payload");
+    if (input.wakeEvent.type === "visual_opportunity" && parsed.data.action === "proactive_message") {
+      throw new Error("Visual opportunity cannot directly create a proactive message");
+    }
+    if (input.wakeEvent.type !== "visual_opportunity" && parsed.data.action === "request_visual") {
+      throw new Error("Only a visual opportunity may request visual observation");
+    }
     return parsed.data;
   }
 }
@@ -98,14 +131,119 @@ export async function runProactiveCycle(
   notifier: ProactiveNotifier,
   asOf = new Date(),
   decisionEngine?: BrainAdapter,
+  quietHoursPolicy: QuietHoursPolicy = quietHoursPolicyFromEnv({}),
+  aiWorldTimezone = "UTC",
+  reflectionEngine?: AiWorldReflectionAdapter,
+  explorationAdapter?: AiWorldExplorationAdapter,
+  relationshipReplyReviewEngine?: RelationshipReplyReviewAdapter,
 ): Promise<{ heartbeatId: string; wakeEventCount: number; dueCount: number; deliveredCount: number; failedCount: number }> {
   const observedAt = asOf.toISOString();
+
+  // OH-P3: deterministic AI World progression is independent from Brain availability.
+  // Failure is isolated so a corrupt/invalid AI World cannot block Earth Care/Delivery.
+  try {
+    await advancePersistedAiWorld(store, observedAt, aiWorldTimezone);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown AI World error";
+    process.stderr.write(`[our-home] ai-world advance failed: ${message}\n`);
+  }
+
+  // OH-P4: Preference review, reviewed-evidence Soul promotion, and Soul decay are
+  // deterministic zero-model-cost identity maintenance. They must continue while Brain sleeps.
+  // Any corrupt identity state is isolated from Earth heartbeat/Wake/Care/Delivery.
+  try {
+    const reviewedPreferences = await reviewDueAiWorldPreferences(store, observedAt);
+    for (const preference of reviewedPreferences) {
+      await applyReviewedPreferenceToSoul(store, preference.interestKey, observedAt);
+    }
+    await reviewDueAiWorldSoul(store, observedAt);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown AI World identity maintenance error";
+    process.stderr.write(`[our-home] ai-world identity maintenance failed: ${message}\n`);
+  }
+
+  // OH-P4.4/P5.5: reflection stays AI World-only. A successfully recorded/reconciled public
+  // Thought Thread may create one internal maybe-share intent, but that intent is not an Earth
+  // notification or delivery candidate and cannot block the rest of the Life Loop.
+  if (reflectionEngine) {
+    try {
+      const reflection = await runAiWorldReflectionCycle(store, reflectionEngine, observedAt);
+      if (reflection.attempted || reflection.status === "reconciled") {
+        process.stderr.write(`[our-home] ai-world reflection=${reflection.status} source=${reflection.sourceKey ?? "none"}\n`);
+      }
+      if (reflection.reflectionThreadId && (reflection.status === "recorded" || reflection.status === "reconciled")) {
+        try {
+          const share = await createAiWorldShareIntent(store, {
+            basisType: "thought_thread",
+            basisId: reflection.reflectionThreadId,
+          }, observedAt);
+          process.stderr.write(
+            `[our-home] ai-world maybe_share=${share.duplicate ? "existing" : "created"} basis=${share.intent.basisKey}\n`,
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown AI World share-intent error";
+          process.stderr.write(`[our-home] ai-world maybe_share handoff failed: ${message}\n`);
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown AI World reflection error";
+      process.stderr.write(`[our-home] ai-world reflection failed: ${message}\n`);
+    }
+  }
+
+  // OH-P5: autonomous exploration is an optional step inside the same single-owner Life Loop.
+  // The adapter only exists when explicitly enabled. P5.1 remains the authority for free-time,
+  // topic, cooldown/backoff and daily budget eligibility; failure cannot block Earth Care.
+  if (explorationAdapter) {
+    try {
+      const exploration = await runAiWorldExplorationCycle(store, explorationAdapter, observedAt, true);
+      if (exploration.attempted) {
+        process.stderr.write(`[our-home] ai-world exploration=${exploration.status} topic=${exploration.topic?.topicKey ?? "none"}\n`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown AI World exploration error";
+      process.stderr.write(`[our-home] ai-world exploration failed: ${message}\n`);
+    }
+  }
+
+  // OH-P6.2: reply interpretation is a bounded inferred-proposal path. It can read only the
+  // exact reply/message pair and cannot directly write Preference/Soul or create a delivery.
+  if (relationshipReplyReviewEngine) {
+    try {
+      const review = await runRelationshipReplyReviewCycle(store, relationshipReplyReviewEngine, observedAt);
+      if (review.attempted || review.status === "reconciled") {
+        process.stderr.write(
+          `[our-home] relationship reply review=${review.status} content=${review.replyContentId ?? "none"}\n`,
+        );
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown relationship reply review error";
+      process.stderr.write(`[our-home] relationship reply review failed: ${message}\n`);
+    }
+  }
+
   const heartbeat = await store.recordHeartbeat("独立 Life Loop 心跳：检查主动消息队列。");
   const wakeEvents = await store.evaluateWakeEvents(observedAt);
+  let visualResultWakeCount = 0;
 
   if (decisionEngine) {
+    const visualResultWakeEvents = await enqueueVisualResultWakeEvents(store, observedAt);
+    visualResultWakeCount = visualResultWakeEvents.length;
     const claimedWakeEvents = await claimPendingWakeEvents(store, observedAt, 5);
     for (const wakeEvent of claimedWakeEvents) {
+      if (
+        wakeEvent.type === "visual_opportunity"
+        && (!wakeEvent.visualContext || wakeEvent.visualContext.expiresAt <= observedAt)
+      ) {
+        await store.resolveWakeEvent(wakeEvent.id, "dismissed");
+        await clearWakeEventClaim(store, wakeEvent.id);
+        continue;
+      }
+      if (visualResultWakeExpired(wakeEvent, observedAt)) {
+        await store.resolveWakeEvent(wakeEvent.id, "dismissed");
+        await clearWakeEventClaim(store, wakeEvent.id);
+        continue;
+      }
       try {
         const decision = decisionResponseSchema.parse(await decisionEngine.evaluate({
           wakeEvent,
@@ -114,12 +252,17 @@ export async function runProactiveCycle(
         await store.applyWakeDecision(wakeEvent.id, decision, observedAt);
         await clearWakeEventClaim(store, wakeEvent.id);
       } catch (error) {
-        // Do not release the claim immediately. The persisted five-minute lease acts as
-        // the V0.1 Brain retry cooldown, so a failing Hermes/provider cannot be called
-        // again every worker cycle. The claim becomes eligible automatically after the
-        // lease expires; a clean Runtime restart also recovers orphaned claims.
         const message = error instanceof Error ? error.message : "Unknown decision engine error";
         process.stderr.write(`[our-home] wake decision failed: ${wakeEvent.id}: ${message}\n`);
+        if (wakeEvent.type === "visual_opportunity") {
+          // Visual opportunities are intentionally short-lived. A failed Brain call should not
+          // hold the phone in a polling state for the generic five-minute wake lease.
+          await store.resolveWakeEvent(wakeEvent.id, "dismissed");
+          await clearWakeEventClaim(store, wakeEvent.id);
+        }
+        // Ordinary Care wakes, including fresh visual-result Care wakes, retain the persisted
+        // five-minute lease. That prevents a failing provider from being called every cycle;
+        // visual-result wakes are discarded by their own freshness bound before stale contact.
       }
     }
   }
@@ -129,11 +272,38 @@ export async function runProactiveCycle(
   let failedCount = 0;
 
   for (const candidate of due) {
-    const careDelivery = decideCareDelivery(candidate, store.snapshot(), observedAt);
+    const careDelivery = decideCareDelivery(candidate, store.snapshot(), observedAt, quietHoursPolicy);
     if (!careDelivery.deliver) {
-      await store.resolveProactiveMessage(candidate.id, "dismissed");
-      await clearProactiveClaim(store, candidate.id);
-      process.stderr.write(`[our-home] proactive suppressed: ${candidate.id}: ${careDelivery.reason}\n`);
+      if (careDelivery.nextAvailableAt) {
+        await store.update((data) => {
+          const queued = data.proactiveQueue.find((item) => item.id === candidate.id);
+          if (!queued || queued.status !== "pending") return;
+          queued.dueAt = careDelivery.nextAvailableAt!;
+          queued.processingAt = undefined;
+          queued.lastDeliveryPolicy = {
+            evaluatedAt: observedAt,
+            outcome: "deferred",
+            reason: careDelivery.reason,
+            nextAvailableAt: careDelivery.nextAvailableAt,
+          };
+        });
+        process.stderr.write(
+          `[our-home] proactive deferred: ${candidate.id}: ${careDelivery.reason} until ${careDelivery.nextAvailableAt}\n`,
+        );
+      } else {
+        await store.update((data) => {
+          const queued = data.proactiveQueue.find((item) => item.id === candidate.id);
+          if (!queued || queued.status !== "pending") return;
+          queued.lastDeliveryPolicy = {
+            evaluatedAt: observedAt,
+            outcome: "suppressed",
+            reason: careDelivery.reason,
+          };
+        });
+        await store.resolveProactiveMessage(candidate.id, "dismissed");
+        await clearProactiveClaim(store, candidate.id);
+        process.stderr.write(`[our-home] proactive suppressed: ${candidate.id}: ${careDelivery.reason}\n`);
+      }
       continue;
     }
 
@@ -152,7 +322,13 @@ export async function runProactiveCycle(
     }
   }
 
-  return { heartbeatId: heartbeat.id, wakeEventCount: wakeEvents.length, dueCount: due.length, deliveredCount, failedCount };
+  return {
+    heartbeatId: heartbeat.id,
+    wakeEventCount: wakeEvents.length + visualResultWakeCount,
+    dueCount: due.length,
+    deliveredCount,
+    failedCount,
+  };
 }
 
 const intervalMs = Number(process.env.OUR_HOME_WORKER_INTERVAL_MS ?? "60000");
@@ -161,6 +337,12 @@ const webhookUrl = process.env.OUR_HOME_NOTIFY_WEBHOOK_URL;
 const webhookToken = process.env.OUR_HOME_NOTIFY_WEBHOOK_TOKEN;
 const decisionUrl = process.env.OUR_HOME_DECISION_WEBHOOK_URL;
 const decisionToken = process.env.OUR_HOME_DECISION_WEBHOOK_TOKEN;
+const reflectionEnabled = process.env.OUR_HOME_REFLECTION_ENABLED === "true";
+const reflectionUrl = process.env.OUR_HOME_REFLECTION_WEBHOOK_URL;
+const reflectionToken = process.env.OUR_HOME_REFLECTION_WEBHOOK_TOKEN;
+const relationshipReplyReviewEnabled = process.env.OUR_HOME_RELATIONSHIP_REPLY_REVIEW_ENABLED === "true";
+const relationshipReplyReviewUrl = process.env.OUR_HOME_RELATIONSHIP_REPLY_REVIEW_WEBHOOK_URL;
+const relationshipReplyReviewToken = process.env.OUR_HOME_RELATIONSHIP_REPLY_REVIEW_WEBHOOK_TOKEN;
 const hermesApiUrl = process.env.OUR_HOME_HERMES_API_URL;
 const hermesApiKey = process.env.OUR_HOME_HERMES_API_KEY;
 const hermesConversation = process.env.OUR_HOME_HERMES_CONVERSATION;
@@ -203,7 +385,12 @@ export function startRuntimeWorker(store: JsonStore): RuntimeWorkerHandle {
   if (!Number.isInteger(externalTimeoutMs) || externalTimeoutMs < 1_000 || externalTimeoutMs > 120_000) {
     throw new Error("OUR_HOME_EXTERNAL_TIMEOUT_MS must be an integer between 1000 and 120000ms");
   }
+  if (relationshipReplyReviewEnabled && !relationshipReplyReviewUrl) {
+    throw new Error("OUR_HOME_RELATIONSHIP_REPLY_REVIEW_WEBHOOK_URL is required when relationship reply review is enabled");
+  }
 
+  const quietHoursPolicy = quietHoursPolicyFromEnv(process.env);
+  const aiWorldTimezone = aiWorldTimezoneFromEnv(process.env);
   const notifier = selectNotifier(store, {
     firebaseProjectId,
     googleCredentials,
@@ -222,13 +409,47 @@ export function startRuntimeWorker(store: JsonStore): RuntimeWorkerHandle {
     : decisionUrl
       ? new WebhookDecisionEngine(decisionUrl, decisionToken, externalTimeoutMs)
       : undefined;
+  const reflectionEngine: AiWorldReflectionAdapter | undefined = !reflectionEnabled
+    ? undefined
+    : hermesApiUrl && hermesApiKey
+      ? new HermesReflectionEngine({
+        apiUrl: hermesApiUrl,
+        apiKey: hermesApiKey,
+        conversation: hermesConversation,
+        model: hermesModel,
+        timeoutMs: externalTimeoutMs,
+      })
+      : reflectionUrl
+        ? new WebhookReflectionEngine(reflectionUrl, reflectionToken, externalTimeoutMs)
+        : undefined;
+  const explorationAdapter = selectAiWorldExplorationAdapter(store, {
+    ...aiWorldExplorationConfigFromEnv(process.env),
+    timeoutMs: externalTimeoutMs,
+  });
+  const relationshipReplyReviewEngine: RelationshipReplyReviewAdapter | undefined = relationshipReplyReviewEnabled
+    ? new WebhookRelationshipReplyReviewEngine(
+      relationshipReplyReviewUrl!,
+      relationshipReplyReviewToken,
+      externalTimeoutMs,
+    )
+    : undefined;
 
   const controller = new AbortController();
   const done = (async () => {
     await recoverInterruptedWorkerClaims(store);
     while (!controller.signal.aborted) {
       try {
-        const result = await runProactiveCycle(store, notifier, new Date(), decisionEngine);
+        const result = await runProactiveCycle(
+          store,
+          notifier,
+          new Date(),
+          decisionEngine,
+          quietHoursPolicy,
+          aiWorldTimezone,
+          reflectionEngine,
+          explorationAdapter,
+          relationshipReplyReviewEngine,
+        );
         process.stderr.write(
           `[our-home] heartbeat=${result.heartbeatId} due=${result.dueCount} delivered=${result.deliveredCount} failed=${result.failedCount}\n`,
         );

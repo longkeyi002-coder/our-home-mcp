@@ -7,6 +7,8 @@ import com.hermes.companion.presence.PresenceRuntime
 import com.hermes.companion.push.HermesNotifications
 import com.hermes.companion.push.PushRegistration
 import com.hermes.companion.push.PushRegistrationWorker
+import com.hermes.companion.update.UpdateNotifier
+import com.hermes.companion.update.UpdateWorker
 
 class HermesCompanionApplication : Application() {
     override fun onCreate() {
@@ -18,5 +20,8 @@ class HermesCompanionApplication : Application() {
         HermesNotifications.createChannel(this)
         PushRegistrationWorker.schedulePeriodic(this)
         PushRegistration.refresh(this)
+        UpdateNotifier.createChannel(this)
+        UpdateWorker.schedulePeriodic(this)
+        UpdateWorker.enqueueImmediate(this)
     }
 }

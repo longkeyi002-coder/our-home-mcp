@@ -5,12 +5,13 @@ on:
   push:
     branches:
       - rebuild/ai-life-runtime-v01
+      - fix/presence-reconciliation-push-auth
     paths:
       - "android-companion/**"
       - ".github/workflows/android-stable-apk.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -99,12 +100,59 @@ jobs:
           "$APKSIGNER" verify --verbose --print-certs "$APK" | tee signing-cert.txt
           grep -q "Signer #1 certificate SHA-256 digest:" signing-cert.txt
 
-      - name: Upload stable APK
+      - name: Prepare immutable self-update release assets
+        run: |
+          set -euo pipefail
+          VERSION_CODE="${GITHUB_RUN_NUMBER}"
+          VERSION_NAME="0.1.${GITHUB_RUN_NUMBER}"
+          RELEASE_TAG="android-stable-v${VERSION_NAME}"
+          SOURCE_APK="app/build/outputs/apk/debug/app-debug.apk"
+          RELEASE_APK="app/build/outputs/apk/debug/our-home-android-stable.apk"
+          cp "$SOURCE_APK" "$RELEASE_APK"
+          SHA256="$(sha256sum "$RELEASE_APK" | awk '{print $1}')"
+          PUBLISHED_AT="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          APK_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${RELEASE_TAG}/our-home-android-stable.apk"
+          cat > update.json <<EOF
+          {
+            "schemaVersion": 1,
+            "versionCode": ${VERSION_CODE},
+            "versionName": "${VERSION_NAME}",
+            "apkUrl": "${APK_URL}",
+            "sha256": "${SHA256}",
+            "publishedAt": "${PUBLISHED_AT}"
+          }
+          EOF
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
+          echo "RELEASE_VERSION_NAME=${VERSION_NAME}" >> "$GITHUB_ENV"
+          echo "RELEASE_SHA256=${SHA256}" >> "$GITHUB_ENV"
+
+      - name: Upload stable APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: our-home-android-stable-apk
           path: |
-            android-companion/app/build/outputs/apk/debug/app-debug.apk
+            android-companion/app/build/outputs/apk/debug/our-home-android-stable.apk
+            android-companion/update.json
             android-companion/signing-cert.txt
           if-no-files-found: error
           retention-days: 30
+
+      - name: Publish GitHub self-update release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ASSETS=(
+            "app/build/outputs/apk/debug/our-home-android-stable.apk"
+            "update.json"
+            "signing-cert.txt"
+          )
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${ASSETS[@]}" --clobber --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" "${ASSETS[@]}" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Our Home Android ${RELEASE_VERSION_NAME}" \
+              --notes "Stable signed Android Companion build. SHA-256: ${RELEASE_SHA256}" \
+              --latest
+          fi

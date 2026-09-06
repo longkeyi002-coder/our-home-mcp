@@ -1,5 +1,7 @@
 import { deriveLifeState } from "./life-state.js";
 import type { LifeObservation, ProactiveCandidate, WakeEvent } from "./types.js";
+import { decideQuietHours, type QuietHoursPolicy } from "./quiet-hours.js";
+import { VISUAL_RESULT_WAKE_TTL_MS } from "./visual-result-wake.js";
 
 export const CARE_MESSAGE_COOLDOWN_MS = 60 * 60_000;
 
@@ -7,7 +9,9 @@ export type CareDeliveryReason =
   | "not_long_dwell"
   | "current_session"
   | "stale_long_dwell"
-  | "care_message_cooldown";
+  | "stale_visual_result"
+  | "care_message_cooldown"
+  | "quiet_hours";
 
 export interface CareDeliveryDecision {
   deliver: boolean;
@@ -41,19 +45,52 @@ function recentLongDwellDeliveryAt(
   return times[0] ?? null;
 }
 
+function applyQuietHours(
+  wake: WakeEvent | undefined,
+  observedAt: string,
+  quietHoursPolicy: QuietHoursPolicy | undefined,
+  allowedReason: "not_long_dwell" | "current_session",
+): CareDeliveryDecision {
+  if (!quietHoursPolicy) return { deliver: true, reason: allowedReason };
+  const quiet = decideQuietHours(quietHoursPolicy, observedAt, wake?.priority ?? "normal");
+  if (quiet.defer) {
+    return {
+      deliver: false,
+      reason: "quiet_hours",
+      nextAvailableAt: quiet.nextAvailableAt,
+    };
+  }
+  return { deliver: true, reason: allowedReason };
+}
+
 /**
- * OH-40/OH-47: final deterministic guard before a long-dwell Care message leaves the
- * Runtime. A delayed candidate is discarded if the user already left the App/session,
- * and long-dwell Care messages are rate-limited independently from urgent wake types.
+ * OH-40/OH-44/OH-47: final deterministic guard before a Care message leaves Runtime.
+ * Long-dwell messages are session-bound and rate-limited; visual-result messages are also
+ * freshness-bound so a failed notification cannot surface stale "I just saw..." context later.
+ * A configured quiet-hours policy is evaluated last, so Brain cannot bypass it.
  */
 export function decideCareDelivery(
   candidate: ProactiveCandidate,
   snapshot: CareDeliverySnapshot,
   observedAt: string,
+  quietHoursPolicy?: QuietHoursPolicy,
 ): CareDeliveryDecision {
   const wake = linkedWake(candidate, snapshot.wakeEvents);
+  if (wake?.type === "visual_result") {
+    const wakeObservedAt = Date.parse(wake.observedAt);
+    const asOfMs = Date.parse(observedAt);
+    if (
+      !Number.isFinite(wakeObservedAt)
+      || !Number.isFinite(asOfMs)
+      || asOfMs - wakeObservedAt >= VISUAL_RESULT_WAKE_TTL_MS
+    ) {
+      return { deliver: false, reason: "stale_visual_result" };
+    }
+    return applyQuietHours(wake, observedAt, quietHoursPolicy, "not_long_dwell");
+  }
+
   if (!wake || wake.type !== "long_dwell") {
-    return { deliver: true, reason: "not_long_dwell" };
+    return applyQuietHours(wake, observedAt, quietHoursPolicy, "not_long_dwell");
   }
 
   const expectedPackage = wake.lifeState.foregroundPackage;
@@ -79,5 +116,5 @@ export function decideCareDelivery(
     };
   }
 
-  return { deliver: true, reason: "current_session" };
+  return applyQuietHours(wake, observedAt, quietHoursPolicy, "current_session");
 }

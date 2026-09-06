@@ -26,10 +26,13 @@ import type {
   WakeDecision,
   ObservationProvenance,
   ObservationWorld,
+  VisualRequestRecord,
 } from "./types.js";
 import { deriveLifeState } from "./life-state.js";
 import { deriveWakeEventDrafts } from "./wake-engine.js";
 import { assertValidObservationBoundary, resolveObservationBoundary } from "./world-boundary.js";
+import { assertValidRecordBoundary, resolveRecordBoundary } from "./record-boundary.js";
+import { VISUAL_REQUEST_TTL_MS, type VisualOpportunity } from "./visual-request.js";
 
 const now = () => new Date().toISOString();
 export interface StoreFileSystem { writeFile: typeof writeFile }
@@ -42,8 +45,11 @@ function appendActivity(
     title: string;
     summary?: string;
     source: "AGENT_LIFE" | "RELATIONSHIP" | "HOME_STATE";
+    world: ObservationWorld;
+    provenance: ObservationProvenance;
   },
 ): void {
+  assertValidRecordBoundary(input);
   data.activities.unshift({
     id: randomUUID(),
     ...input,
@@ -96,6 +102,7 @@ function emptyData(): OurHomeData {
     wakeEvents: [],
     wakeEngineState: emptyWakeEngineState(),
     phoneDeviceRegistrations: [],
+    visualRequests: [],
   };
 }
 
@@ -110,6 +117,8 @@ function seedData(): OurHomeData {
     diaries: [
       {
         id: "diary_seed_welcome",
+        world: "FICTION",
+        provenance: "authored",
         title: "第一份记录",
         body: "这是 Our Home 的本地示例数据。它不是 Hermes 的真实活动，也不是关系事实。",
         author: "agent",
@@ -123,6 +132,8 @@ function seedData(): OurHomeData {
     actions: [
       {
         id: "action_seed_review",
+        world: "FICTION",
+        provenance: "authored",
         title: "确认 Our Home 的第一版边界",
         description: "确认哪些数据属于 Hermes，哪些数据属于 Our Home。",
         status: "in_progress",
@@ -134,6 +145,8 @@ function seedData(): OurHomeData {
     activities: [
       {
         id: "activity_seed_started",
+        world: "FICTION",
+        provenance: "simulated",
         kind: "system",
         title: "Our Home MCP 已初始化",
         summary: "当前使用本地 Mock 数据层。",
@@ -155,6 +168,7 @@ function seedData(): OurHomeData {
     wakeEvents: [],
     wakeEngineState: emptyWakeEngineState(),
     phoneDeviceRegistrations: [],
+    visualRequests: [],
   };
 }
 
@@ -188,6 +202,7 @@ function migrateData(value: unknown): OurHomeData {
     wakeEvents?: OurHomeData["wakeEvents"];
     wakeEngineState?: OurHomeData["wakeEngineState"];
     phoneDeviceRegistrations?: OurHomeData["phoneDeviceRegistrations"];
+    visualRequests?: OurHomeData["visualRequests"];
   };
   const hasBaseShape =
     Array.isArray(candidate.diaries) &&
@@ -210,6 +225,7 @@ function migrateData(value: unknown): OurHomeData {
       wakeEvents: [],
       wakeEngineState: emptyWakeEngineState(),
       phoneDeviceRegistrations: [],
+      visualRequests: [],
     };
   }
   if (
@@ -231,6 +247,13 @@ function migrateData(value: unknown): OurHomeData {
       }
       return migratePersistedObservation(item);
     }),
+    // RoutineWindow has always represented user-declared Earth routine context. Older
+    // records can therefore be normalized without guessing an ambiguous world.
+    routines: candidate.routines.map((item) => ({
+      ...item,
+      world: "EARTH" as const,
+      provenance: "user_declared" as const,
+    })),
     // Legacy wake snapshots were derived before world filtering. Keep their history,
     // but do not let queued decisions reuse unverified Earth evidence after migration.
     wakeEvents: (candidate.wakeEvents ?? []).map((event) => candidate.schemaVersion === 2 && event.status === "pending"
@@ -239,6 +262,8 @@ function migrateData(value: unknown): OurHomeData {
       ? { ...entry, status: "dismissed" as const, processingAt: undefined } : entry),
     wakeEngineState: candidate.schemaVersion === 2 ? emptyWakeEngineState() : candidate.wakeEngineState ?? emptyWakeEngineState(),
     phoneDeviceRegistrations: candidate.phoneDeviceRegistrations ?? [],
+    // This is a new empty runtime queue, not a migration of historical observations.
+    visualRequests: candidate.visualRequests ?? [],
   };
 }
 
@@ -330,6 +355,68 @@ export class JsonStore {
     return structuredClone(events);
   }
 
+  /**
+   * Converts a deterministic Curiosity eligibility result into one short-lived Brain wake.
+   * It deliberately does not create a capture request; only applyWakeDecision(request_visual)
+   * can do that. At most one unresolved opportunity is kept for the same foreground session.
+   */
+  async enqueueVisualOpportunity(opportunity: VisualOpportunity): Promise<WakeEvent> {
+    const current = deriveLifeState(this.data.observations, opportunity.observedAt);
+    const previous = this.data.wakeEngineState.lastLifeState ?? current;
+    let result: WakeEvent | undefined;
+    await this.update((data) => {
+      const existing = data.wakeEvents.find((item) =>
+        item.type === "visual_opportunity"
+        && item.status === "pending"
+        && item.visualContext?.sessionId === opportunity.sessionId,
+      );
+      if (existing && existing.visualContext!.expiresAt > opportunity.observedAt) {
+        result = existing;
+        return;
+      }
+      if (existing) existing.status = "dismissed";
+      const event: WakeEvent = {
+        id: randomUUID(),
+        type: "visual_opportunity",
+        status: "pending",
+        priority: "low",
+        createdAt: opportunity.observedAt,
+        observedAt: opportunity.observedAt,
+        reason: `Curiosity eligibility gate passed: ${opportunity.curiosityReason}`,
+        dedupeKey: `visual_opportunity:${opportunity.sessionId}:${opportunity.observedAt}:${opportunity.curiosityReason}`,
+        lifeState: structuredClone(current),
+        previousLifeState: structuredClone(previous),
+        visualContext: {
+          deviceId: opportunity.deviceId,
+          packageName: opportunity.packageName,
+          sessionId: opportunity.sessionId,
+          curiosityReason: opportunity.curiosityReason,
+          expiresAt: opportunity.expiresAt,
+        },
+      };
+      data.wakeEvents.unshift(event);
+      data.wakeEvents = data.wakeEvents.slice(0, 200);
+      result = event;
+    });
+    if (!result) throw new Error("Visual opportunity was not queued");
+    return structuredClone(result);
+  }
+
+  hasPendingVisualDecision(deviceId: string, asOf = now()): boolean {
+    return this.snapshot().wakeEvents.some((item) =>
+      item.type === "visual_opportunity"
+      && item.status === "pending"
+      && item.visualContext?.deviceId === deviceId
+      && item.visualContext.expiresAt > asOf,
+    );
+  }
+
+  getPendingVisualRequest(deviceId: string, asOf = now()): VisualRequestRecord | undefined {
+    return (this.snapshot().visualRequests ?? [])
+      .filter((item) => item.status === "pending" && item.deviceId === deviceId && item.expiresAt > asOf)
+      .sort((left, right) => right.issuedAt.localeCompare(left.issuedAt) || left.requestId.localeCompare(right.requestId))[0];
+  }
+
   async resolveWakeEvent(id: string, status: Exclude<WakeEventStatus, "pending">): Promise<WakeEvent> {
     let result: WakeEvent | undefined;
     await this.update((data) => {
@@ -352,6 +439,45 @@ export class JsonStore {
       if (!result) throw new Error(`Wake event not found: ${id}`);
       if (result.status === "handled") return;
       if (result.status !== "pending") throw new Error(`Pending wake event not found: ${id}`);
+
+      if (result.type === "visual_opportunity" && decision.action === "proactive_message") {
+        throw new Error("Visual opportunity cannot directly create a proactive message");
+      }
+      if (result.type !== "visual_opportunity" && decision.action === "request_visual") {
+        throw new Error("Only a visual opportunity may request visual observation");
+      }
+
+      if (decision.action === "request_visual") {
+        const visual = result.visualContext;
+        if (!visual || visual.expiresAt <= observedAt) {
+          result.status = "dismissed";
+          return;
+        }
+        data.visualRequests ??= [];
+        const existing = data.visualRequests.find((item) => item.wakeEventId === id);
+        if (!existing) {
+          const issuedAtMs = Date.parse(observedAt);
+          const opportunityExpiresAtMs = Date.parse(visual.expiresAt);
+          const requestExpiresAtMs = Math.min(opportunityExpiresAtMs, issuedAtMs + VISUAL_REQUEST_TTL_MS);
+          if (!Number.isFinite(issuedAtMs) || !Number.isFinite(opportunityExpiresAtMs) || requestExpiresAtMs <= issuedAtMs) {
+            result.status = "dismissed";
+            return;
+          }
+          data.visualRequests.unshift({
+            requestId: `visual-brain:${id}`,
+            deviceId: visual.deviceId,
+            packageName: visual.packageName,
+            sessionId: visual.sessionId,
+            reason: decision.reason,
+            issuedAt: new Date(issuedAtMs).toISOString(),
+            expiresAt: new Date(requestExpiresAtMs).toISOString(),
+            status: "pending",
+            wakeEventId: id,
+          });
+          data.visualRequests = data.visualRequests.slice(0, 200);
+        }
+      }
+
       if (decision.action === "proactive_message") {
         const existing = data.proactiveQueue.find((item) => item.wakeEventId === id);
         if (!existing) {
@@ -423,11 +549,15 @@ export class JsonStore {
     body: string;
     author: Actor;
     visibility: DiaryVisibility;
+    world?: ObservationWorld;
+    provenance?: ObservationProvenance;
   }): Promise<DiaryEntry> {
+    const boundary = resolveRecordBoundary(input);
     const timestamp = now();
     const entry: DiaryEntry = {
       id: randomUUID(),
       ...input,
+      ...boundary,
       source: input.author === "agent" ? "AGENT_LIFE" : "RELATIONSHIP",
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -439,6 +569,8 @@ export class JsonStore {
         title: "写入一篇日记",
         summary: entry.title,
         source: entry.source,
+        world: entry.world,
+        provenance: entry.provenance,
       });
     });
     return entry;
@@ -458,6 +590,8 @@ export class JsonStore {
         title: "留下主动留言",
         summary: "一条新的 AGENT_LIFE 留言已进入 Our Home。",
         source: "AGENT_LIFE",
+        world: "EARTH",
+        provenance: "model_generated",
       });
     });
     return entry;
@@ -499,11 +633,21 @@ export class JsonStore {
       };
       data.observations.unshift(observation);
       compactUsageSummaryObservations(data);
+      if (observation.kind === "visual_observation_summary") {
+        const requestId = typeof observation.metadata?.requestId === "string" ? observation.metadata.requestId : undefined;
+        const request = requestId ? (data.visualRequests ?? []).find((item) => item.requestId === requestId) : undefined;
+        if (request && request.status === "pending") {
+          request.status = "observed";
+          request.observedAt = observation.observedAt;
+        }
+      }
       appendActivity(data, {
         kind: "observation_recorded",
         title: "记录一条生活观察",
         summary: observation.label,
         source: "HOME_STATE",
+        world: observation.world,
+        provenance: observation.provenance,
       });
       result = observation;
     });
@@ -522,6 +666,8 @@ export class JsonStore {
     const timestamp = now();
     const routine: RoutineWindow = {
       id: randomUUID(),
+      world: "EARTH",
+      provenance: "user_declared",
       ...input,
       enabled: true,
       createdAt: timestamp,
@@ -534,6 +680,8 @@ export class JsonStore {
         title: "建立一段生活时间表",
         summary: routine.label,
         source: "HOME_STATE",
+        world: routine.world,
+        provenance: routine.provenance,
       });
     });
     return routine;
@@ -589,6 +737,8 @@ export class JsonStore {
         title: "安排一条主动消息",
         summary: candidate.title,
         source: "AGENT_LIFE",
+        world: "EARTH",
+        provenance: "model_generated",
       });
     });
     if (!candidate) throw new Error("Proactive candidate was not created");
@@ -631,10 +781,14 @@ export class JsonStore {
     title: string;
     description?: string;
     dueAt?: string;
+    world?: ObservationWorld;
+    provenance?: ObservationProvenance;
   }): Promise<ActionItem> {
+    const boundary = resolveRecordBoundary(input);
     const action: ActionItem = {
       id: randomUUID(),
       ...input,
+      ...boundary,
       status: "todo",
       createdAt: now(),
       updatedAt: now(),
@@ -647,6 +801,8 @@ export class JsonStore {
         title: "创建一项行动",
         summary: action.title,
         source: "AGENT_LIFE",
+        world: action.world,
+        provenance: action.provenance,
       });
     });
     return action;
@@ -664,6 +820,8 @@ export class JsonStore {
         title: "更新行动状态",
         summary: `${result.title} → ${status}`,
         source: "AGENT_LIFE",
+        world: result.world,
+        provenance: result.provenance,
       });
     });
     if (!result) throw new Error(`Action not found: ${id}`);
@@ -676,11 +834,15 @@ export class JsonStore {
     occurredAt: string;
     proposedBy: Actor;
     importance: "ordinary" | "major";
+    world?: ObservationWorld;
+    provenance?: ObservationProvenance;
   }): Promise<RelationshipEvent> {
+    const boundary = resolveRecordBoundary(input);
     const timestamp = now();
     const event: RelationshipEvent = {
       id: randomUUID(),
       ...input,
+      ...boundary,
       approvalStatus: "proposed",
       approvedBy: [],
       createdAt: timestamp,
@@ -693,6 +855,8 @@ export class JsonStore {
         title: "提出一项关系事件提案",
         summary: event.title,
         source: "RELATIONSHIP",
+        world: event.world,
+        provenance: event.provenance,
       });
     });
     return event;
@@ -706,6 +870,7 @@ export class JsonStore {
       if (result.approvalStatus === "rejected") {
         throw new Error("A rejected relationship event cannot be approved");
       }
+      assertValidRecordBoundary(result);
       if (!result.approvedBy.includes(approvedBy)) result.approvedBy.push(approvedBy);
       const fullyApproved =
         result.importance === "ordinary" ||
@@ -717,6 +882,8 @@ export class JsonStore {
         title: fullyApproved ? "关系事件已批准" : "记录关系事件批准",
         summary: result.title,
         source: "RELATIONSHIP",
+        world: result.world,
+        provenance: result.provenance,
       });
     });
     if (!result) throw new Error(`Relationship event not found: ${id}`);
@@ -746,4 +913,3 @@ export function parseBoolean(value: string | undefined, fallback: boolean): bool
   if (value === undefined) return fallback;
   return value.toLowerCase() !== "false";
 }
-
