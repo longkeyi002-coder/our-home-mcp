@@ -25,6 +25,11 @@ class VisualObservationWorker(context: Context, params: WorkerParameters) : Coro
     override suspend fun doWork(): Result {
         val ack = inputData.toVisualRequestAck() ?: return Result.failure()
         return try {
+            // Do not surface a visual-consent prompt unless the local vision provider is actually
+            // ready to analyze a captured frame. Stable APKs intentionally never embed API keys.
+            val vision = VisionProviderSettingsStore(applicationContext).snapshot()
+            if (!vision.enabled || !vision.hasApiKey) return Result.success()
+
             // ASK_ONLY/PRIVATE/PROTECTED requests are surfaced locally before screenshot work.
             // This worker ends immediately; explicit approval schedules a fresh consent-bound attempt.
             if (VisualConsentPrompt.promptIfNeeded(applicationContext, ack)) return Result.success()
