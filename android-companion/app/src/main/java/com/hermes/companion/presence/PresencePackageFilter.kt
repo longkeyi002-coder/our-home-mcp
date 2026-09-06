@@ -6,12 +6,19 @@ import android.view.inputmethod.InputMethodManager
 
 /**
  * Packages that can own an Android window without becoming the user's semantic foreground App.
- * Keyboard, notification shade/System UI and launcher windows must not replace the last real App.
+ * Keyboard, notification shade/System UI, OEM system overlays and launcher windows must not replace
+ * the last real App.
  */
 object PresencePackageFilter {
     private val knownSystemUiPackages = setOf(
         "com.android.systemui",
         "com.google.android.systemui",
+        // ColorOS / OxygenOS system overlay surfaces can emit accessibility window events while
+        // the user is still semantically inside the underlying App. In particular,
+        // com.oplus.appdetail is observed when opening the notification shade on current OPPO builds.
+        "com.oplus.appdetail",
+        "com.oplus.notificationmanager",
+        "com.coloros.notificationmanager",
     )
 
     fun ignoredPackages(context: Context): Set<String> {

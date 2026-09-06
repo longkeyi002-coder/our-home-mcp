@@ -12,30 +12,42 @@ import org.junit.Test
 
 class PresenceSystemOverlayFilterTest {
     @Test
-    fun keyboardSystemUiAndLauncherAreIgnoredButRealAppIsNot() {
+    fun keyboardSystemUiLauncherAndColorOsOverlayAreIgnoredButRealAppIsNot() {
         val ignored = setOf(
             "com.sohu.inputmethod.sogou",
             "com.android.systemui",
             "com.oplus.launcher",
+            "com.oplus.appdetail",
+            "com.oplus.notificationmanager",
+            "com.coloros.notificationmanager",
         )
         assertTrue(PresencePackageFilter.shouldIgnore("com.sohu.inputmethod.sogou", ignored))
         assertTrue(PresencePackageFilter.shouldIgnore("com.android.systemui", ignored))
         assertTrue(PresencePackageFilter.shouldIgnore("com.oplus.launcher", ignored))
+        assertTrue(PresencePackageFilter.shouldIgnore("com.oplus.appdetail", ignored))
+        assertTrue(PresencePackageFilter.shouldIgnore("com.oplus.notificationmanager", ignored))
+        assertTrue(PresencePackageFilter.shouldIgnore("com.coloros.notificationmanager", ignored))
         assertFalse(PresencePackageFilter.shouldIgnore("com.openai.chatgpt", ignored))
     }
 
     @Test
     fun usageRecoveryKeepsRealAppWhenOverlayIsReportedAsCurrent() {
         val now = 1_000_000L
-        val ignored = setOf("com.sohu.inputmethod.sogou", "com.android.systemui", "com.oplus.launcher")
+        val ignored = setOf(
+            "com.sohu.inputmethod.sogou",
+            "com.android.systemui",
+            "com.oplus.launcher",
+            "com.oplus.appdetail",
+        )
         val summary = UsageTimelineSummary(
             observedAt = now,
-            currentPackageName = "com.sohu.inputmethod.sogou",
+            currentPackageName = "com.oplus.appdetail",
             currentDurationMs = 1_000,
             sessions = listOf(
                 UsageSession("com.openai.chatgpt", now - 20_000, null, 20_000, "ai"),
                 UsageSession("com.sohu.inputmethod.sogou", now - 5_000, null, 5_000, "other"),
                 UsageSession("com.android.systemui", now - 2_000, null, 2_000, "other"),
+                UsageSession("com.oplus.appdetail", now - 1_000, null, 1_000, "other"),
             ),
             appTotalsMs = emptyMap(),
             categoryTotalsMs = emptyMap(),
