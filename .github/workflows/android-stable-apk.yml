@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - rebuild/ai-life-runtime-v01
-      - feat/brain-directed-visual-observation
     paths:
       - "android-companion/**"
       - ".github/workflows/android-stable-apk.yml"
