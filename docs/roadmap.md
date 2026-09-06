@@ -339,34 +339,75 @@ Final validated code baseline: `64f7d70fe9e066cd670a9098611f624e9dca3500`; Runti
 
 ## OH-P6 — Relationship Feedback Loop
 
-**Status: IN PROGRESS. P6.1 COMPLETE. Issue #57. See `docs/P6_RELATIONSHIP_FEEDBACK_V01.md`.**
+**Status: COMPLETE. Acceptance: `docs/OH_P6_ACCEPTANCE.md`. Final review issue #71.**
 
-P6 turns real user/product interaction into traceable relationship evidence while preserving the slow P4 learning boundary.
+P6 turns real user/product interaction into traceable relationship evidence while preserving the slow P4 learning boundary. The completed V0.1 chain is:
+
+```text
+delivered proactive message
+→ explicit relationship signal or bounded reply review
+→ optional explicit user confirm/correct
+→ P4.5 Feedback Bridge
+→ bounded Preference
+→ explicit review
+→ bounded Soul gate
+```
 
 ### P6.1 — Delivered-message relationship signals
 
-Implemented:
+- durable Earth relationship feedback is bound to one exact delivered proactive message;
+- explicit `like` / `dislike` / `accept_suggestion` / `reject_suggestion` actions use fixed P4.5 mappings;
+- `reply` and `ignore` remain ambiguous Earth facts and do not automatically create Preference evidence;
+- stable signal replay is idempotent and collisions fail closed;
+- capture has no model call, notification, Android action, external action or direct Soul write.
 
-- durable Earth relationship feedback bound to one exact delivered proactive message;
-- signals: `like`, `dislike`, `reply`, `ignore`, `accept_suggestion`, `reject_suggestion`;
-- stable client `signalKey` replay idempotency and collision rejection;
-- feedback timestamps cannot precede actual message delivery;
-- `like` / `dislike` map to the fixed `relationship:proactive_messages` strategy key;
-- `accept_suggestion` / `reject_suggestion` map to the fixed `relationship:suggestions` strategy key;
-- those explicit valenced signals reuse the P4.5 Feedback Bridge and cannot supply arbitrary learning strength/Preference/Soul values;
-- `reply` and `ignore` remain `EARTH/observed` interaction evidence only and do not automatically create Preference evidence;
-- capture is zero-model-cost and cannot mutate delivery state, observations, Android state, notifications or external systems;
-- no relationship signal directly changes Soul.
+Implementation note: `docs/P6_RELATIONSHIP_FEEDBACK_V01.md`.
 
-Validated code/test baseline: `5d5ab419bdcce7082d1ff30a8cf52294081ee7a8`; Runtime CI `33971095475` success; Android CI `33971095486` success (`test + lint + assembleDebug`).
+### P6.2 — Bounded reply interpretation
 
-Remaining P6:
+- only explicit reply records are eligible for review;
+- user-authored reply text remains `EARTH/user_declared/RELATIONSHIP`;
+- model interpretation remains separately `EARTH/inferred/RELATIONSHIP`;
+- strict output is limited to `ignore | propose_feedback` with fixed proposal classes;
+- inferred proposals never call P4.5 automatically;
+- one due reply per Life Loop cycle, six-hour success cooldown, one-hour failure backoff, three attempts per UTC day and persisted lease bound cognition cost;
+- provider failure is isolated from Earth heartbeat/Wake/Care/Delivery.
 
-- bounded handling of reply content/corrections without inferring hidden valence;
-- user-visible review/correction/revocation of learned relationship strategy where required by OH-41;
-- final P6 Phase Review.
+Implementation note: `docs/P6_REPLY_INTERPRETATION_V01.md`.
 
-Absence of interaction must not be automatically interpreted as dislike.
+### P6.3 — Explicit proposal confirmation/correction/dismissal
+
+- a P6.2 proposal cannot enter learning until the user explicitly confirms or corrects it;
+- the inferred proposal stays immutable and `EARTH/inferred`;
+- user review is a separate `EARTH/user_declared/RELATIONSHIP` record;
+- confirm/correct uses only fixed directional mappings through the existing P4.5 Bridge;
+- dismiss is terminal and produces no Preference evidence;
+- crash/restart replay is idempotent and conflicting terminal review fails closed;
+- no model call, notification, Android action, external action or direct Soul write is added.
+
+Implementation note: `docs/P6_REPLY_PROPOSAL_CONFIRMATION_V01.md`.
+
+### P6.4 — Auditable learned-evidence review/revoke/correct
+
+- bounded review links each P4.5 user feedback record to its exact AI World evidence and active/revoked status;
+- revoke persists separate `EARTH/user_declared/RELATIONSHIP` and `AI_WORLD/inferred` revocation records;
+- original feedback/evidence remains in audit history;
+- revoked evidence is excluded from active Preference score/evidenceCount/evidenceIds rather than cancelled with fabricated opposite evidence;
+- active basis changes invalidate old Preference review;
+- if no active evidence remains, temporary Preference is removed while existing Soul state remains unchanged;
+- correction first revokes the exact old evidence and then enters one bounded new P4.5 correction record;
+- restart/dedupe/collision and corrupt revocation targets fail closed;
+- historical Soul audit may continue referencing archived revoked evidence, but revoke/correct never directly rewrites Soul.
+
+Formal integration: PR #69 / merge commit `8c4ebcc3c04fdc61576e550d6efd577e4eb2d37b`.
+
+### Final P6 boundary
+
+P6 does **not** infer dislike from silence or inactivity, does not allow Brain/provider/user input to set Preference or Soul numeric values, does not add a second scheduler, and does not grant learned preference authority to perform Android or external actions.
+
+Product UI for browsing/revoking learned evidence remains a later product-surface task under OH-41; the Runtime/domain review/revoke/correct capability itself is complete. Broader delete/pause controls and P7 remote controlled actions remain separate work.
+
+Final P6 Phase Review acceptance: `docs/OH_P6_ACCEPTANCE.md`.
 
 ---
 
