@@ -17,6 +17,15 @@ class ObservationStatusNotificationTest {
     }
 
     @Test
+    fun aiComingStateSeparatesRuntimeAttentionFromActualCapture() {
+        val presentation = observationStatusPresentation(ObservationStatusMode.AI_COMING, "微信")
+
+        assertEquals("AI 已收到切换，正在过来看", presentation.title)
+        assertContains(presentation.text, "微信")
+        assertContains(presentation.text, "等待本次视觉观察开始")
+    }
+
+    @Test
     fun observingStateIsUnambiguous() {
         val presentation = observationStatusPresentation(ObservationStatusMode.OBSERVING, "微信")
 
