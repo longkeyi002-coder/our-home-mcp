@@ -179,9 +179,23 @@ class QueueRepository private constructor(
     suspend fun registerPushAddress(pushFid: String?, pushToken: String) {
         settings.savePushAddress(pushFid, pushToken)
         val serverUrl = settings.serverUrl()
-        val bootstrap = settings.bootstrapToken() ?: throw IllegalStateException("Registration token is missing")
         require(serverUrl.isNotBlank()) { "Server URL is missing" }
-        val response = apiFactory(serverUrl).register("Bearer $bootstrap", registrationRequest())
+        val api = apiFactory(serverUrl)
+        val request = registrationRequest()
+        val deviceToken = settings.deviceToken()
+        val bootstrap = settings.bootstrapToken()
+
+        val response = if (!deviceToken.isNullOrBlank()) {
+            try {
+                api.register("Bearer $deviceToken", request)
+            } catch (error: HttpException) {
+                if (error.code() != 401 || bootstrap.isNullOrBlank()) throw error
+                api.register("Bearer $bootstrap", request)
+            }
+        } else {
+            val enrollment = bootstrap ?: throw IllegalStateException("Registration token is missing")
+            api.register("Bearer $enrollment", request)
+        }
         settings.saveDeviceToken(response.token)
     }
 

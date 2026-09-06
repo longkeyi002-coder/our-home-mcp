@@ -13,7 +13,11 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.hermes.companion.BuildConfig
 import com.hermes.companion.platform.UsagePrivacyFilter
+import com.hermes.companion.presence.PresenceReporter
+import com.hermes.companion.presence.PresenceStateStore
+import com.hermes.companion.presence.PresenceUsageReconciliation
 import com.hermes.companion.privacy.PresencePrivacyStore
+import com.hermes.companion.privacy.VisualPrivacyStore
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 
@@ -61,6 +65,35 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                     settings.deviceId(),
                     scheduleUpload = false,
                 )
+
+                // Accessibility remains the realtime source of truth. If that channel has gone
+                // quiet, recover only a bounded recent slice from UsageEvents so Presence cannot
+                // silently stay dead for an entire day. PresenceReporter still applies the local
+                // per-App identity policy before any recovered transition leaves the device.
+                val presenceStore = PresenceStateStore(applicationContext)
+                val reporter = PresenceReporter(applicationContext)
+                val visualPrivacy = VisualPrivacyStore(applicationContext)
+                val candidates = PresenceUsageReconciliation.candidates(
+                    summary = usage,
+                    snapshot = presenceStore.snapshot(),
+                    nowMs = now,
+                )
+                for (candidate in candidates) {
+                    presenceStore.commitPackage(candidate.packageName, candidate.observedAtMs)?.let { transition ->
+                        // Match the realtime Accessibility path: a package change must invalidate
+                        // any visual grant that was scoped to the previous App/session.
+                        visualPrivacy.invalidateGrantForPackageChange(transition.toPackage)
+                        visualPrivacy.armedGrant()?.let { armed ->
+                            if (
+                                transition.toPackage != armed.packageName &&
+                                transition.toPackage != applicationContext.packageName
+                            ) {
+                                visualPrivacy.clearArmedGrant()
+                            }
+                        }
+                        reporter.reportTransition(transition)
+                    }
+                }
             }
         }
 

@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - rebuild/ai-life-runtime-v01
+      - fix/presence-reconciliation-push-auth
     paths:
       - "android-companion/**"
       - ".github/workflows/android-stable-apk.yml"

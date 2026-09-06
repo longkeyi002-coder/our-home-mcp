@@ -54,6 +54,11 @@ object VisualConsentPrompt {
         val policy = privacy.policyFor(ack.packageName)
         if (policy == VisualAppPolicy.NEVER) return false
 
+        // AUTO is a standing user permission. Do not ask again for each visual request,
+        // including Apps classified as PRIVATE/PROTECTED. Capture still passes through
+        // the local preflight/guard and Android's secure-window screenshot enforcement.
+        if (policy == VisualAppPolicy.AUTO) return false
+
         val existingGrant = privacy.temporaryGrant()?.isUsable(
             packageName = ack.packageName,
             sessionId = ack.sessionId,
@@ -71,7 +76,6 @@ object VisualConsentPrompt {
             sensitivity == SensitivityClass.PRIVATE ||
             policy == VisualAppPolicy.ASK_ONLY
         if (!needsConsent) return false
-        if (policy == VisualAppPolicy.AUTO && sensitivity != SensitivityClass.PROTECTED) return false
 
         if (!canPostNotifications(appContext)) return false
         createChannel(appContext)

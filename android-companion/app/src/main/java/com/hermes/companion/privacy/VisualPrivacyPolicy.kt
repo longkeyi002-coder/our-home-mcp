@@ -77,6 +77,13 @@ object SensitiveVisualGuard {
             return VisualDecision(false, VisualDecisionReason.USER_NEVER)
         }
 
+        // Persistent AUTO is the user's explicit standing permission for this App.
+        // It suppresses per-request consent even for Apps classified as PRIVATE/PROTECTED.
+        // Android/OS screenshot restrictions above still remain absolute.
+        if (value.userPolicy == VisualAppPolicy.AUTO) {
+            return VisualDecision(true, VisualDecisionReason.ALLOWED_USER_AUTO)
+        }
+
         val grantUsable = value.temporaryGrant?.isUsable(
             packageName = value.packageName,
             sessionId = value.sessionId,
@@ -89,10 +96,6 @@ object SensitiveVisualGuard {
             } else {
                 VisualDecision(false, VisualDecisionReason.PROTECTED_REQUIRES_TEMPORARY_GRANT)
             }
-        }
-
-        if (value.userPolicy == VisualAppPolicy.AUTO) {
-            return VisualDecision(true, VisualDecisionReason.ALLOWED_USER_AUTO)
         }
 
         if (grantUsable) {
