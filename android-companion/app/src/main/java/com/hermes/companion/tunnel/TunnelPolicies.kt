@@ -40,10 +40,8 @@ internal object TunnelEndpointPolicy {
 
 internal object TunnelReconnectPolicy {
     const val MAX_RECONNECT_MS = 30_000L
+    private val DELAYS_MS = longArrayOf(1_000L, 2_000L, 4_000L, 8_000L, 16_000L, MAX_RECONNECT_MS)
 
-    fun delayMillis(failureAttempt: Int): Long {
-        val exponent = failureAttempt.coerceIn(0, 5)
-        val exponential = 1_000L shl exponent
-        return exponential.coerceAtMost(MAX_RECONNECT_MS)
-    }
+    fun delayMillis(failureAttempt: Int): Long =
+        DELAYS_MS[failureAttempt.coerceIn(0, DELAYS_MS.lastIndex)]
 }
