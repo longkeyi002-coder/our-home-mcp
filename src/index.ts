@@ -7,7 +7,7 @@ import { createOurHomeServer } from "./server.js";
 import { JsonStore, parseBoolean } from "./store.js";
 import { createDeviceToken, registerPhone } from "./phone-registration.js";
 import { derivePhoneTelemetryStatus } from "./phone-status.js";
-import { deriveVisualOpportunity } from "./visual-request.js";
+import { deriveVisualOpportunity, VISUAL_TRANSITION_REASON } from "./visual-request.js";
 import { startRuntimeWorker } from "./worker.js";
 import { listenOrThrow } from "./http-listen.js";
 import { deriveRuntimeMessagingStatus } from "./runtime-messaging-status.js";
@@ -292,9 +292,23 @@ async function handlePhoneObservations(
         metadata: item.clientEventId ? { ...(item.metadata ?? {}), clientEventId: item.clientEventId } : item.metadata,
       });
       observations.push(observation);
-      if (brainVisualDecisionConfigured()) {
-        const opportunity = deriveVisualOpportunity(observation, store.snapshot().observations);
-        if (opportunity) await store.enqueueVisualOpportunity(opportunity);
+
+      const opportunity = deriveVisualOpportunity(observation, store.snapshot().observations);
+      if (opportunity?.curiosityReason === VISUAL_TRANSITION_REASON) {
+        // App sensing and AI looking are separate layers. A real allowed foreground switch
+        // immediately hands the exact new session to the visual subsystem; do not wait for the
+        // generic Life Loop or spend a pre-look Brain call asking whether the required first look
+        // should happen. Android remains the final privacy/screen/session veto. The completed
+        // visual summary wakes Brain afterwards for interpretation and the separate speak/ignore choice.
+        const wake = await store.enqueueVisualOpportunity(opportunity);
+        await store.applyWakeDecision(
+          wake.id,
+          { action: "request_visual", reason: VISUAL_TRANSITION_REASON },
+          observation.observedAt,
+        );
+      } else if (opportunity && brainVisualDecisionConfigured()) {
+        // Sustained dwell/Curiosity remains optional Brain-directed observation.
+        await store.enqueueVisualOpportunity(opportunity);
       }
     }
     const deviceIds = [...new Set(items.map((item) => item.deviceId).filter((value): value is string => Boolean(value)))];
