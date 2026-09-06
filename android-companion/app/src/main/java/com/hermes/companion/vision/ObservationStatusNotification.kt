@@ -1,6 +1,7 @@
 package com.hermes.companion.vision
 
 import android.Manifest
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -78,15 +79,16 @@ fun observationStatusPresentation(
 /**
  * User-visible truth surface for Presence vs AI attention vs actual visual observation.
  *
- * This is deliberately one low-priority ongoing notification instead of a second
- * foreground service. AccessibilityService already owns continuous foreground-App
- * sensing. Actual screenshot/Vision still fails closed when this notification cannot
- * be shown, so visual observation is never silent.
+ * Ordinary Presence remains a low-priority ongoing notification. Actual screenshot work requests
+ * Android 16 promoted-ongoing/live-update presentation so supported ColorOS/OxygenOS devices can
+ * surface the short-lived state in the top capsule / Fluid Cloud area without requiring the shade.
+ * Promotion is best-effort and never weakens the existing visual guard.
  */
 object ObservationStatusNotification {
     private const val CHANNEL_ID = "our_home_sensing_status"
     private const val CHANNEL_NAME = "感知状态"
     private const val NOTIFICATION_ID = 0x4f485354
+    private const val API_36 = 36
 
     private data class PresenceState(
         val packageName: String?,
@@ -108,12 +110,7 @@ object ObservationStatusNotification {
         unlocked: Boolean,
         accessibilityConnected: Boolean,
     ) {
-        latestPresence = PresenceState(
-            packageName = packageName,
-            screenInteractive = screenInteractive,
-            unlocked = unlocked,
-            accessibilityConnected = accessibilityConnected,
-        )
+        latestPresence = PresenceState(packageName, screenInteractive, unlocked, accessibilityConnected)
         if (!accessibilityConnected) {
             activeVisualRequests.clear()
             latestVisualPackage = null
@@ -134,7 +131,7 @@ object ObservationStatusNotification {
         pendingAiPackage = packageName
         if (activeVisualRequests.isEmpty()) {
             val label = visibleAppLabel(appContext, packageName)
-            notify(appContext, observationStatusPresentation(ObservationStatusMode.AI_COMING, label))
+            notify(appContext, ObservationStatusMode.AI_COMING, observationStatusPresentation(ObservationStatusMode.AI_COMING, label))
         }
     }
 
@@ -146,7 +143,11 @@ object ObservationStatusNotification {
         activeVisualRequests.add(request.requestId)
         latestVisualPackage = request.packageName
         val label = visibleAppLabel(appContext, request.packageName)
-        val shown = notify(appContext, observationStatusPresentation(ObservationStatusMode.OBSERVING, label))
+        val shown = notify(
+            appContext,
+            ObservationStatusMode.OBSERVING,
+            observationStatusPresentation(ObservationStatusMode.OBSERVING, label),
+        )
         if (!shown) {
             activeVisualRequests.remove(request.requestId)
             if (activeVisualRequests.isEmpty()) latestVisualPackage = null
@@ -159,7 +160,11 @@ object ObservationStatusNotification {
         activeVisualRequests.remove(request.requestId)
         if (activeVisualRequests.isNotEmpty()) {
             val label = visibleAppLabel(context.applicationContext, latestVisualPackage)
-            notify(context.applicationContext, observationStatusPresentation(ObservationStatusMode.OBSERVING, label))
+            notify(
+                context.applicationContext,
+                ObservationStatusMode.OBSERVING,
+                observationStatusPresentation(ObservationStatusMode.OBSERVING, label),
+            )
             return
         }
         latestVisualPackage = null
@@ -207,10 +212,14 @@ object ObservationStatusNotification {
                 label = visibleAppLabel(context, state.packageName)
             }
         }
-        notify(context, observationStatusPresentation(mode, label))
+        notify(context, mode, observationStatusPresentation(mode, label))
     }
 
-    private fun notify(context: Context, presentation: ObservationStatusPresentation): Boolean {
+    private fun notify(
+        context: Context,
+        mode: ObservationStatusMode,
+        presentation: ObservationStatusPresentation,
+    ): Boolean {
         createChannel(context)
         if (!channelEnabled(context)) return false
         val intent = Intent(context, MainActivity::class.java)
@@ -221,7 +230,7 @@ object ObservationStatusNotification {
             intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
         )
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+        val base = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.ic_menu_view)
             .setContentTitle(presentation.title)
             .setContentText(presentation.text)
@@ -234,12 +243,41 @@ object ObservationStatusNotification {
             .setShowWhen(false)
             .setContentIntent(pendingIntent)
             .build()
+
+        val notification = if (PromotedObservationPolicy.shouldRequestPromotion(mode)) {
+            requestPromotedOngoing(context, base)
+        } else {
+            base
+        }
+
         return try {
             NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
             true
         } catch (_: SecurityException) {
             false
         }
+    }
+
+    /**
+     * compileSdk remains 35 for the canonical app today, while the user's OnePlus 12 is already
+     * Android 16. Reflection lets API 36/36.1 opt in without raising the whole project's compile
+     * SDK just for this presentation hint. Any missing/changed OEM/platform method falls back to
+     * the normal ongoing notification rather than breaking observation.
+     */
+    private fun requestPromotedOngoing(context: Context, notification: Notification): Notification {
+        if (Build.VERSION.SDK_INT < API_36) return notification
+        return runCatching {
+            val builder = Notification.Builder.recoverBuilder(context, notification)
+            builder.javaClass
+                .getMethod("setRequestPromotedOngoing", Boolean::class.javaPrimitiveType)
+                .invoke(builder, true)
+            runCatching {
+                builder.javaClass
+                    .getMethod("setShortCriticalText", String::class.java)
+                    .invoke(builder, "观察中")
+            }
+            builder.build()
+        }.getOrDefault(notification)
     }
 
     private fun createChannel(context: Context) {
@@ -256,9 +294,7 @@ object ObservationStatusNotification {
         if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            return false
-        }
+        ) return false
         createChannel(context)
         return channelEnabled(context)
     }
