@@ -583,6 +583,8 @@ private fun AdvancedPage(
         }
     }
 
+    TunnelSettingsSection()
+
     OutlinedButton(onClick = onOpenUsage, modifier = Modifier.fillMaxWidth()) {
         Text(if (state.usageAccess) "使用情况访问：已开启" else "开启使用情况访问")
     }
@@ -694,4 +696,3 @@ private fun Diagnostics(state: CompanionUiState, model: CompanionViewModel) {
 }
 
 private fun Long.asTime(): String = if (this == 0L) "never" else java.text.DateFormat.getDateTimeInstance().format(java.util.Date(this))
-
