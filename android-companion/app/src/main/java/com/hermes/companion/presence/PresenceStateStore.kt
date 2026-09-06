@@ -2,6 +2,7 @@ package com.hermes.companion.presence
 
 import android.content.Context
 import android.content.SharedPreferences
+import com.hermes.companion.vision.ObservationStatusNotification
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -20,7 +21,8 @@ data class PresenceSnapshot(
 )
 
 class PresenceStateStore(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun snapshots() = callbackFlow {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> trySend(snapshot()); Unit }
@@ -41,6 +43,7 @@ class PresenceStateStore(context: Context) {
             .putString(KEY_LAST_FROM_PACKAGE, transition.fromPackage)
             .putString(KEY_LAST_TO_PACKAGE, transition.toPackage)
             .apply()
+        publishStatus()
         return transition
     }
 
@@ -59,6 +62,7 @@ class PresenceStateStore(context: Context) {
             .remove(KEY_CURRENT_PACKAGE)
             .remove(KEY_CURRENT_STARTED_AT)
             .apply()
+        publishStatus()
         return end
     }
 
@@ -68,6 +72,7 @@ class PresenceStateStore(context: Context) {
 
     fun setAccessibilityConnected(connected: Boolean) {
         prefs.edit().putBoolean(KEY_ACCESSIBILITY_CONNECTED, connected).apply()
+        publishStatus()
     }
 
     fun setScreenState(interactive: Boolean, unlocked: Boolean) {
@@ -75,6 +80,7 @@ class PresenceStateStore(context: Context) {
             .putBoolean(KEY_SCREEN_INTERACTIVE, interactive)
             .putBoolean(KEY_UNLOCKED, unlocked)
             .apply()
+        publishStatus()
     }
 
     fun snapshot(): PresenceSnapshot = PresenceSnapshot(
@@ -89,6 +95,17 @@ class PresenceStateStore(context: Context) {
         lastAccessibilityEventAtMs = prefs.getLong(KEY_LAST_ACCESSIBILITY_EVENT_AT, 0L),
     )
 
+    private fun publishStatus() {
+        val state = snapshot()
+        ObservationStatusNotification.updatePresence(
+            context = appContext,
+            packageName = state.currentPackage,
+            screenInteractive = state.screenInteractive,
+            unlocked = state.unlocked,
+            accessibilityConnected = state.accessibilityConnected,
+        )
+    }
+
     companion object {
         private const val PREFS = "presence_state"
         private const val KEY_CURRENT_PACKAGE = "current_package"
@@ -102,4 +119,3 @@ class PresenceStateStore(context: Context) {
         private const val KEY_LAST_ACCESSIBILITY_EVENT_AT = "last_accessibility_event_at"
     }
 }
-
