@@ -52,6 +52,10 @@ internal class TunnelSettingsStore(context: Context) {
 
     fun lastErrorCode(): String = prefs.getString(KEY_LAST_ERROR_CODE, "").orEmpty()
 
+    fun lastMcpRequestAt(): Long = prefs.getLong(KEY_LAST_MCP_REQUEST_AT, 0L)
+
+    fun lastServedTool(): String = prefs.getString(KEY_LAST_SERVED_TOOL, "").orEmpty()
+
     fun recordConnecting() = recordState(STATE_CONNECTING)
 
     fun recordConnected(at: Long = System.currentTimeMillis()) {
@@ -76,6 +80,13 @@ internal class TunnelSettingsStore(context: Context) {
             .apply()
     }
 
+    fun recordMcpToolServed(toolName: String, at: Long = System.currentTimeMillis()) {
+        prefs.edit()
+            .putLong(KEY_LAST_MCP_REQUEST_AT, at)
+            .putString(KEY_LAST_SERVED_TOOL, toolName.take(80))
+            .apply()
+    }
+
     private fun recordState(value: String) {
         prefs.edit()
             .putString(KEY_CONNECTION_STATE, value)
@@ -97,5 +108,7 @@ internal class TunnelSettingsStore(context: Context) {
         private const val KEY_CONNECTION_STATE = "connection_state"
         private const val KEY_LAST_CONNECTED_AT = "last_connected_at"
         private const val KEY_LAST_ERROR_CODE = "last_error_code"
+        private const val KEY_LAST_MCP_REQUEST_AT = "last_mcp_request_at"
+        private const val KEY_LAST_SERVED_TOOL = "last_served_tool"
     }
 }

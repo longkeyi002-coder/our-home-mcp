@@ -25,6 +25,7 @@ internal class TunnelMcpHandler(context: Context) {
     private val appContext = context.applicationContext
     private val json = Json { ignoreUnknownKeys = false }
     private val presencePrivacy = PresencePrivacyStore(appContext)
+    private val tunnelSettings = TunnelSettingsStore(appContext)
 
     fun handleMcp(body: String): String {
         if (body.toByteArray(Charsets.UTF_8).size > RelayProtocol.MAX_MCP_BODY_BYTES) {
@@ -84,6 +85,7 @@ internal class TunnelMcpHandler(context: Context) {
             "get_current_usage" -> usage()
             else -> throw IllegalArgumentException("Tool is not allowed")
         }
+        tunnelSettings.recordMcpToolServed(name)
         return buildJsonObject {
             put("content", buildJsonArray {
                 add(buildJsonObject {
