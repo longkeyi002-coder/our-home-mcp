@@ -13,6 +13,7 @@ import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.hermes.companion.BuildConfig
 import com.hermes.companion.platform.UsagePrivacyFilter
+import com.hermes.companion.presence.PresencePackageFilter
 import com.hermes.companion.presence.PresenceReporter
 import com.hermes.companion.presence.PresenceStateStore
 import com.hermes.companion.presence.PresenceUsageReconciliation
@@ -67,9 +68,8 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                 )
 
                 // Accessibility remains the realtime source of truth. If that channel has gone
-                // quiet, recover only a bounded recent slice from UsageEvents so Presence cannot
-                // silently stay dead for an entire day. PresenceReporter still applies the local
-                // per-App identity policy before any recovered transition leaves the device.
+                // quiet, recover only a bounded recent slice from UsageEvents. Keyboard/System UI/
+                // launcher windows are overlays and must not replace the last real foreground App.
                 val presenceStore = PresenceStateStore(applicationContext)
                 val reporter = PresenceReporter(applicationContext)
                 val visualPrivacy = VisualPrivacyStore(applicationContext)
@@ -77,11 +77,10 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                     summary = usage,
                     snapshot = presenceStore.snapshot(),
                     nowMs = now,
+                    ignoredPackages = PresencePackageFilter.ignoredPackages(applicationContext),
                 )
                 for (candidate in candidates) {
                     presenceStore.commitPackage(candidate.packageName, candidate.observedAtMs)?.let { transition ->
-                        // Match the realtime Accessibility path: a package change must invalidate
-                        // any visual grant that was scoped to the previous App/session.
                         visualPrivacy.invalidateGrantForPackageChange(transition.toPackage)
                         visualPrivacy.armedGrant()?.let { armed ->
                             if (
@@ -122,11 +121,6 @@ class UploadWorker(context: Context, params: WorkerParameters) : CoroutineWorker
             WorkManager.getInstance(context).enqueueUniqueWork(IMMEDIATE_WORK_NAME, ExistingWorkPolicy.APPEND_OR_REPLACE, request)
         }
 
-        /**
-         * Only scheduled when Runtime says a Brain visual decision is actually pending.
-         * Repeated pending ACKs append another bounded delayed poll; once the decision resolves,
-         * no further poll is scheduled.
-         */
         fun enqueueVisualDecisionPoll(context: Context) {
             val request = OneTimeWorkRequestBuilder<UploadWorker>()
                 .setInputData(workDataOf(KEY_VISUAL_DECISION_POLL to true))

@@ -18,12 +18,13 @@ object PresenceUsageReconciliation {
         summary: UsageTimelineSummary,
         snapshot: PresenceSnapshot,
         nowMs: Long,
+        ignoredPackages: Set<String> = emptySet(),
     ): List<Candidate> {
         if (!isAccessibilityStale(snapshot, nowMs)) return emptyList()
 
         val lowerBound = maxOf(snapshot.lastTransitionAtMs, nowMs - MAX_BACKFILL_AGE_MS)
         val recovered = summary.sessions.asSequence()
-            .filter { it.packageName.isNotBlank() }
+            .filter { it.packageName.isNotBlank() && it.packageName !in ignoredPackages }
             .filter { it.startedAt > lowerBound && it.startedAt <= nowMs }
             .sortedBy { it.startedAt }
             .map { Candidate(it.packageName, it.startedAt) }
@@ -34,12 +35,10 @@ object PresenceUsageReconciliation {
             .takeLast(MAX_BACKFILL_TRANSITIONS)
             .toMutableList()
 
-        val current = summary.currentPackageName?.trim()?.takeIf { it.isNotEmpty() }
+        val current = summary.currentPackageName?.trim()?.takeIf { it.isNotEmpty() && it !in ignoredPackages }
         if (current != null) {
             val lastKnown = recovered.lastOrNull()?.packageName ?: snapshot.currentPackage
-            if (lastKnown != current) {
-                recovered += Candidate(current, nowMs)
-            }
+            if (lastKnown != current) recovered += Candidate(current, nowMs)
         }
         return recovered
     }

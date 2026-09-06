@@ -34,14 +34,13 @@ class PresenceAccessibilityService : AccessibilityService() {
     private lateinit var reporter: PresenceReporter
     private lateinit var privacy: VisualPrivacyStore
     private lateinit var visualAudit: VisualAuditReporter
+    private var ignoredPresencePackages: Set<String> = emptySet()
     private var pendingPackage: String? = null
     private val commitPending = Runnable {
         val candidate = pendingPackage ?: return@Runnable
         pendingPackage = null
         val now = System.currentTimeMillis()
         store.commitPackage(candidate, now)?.let { transition ->
-            // OH-45: a sensitive visual grant is scoped to the current App session.
-            // Switching away invalidates it before any future visual request can use it.
             privacy.invalidateGrantForPackageChange(transition.toPackage)
             privacy.armedGrant()?.let { armed ->
                 if (transition.toPackage != armed.packageName && transition.toPackage != applicationContext.packageName) {
@@ -58,6 +57,7 @@ class PresenceAccessibilityService : AccessibilityService() {
         reporter = PresenceReporter(applicationContext)
         privacy = VisualPrivacyStore(applicationContext)
         visualAudit = VisualAuditReporter(applicationContext)
+        ignoredPresencePackages = PresencePackageFilter.ignoredPackages(applicationContext)
         privacy.pruneExpiredGrant(System.currentTimeMillis())
         store.setAccessibilityConnected(true)
         VisualCaptureBridge.attach(this)
@@ -72,6 +72,10 @@ class PresenceAccessibilityService : AccessibilityService() {
         val now = System.currentTimeMillis()
         store.recordAccessibilityEvent(now)
 
+        // Input methods, System UI/notification shade and launchers can own a window while the
+        // user is still semantically inside the same App. Keep the last real foreground App.
+        if (PresencePackageFilter.shouldIgnore(candidate, ignoredPresencePackages)) return
+
         // OH-68: Accessibility can emit several window events for one semantic switch.
         // A short local debounce prevents transient windows from becoming noisy Presence events.
         pendingPackage = candidate
@@ -79,11 +83,6 @@ class PresenceAccessibilityService : AccessibilityService() {
         handler.postDelayed(commitPending, APP_TRANSITION_DEBOUNCE_MS)
     }
 
-    /**
-     * OH-45/OH-69: this is the only screenshot entry point. A Runtime request is advisory;
-     * Android re-checks the exact App session, lock/screen state and local privacy policy
-     * before the OS screenshot API is called.
-     */
     fun captureVisual(request: VisualCaptureRequest, callback: (VisualCaptureOutcome) -> Unit) {
         if (!::store.isInitialized || !::privacy.isInitialized || !::visualAudit.isInitialized) {
             callback(VisualCaptureOutcome.Failed("service_not_ready"))
@@ -96,24 +95,12 @@ class PresenceAccessibilityService : AccessibilityService() {
         val sensitivity = AppSensitivityClassifier.classify(request.packageName)
         val preflight = VisualCapturePreflight.decide(snapshot, request)
         if (!preflight.allowed) {
-            reportAudit(
-                request = request,
-                sensitivity = sensitivity,
-                allowed = false,
-                reason = "PREFLIGHT_${preflight.reason.name}",
-                action = "capture_preflight",
-            )
+            reportAudit(request, sensitivity, false, "PREFLIGHT_${preflight.reason.name}", "capture_preflight")
             callback(VisualCaptureOutcome.Blocked(preflight.reason.name))
             return
         }
 
-        // A user may arm a one-time grant from the Privacy page before returning to the
-        // target App. Bind it only now, after Android has verified the exact live session.
-        privacy.bindArmedGrantToSession(
-            packageName = request.packageName,
-            sessionId = request.sessionId,
-            nowMs = now,
-        )
+        privacy.bindArmedGrantToSession(request.packageName, request.sessionId, now)
 
         val guard = SensitiveVisualGuard.decide(
             VisualRequestContext(
@@ -121,22 +108,13 @@ class PresenceAccessibilityService : AccessibilityService() {
                 sensitivity = sensitivity,
                 userPolicy = privacy.policyFor(request.packageName),
                 screenUsable = snapshot.screenInteractive && snapshot.unlocked,
-                // Secure windows are enforced by the OS screenshot API below. On API 34+
-                // ERROR_TAKE_SCREENSHOT_SECURE_WINDOW is treated as an absolute block.
                 secureWindow = false,
                 sessionId = request.sessionId,
                 nowMs = now,
                 temporaryGrant = privacy.temporaryGrant(),
             ),
         )
-        reportAudit(
-            request = request,
-            sensitivity = sensitivity,
-            allowed = guard.allowed,
-            reason = guard.reason.name,
-            action = "capture_guard",
-            temporaryGrantUsed = guard.consumeTemporaryGrant,
-        )
+        reportAudit(request, sensitivity, guard.allowed, guard.reason.name, "capture_guard", guard.consumeTemporaryGrant)
         if (!guard.allowed) {
             callback(VisualCaptureOutcome.Blocked(guard.reason.name))
             return
@@ -164,9 +142,7 @@ class PresenceAccessibilityService : AccessibilityService() {
             object : TakeScreenshotCallback {
                 override fun onSuccess(screenshot: ScreenshotResult) {
                     val hardwareBuffer = screenshot.hardwareBuffer
-                    val hardwareBitmap = runCatching {
-                        Bitmap.wrapHardwareBuffer(hardwareBuffer, screenshot.colorSpace)
-                    }.getOrNull()
+                    val hardwareBitmap = runCatching { Bitmap.wrapHardwareBuffer(hardwareBuffer, screenshot.colorSpace) }.getOrNull()
                     if (hardwareBitmap == null) {
                         hardwareBuffer.close()
                         reportAudit(request, sensitivity, false, "BITMAP_WRAP_FAILED", "capture_failed")
@@ -174,9 +150,7 @@ class PresenceAccessibilityService : AccessibilityService() {
                         return
                     }
 
-                    val softwareBitmap = runCatching {
-                        hardwareBitmap.copy(Bitmap.Config.ARGB_8888, false)
-                    }.getOrNull()
+                    val softwareBitmap = runCatching { hardwareBitmap.copy(Bitmap.Config.ARGB_8888, false) }.getOrNull()
                     hardwareBitmap.recycle()
                     hardwareBuffer.close()
                     if (softwareBitmap == null) {
@@ -187,9 +161,7 @@ class PresenceAccessibilityService : AccessibilityService() {
 
                     captureScope.launch {
                         val output = ZeroingByteArrayOutputStream()
-                        val compressed = runCatching {
-                            softwareBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output)
-                        }.getOrDefault(false)
+                        val compressed = runCatching { softwareBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, output) }.getOrDefault(false)
                         softwareBitmap.recycle()
                         if (!compressed) {
                             output.wipe()
@@ -201,9 +173,7 @@ class PresenceAccessibilityService : AccessibilityService() {
                         }
 
                         val jpeg = output.copyAndWipe()
-                        val frame = runCatching {
-                            EphemeralVisualFrame.jpeg(request.requestId, request.packageName, jpeg)
-                        }.getOrElse {
+                        val frame = runCatching { EphemeralVisualFrame.jpeg(request.requestId, request.packageName, jpeg) }.getOrElse {
                             jpeg.fill(0)
                             mainExecutor.execute {
                                 reportAudit(request, sensitivity, false, "FRAME_CREATE_FAILED", "capture_failed")
@@ -213,28 +183,17 @@ class PresenceAccessibilityService : AccessibilityService() {
                         }
                         mainExecutor.execute {
                             if (consumeTemporaryGrant) privacy.consumeTemporaryGrant()
-                            reportAudit(
-                                request = request,
-                                sensitivity = sensitivity,
-                                allowed = true,
-                                reason = "CAPTURED_EPHEMERAL",
-                                action = "capture_succeeded",
-                                temporaryGrantUsed = consumeTemporaryGrant,
-                            )
+                            reportAudit(request, sensitivity, true, "CAPTURED_EPHEMERAL", "capture_succeeded", consumeTemporaryGrant)
                             callback(VisualCaptureOutcome.Captured(frame))
                         }
                     }
                 }
 
                 override fun onFailure(errorCode: Int) {
-                    val secureWindow = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE &&
-                        errorCode == ERROR_TAKE_SCREENSHOT_SECURE_WINDOW
+                    val secureWindow = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && errorCode == ERROR_TAKE_SCREENSHOT_SECURE_WINDOW
                     val reason = if (secureWindow) "SECURE_WINDOW" else "SCREENSHOT_ERROR_$errorCode"
                     reportAudit(request, sensitivity, false, reason, "capture_failed")
-                    callback(
-                        if (secureWindow) VisualCaptureOutcome.Blocked("SECURE_WINDOW")
-                        else VisualCaptureOutcome.Failed(reason.lowercase()),
-                    )
+                    callback(if (secureWindow) VisualCaptureOutcome.Blocked("SECURE_WINDOW") else VisualCaptureOutcome.Failed(reason.lowercase()))
                 }
             },
         )
