@@ -43,10 +43,23 @@ function responsesUrl(apiUrl: string): string {
   return `${normalized}/v1/responses`;
 }
 
+function isAppTransitionVisualWake(wakeEvent: WakeEvent): boolean {
+  return wakeEvent.type === "visual_opportunity"
+    && wakeEvent.visualContext?.curiosityReason === "app_transition";
+}
+
 function decisionContract(wakeEvent: WakeEvent): string {
+  if (isAppTransitionVisualWake(wakeEvent)) {
+    return [
+      "The phone has just detected a real foreground App transition and is notifying you of the newly active App session.",
+      "Our Home product policy requires one bounded visual observation of this exact new session when Android local privacy/screen guards permit it.",
+      "You may not retarget another app/session and you may not contact the user before the visual result exists.",
+      'Return only {"action":"request_visual","reason":"..."}.',
+    ].join("\n");
+  }
   if (wakeEvent.type === "visual_opportunity") {
     return [
-      "This wake event is only asking whether one already-eligible visual observation is worth requesting now.",
+      "This wake event is optional Curiosity/dwell: decide whether one already-eligible extra visual observation is worth requesting now.",
       "You may not choose another app, session, or privacy policy. Android local guards remain authoritative and may still refuse capture.",
       'Return only {"action":"ignore"} or {"action":"request_visual","reason":"..."}.',
     ].join("\n");
@@ -152,6 +165,17 @@ export class HermesDecisionEngine implements BrainAdapter {
     if (input.wakeEvent.type !== "visual_opportunity" && decisionResult.data.action === "request_visual") {
       throw new Error("Only a visual opportunity may request visual observation");
     }
+
+    // App sensing and AI visual observation are separate. A real App transition is the
+    // product-level notification that AI attention is required for the new exact session.
+    // Hermes still receives the wake, but an accidental/legacy `ignore` response cannot
+    // silently suppress the one transition observation. Android remains the final veto.
+    if (isAppTransitionVisualWake(input.wakeEvent)) {
+      return decisionResult.data.action === "request_visual"
+        ? decisionResult.data
+        : { action: "request_visual", reason: "app_transition_attention" };
+    }
+
     return decisionResult.data;
   }
 }
