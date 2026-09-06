@@ -45,12 +45,41 @@ class RealtimeCaptureService : Service() {
     private suspend fun captureSafely() {
         try {
             CompanionCapture.captureAndUpload(applicationContext)
+            val pkg = com.hermes.companion.platform.DeviceStatusReader.currentForegroundPackage(applicationContext)
+            val label = if (pkg != null) resolveAppLabel(pkg) else "未知"
+            updateNotification("当前应用：$label")
         } catch (_: CancellationException) {
             throw CancellationException()
         } catch (error: Exception) {
             applicationContext.getSharedPreferences("companion_settings", MODE_PRIVATE)
                 .edit().putString("last_error", error.message?.take(300).orEmpty()).apply()
         }
+    }
+
+    private fun resolveAppLabel(packageName: String): String {
+        return try {
+            val appInfo = applicationContext.packageManager.getApplicationInfo(packageName, 0)
+            applicationContext.packageManager.getApplicationLabel(appInfo).toString()
+        } catch (_: Exception) {
+            packageName
+        }
+    }
+
+    private fun updateNotification(text: String) {
+        val manager = getSystemService(NotificationManager::class.java)
+        val actionIntent = Intent(this, NotificationActionReceiver::class.java).setAction(ACTION_CAPTURE_NOW)
+        val action = android.app.PendingIntent.getBroadcast(
+            this, 1001, actionIntent,
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_popup_sync)
+            .setContentTitle("Hermes Companion")
+            .setContentText(text)
+            .setOngoing(true)
+            .addAction(NotificationCompat.Action(android.R.drawable.ic_popup_sync, "立即同步", action))
+            .build()
+        manager.notify(NOTIFICATION_ID, notification)
     }
 
     private fun createChannel() {
