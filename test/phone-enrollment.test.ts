@@ -120,4 +120,36 @@ test("OH-P1 enrollment token can register but cannot ingest telemetry directly",
     }),
   });
   assert.equal(deviceHeartbeat.status, 201);
+
+  // An already-enrolled phone must be able to refresh its own push address without
+  // retaining a long-lived copy of the enrollment credential.
+  const selfRefresh = await fetch(`${baseUrl}/v1/phone/register`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${registration.token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      deviceId: "android-enrolled",
+      appVersion: "0.1.88",
+      pushFid: "fid-refreshed",
+      pushToken: "fcm-refreshed",
+    }),
+  });
+  assert.equal(selfRefresh.status, 201);
+
+  // A device-scoped token is bound to its deviceId and cannot update another phone.
+  const crossDeviceRefresh = await fetch(`${baseUrl}/v1/phone/register`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${registration.token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      deviceId: "android-other",
+      pushFid: "fid-other",
+      pushToken: "fcm-other",
+    }),
+  });
+  assert.equal(crossDeviceRefresh.status, 401);
 });
