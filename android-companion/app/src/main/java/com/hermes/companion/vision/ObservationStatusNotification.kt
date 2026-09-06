@@ -20,6 +20,7 @@ enum class ObservationStatusMode {
     LOCKED,
     PRIVATE_APP,
     SENSING,
+    AI_COMING,
     OBSERVING,
 }
 
@@ -51,9 +52,17 @@ fun observationStatusPresentation(
     ObservationStatusMode.SENSING -> ObservationStatusPresentation(
         title = "仅感知 App",
         text = if (appLabel.isNullOrBlank()) {
-            "等待识别当前前台 App · 尚未观察屏幕"
+            "等待识别当前前台 App · AI 尚未观察屏幕"
         } else {
-            "当前：$appLabel · 尚未观察屏幕"
+            "当前：$appLabel · AI 尚未观察屏幕"
+        },
+    )
+    ObservationStatusMode.AI_COMING -> ObservationStatusPresentation(
+        title = "AI 已收到切换，正在过来看",
+        text = if (appLabel.isNullOrBlank()) {
+            "正在等待本次视觉观察开始"
+        } else {
+            "当前：$appLabel · 正在等待本次视觉观察开始"
         },
     )
     ObservationStatusMode.OBSERVING -> ObservationStatusPresentation(
@@ -67,7 +76,7 @@ fun observationStatusPresentation(
 }
 
 /**
- * User-visible truth surface for Presence vs actual visual observation.
+ * User-visible truth surface for Presence vs AI attention vs actual visual observation.
  *
  * This is deliberately one low-priority ongoing notification instead of a second
  * foreground service. AccessibilityService already owns continuous foreground-App
@@ -89,6 +98,7 @@ object ObservationStatusNotification {
     private var latestPresence = PresenceState(null, false, false, false)
     private val activeVisualRequests = linkedSetOf<String>()
     private var latestVisualPackage: String? = null
+    private var pendingAiPackage: String? = null
 
     @Synchronized
     fun updatePresence(
@@ -107,16 +117,32 @@ object ObservationStatusNotification {
         if (!accessibilityConnected) {
             activeVisualRequests.clear()
             latestVisualPackage = null
+            pendingAiPackage = null
             cancel(context)
             return
         }
+        if (pendingAiPackage != null && pendingAiPackage != packageName) pendingAiPackage = null
         if (activeVisualRequests.isEmpty()) renderPresence(context.applicationContext)
+    }
+
+    @Synchronized
+    fun markAiComing(context: Context, packageName: String?) {
+        val appContext = context.applicationContext
+        if (!latestPresence.accessibilityConnected || !latestPresence.screenInteractive || !latestPresence.unlocked) return
+        if (packageName.isNullOrBlank()) return
+        if (!PresencePrivacyStore(appContext).exposesIdentity(packageName)) return
+        pendingAiPackage = packageName
+        if (activeVisualRequests.isEmpty()) {
+            val label = visibleAppLabel(appContext, packageName)
+            notify(appContext, observationStatusPresentation(ObservationStatusMode.AI_COMING, label))
+        }
     }
 
     @Synchronized
     fun beginObservation(context: Context, request: VisualCaptureRequest): Boolean {
         val appContext = context.applicationContext
         if (!canShow(appContext)) return false
+        pendingAiPackage = null
         activeVisualRequests.add(request.requestId)
         latestVisualPackage = request.packageName
         val label = visibleAppLabel(appContext, request.packageName)
@@ -137,6 +163,7 @@ object ObservationStatusNotification {
             return
         }
         latestVisualPackage = null
+        pendingAiPackage = null
         if (latestPresence.accessibilityConnected) renderPresence(context.applicationContext) else cancel(context)
     }
 
@@ -144,6 +171,7 @@ object ObservationStatusNotification {
     fun clear(context: Context) {
         activeVisualRequests.clear()
         latestVisualPackage = null
+        pendingAiPackage = null
         latestPresence = PresenceState(null, false, false, false)
         cancel(context)
     }
@@ -169,6 +197,10 @@ object ObservationStatusNotification {
             state.packageName != null && !PresencePrivacyStore(context).exposesIdentity(state.packageName) -> {
                 mode = ObservationStatusMode.PRIVATE_APP
                 label = null
+            }
+            pendingAiPackage != null && pendingAiPackage == state.packageName -> {
+                mode = ObservationStatusMode.AI_COMING
+                label = visibleAppLabel(context, pendingAiPackage)
             }
             else -> {
                 mode = ObservationStatusMode.SENSING
@@ -214,7 +246,7 @@ object ObservationStatusNotification {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java)
         val channel = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW).apply {
-            description = "显示 Our Home 当前是在感知 App，还是实际观察屏幕"
+            description = "显示 Our Home 当前是在感知 App、AI 正在过来看，还是实际观察屏幕"
             setShowBadge(false)
         }
         manager.createNotificationChannel(channel)
