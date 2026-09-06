@@ -33,6 +33,8 @@ private data class TunnelUiSnapshot(
     val state: String,
     val lastConnectedAt: Long,
     val lastErrorCode: String,
+    val lastMcpRequestAt: Long,
+    val lastServedTool: String,
 )
 
 @Composable
@@ -60,6 +62,12 @@ internal fun TunnelSettingsSection() {
             TunnelStatusLine("Tunnel Token", if (snapshot.hasToken) "已保存" else "未保存")
             if (snapshot.lastConnectedAt > 0L) {
                 TunnelStatusLine("最近连接", snapshot.lastConnectedAt.asTunnelTime())
+            }
+            if (snapshot.lastMcpRequestAt > 0L) {
+                TunnelStatusLine("最近远程读取", snapshot.lastMcpRequestAt.asTunnelTime())
+                snapshot.lastServedTool.takeIf { it.isNotBlank() }?.let {
+                    TunnelStatusLine("最近读取工具", it)
+                }
             }
             snapshot.lastErrorCode.takeIf { it.isNotBlank() }?.let {
                 Text("连接错误: $it", color = MaterialTheme.colorScheme.error)
@@ -149,6 +157,8 @@ private fun TunnelSettingsStore.uiSnapshot() = TunnelUiSnapshot(
     state = connectionState(),
     lastConnectedAt = lastConnectedAt(),
     lastErrorCode = lastErrorCode(),
+    lastMcpRequestAt = lastMcpRequestAt(),
+    lastServedTool = lastServedTool(),
 )
 
 private fun tunnelStateLabel(value: String): String = when (value) {
