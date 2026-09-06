@@ -16,6 +16,7 @@ class PresenceReporter(context: Context) {
     private val queue = QueueRepository.create(appContext)
     private val settings = SettingsRepository(appContext)
     private val privacy = PresencePrivacyStore(appContext)
+    private val presenceState = PresenceStateStore(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     fun reportTransition(value: AppTransition) {
@@ -24,6 +25,9 @@ class PresenceReporter(context: Context) {
         val exposeFrom = value.fromPackage?.let(privacy::exposesIdentity) == true
         val toPackage = if (exposeTo) value.toPackage else PRIVATE_APP_LABEL
         val fromPackage = if (exposeFrom) value.fromPackage.orEmpty() else if (value.fromPackage != null) PRIVATE_APP_LABEL else ""
+        val snapshot = presenceState.snapshot()
+        val startedAtMs = snapshot.currentStartedAtMs.takeIf { it > 0L } ?: value.observedAtMs
+        val lastInteractionAtMs = snapshot.lastAccessibilityEventAtMs.takeIf { it > 0L } ?: value.observedAtMs
         scope.launch {
             queue.enqueueObservation(
                 ObservationRequest(
@@ -39,6 +43,10 @@ class PresenceReporter(context: Context) {
                         "previousIdentityHidden" to (value.fromPackage != null && !exposeFrom).toString(),
                         "previousStartedAt" to value.previousStartedAtMs.takeIf { it > 0L }?.let { Instant.ofEpochMilli(it).toString() }.orEmpty(),
                         "previousDurationMs" to value.previousDurationMs.toString(),
+                        "startedAt" to Instant.ofEpochMilli(startedAtMs).toString(),
+                        "screenInteractive" to snapshot.screenInteractive.toString(),
+                        "unlocked" to snapshot.unlocked.toString(),
+                        "lastInteractionAt" to Instant.ofEpochMilli(lastInteractionAtMs).toString(),
                     ),
                     clientEventId = "presence-app:$deviceId:${value.observedAtMs}:$toPackage",
                 ),
