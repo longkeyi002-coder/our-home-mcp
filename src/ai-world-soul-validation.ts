@@ -1,8 +1,12 @@
-import type { AiWorldContinuityData } from "./types.js";
+import type { AiWorldContinuityData, AiWorldInterestEvidence } from "./types.js";
 
 const MAX_SOUL_EVIDENCE_IDS = 100;
 const MAX_SOUL_DELTA = 0.02;
 const SOUL_REASONS = new Set(["preference_evidence", "time_decay"] as const);
+
+type RevocationContinuity = AiWorldContinuityData & {
+  revokedInterestEvidence?: AiWorldInterestEvidence[];
+};
 
 function timestamp(value: string, label: string): number {
   const parsed = Date.parse(value);
@@ -17,9 +21,22 @@ function closeEnough(left: number, right: number): boolean {
 /**
  * P4.3 persisted-memory guard. It is deliberately independent from the Soul reducer so
  * generic AI World validation can call it without introducing a circular runtime import.
+ * P6.4 keeps revoked evidence in an immutable audit archive: historical Soul audit may
+ * continue to reference that evidence, while active Preference reducers do not.
  */
 export function assertValidAiWorldSoulMemory(continuity: AiWorldContinuityData): void {
-  const evidence = continuity.interestEvidence ?? [];
+  const activeEvidence = continuity.interestEvidence ?? [];
+  const revokedEvidence = (continuity as RevocationContinuity).revokedInterestEvidence ?? [];
+  if (!Array.isArray(revokedEvidence)) {
+    throw new Error("AI World revoked interest evidence archive must be an array");
+  }
+  const evidence = [...activeEvidence, ...revokedEvidence];
+  const evidenceIds = new Set<string>();
+  for (const item of evidence) {
+    if (!item?.id || evidenceIds.has(item.id)) throw new Error("Duplicate AI World evidence id across active and revoked memory");
+    evidenceIds.add(item.id);
+  }
+
   const preferences = continuity.preferences ?? [];
   const tendencies = continuity.soulTendencies ?? [];
   const changes = continuity.soulChanges ?? [];
