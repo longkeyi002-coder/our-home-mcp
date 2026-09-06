@@ -1,12 +1,16 @@
 package com.hermes.companion.update
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 
 object UpdateNotifier {
     private const val CHANNEL_ID = "our_home_updates"
@@ -25,15 +29,17 @@ object UpdateNotifier {
         )
     }
 
-    fun showReady(context: Context, versionName: String) {
+    fun showReady(context: Context, versionName: String): Boolean {
         createChannel(context)
+        if (!canPostNotifications(context)) return false
+
         val intent = Intent(context, UpdateInstallActivity::class.java).apply {
             action = UpdateInstallActivity.ACTION_INSTALL_READY_UPDATE
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
         }
         val pendingIntent = PendingIntent.getActivity(
             context,
-            3107,
+            NOTIFICATION_ID,
             intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
@@ -45,6 +51,19 @@ object UpdateNotifier {
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
             .build()
-        runCatching { NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification) }
+
+        return try {
+            NotificationManagerCompat.from(context).notify(NOTIFICATION_ID, notification)
+            true
+        } catch (_: SecurityException) {
+            false
+        }
+    }
+
+    private fun canPostNotifications(context: Context): Boolean {
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return false
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) ==
+            PackageManager.PERMISSION_GRANTED
     }
 }
