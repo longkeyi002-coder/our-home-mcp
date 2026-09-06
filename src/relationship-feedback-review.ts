@@ -38,6 +38,7 @@ type RevocationStoreData = OurHomeData & {
 
 type RevocationContinuity = NonNullable<NonNullable<OurHomeData["aiWorld"]>["continuity"]> & {
   interestEvidenceRevocations?: AiWorldInterestEvidenceRevocation[];
+  revokedInterestEvidence?: AiWorldInterestEvidence[];
 };
 
 export interface RelationshipFeedbackReviewItem {
@@ -51,14 +52,17 @@ export interface RelationshipFeedbackReviewItem {
 function revocationState(store: JsonStore): {
   earth: RelationshipFeedbackRevocationRecord[];
   aiWorld: AiWorldInterestEvidenceRevocation[];
+  archivedEvidence: AiWorldInterestEvidence[];
 } {
   const snapshot = store.snapshot() as RevocationStoreData;
   const continuity = snapshot.aiWorld?.continuity as RevocationContinuity | undefined;
   const earth = snapshot.relationshipFeedbackRevocations ?? [];
   const aiWorld = continuity?.interestEvidenceRevocations ?? [];
+  const archivedEvidence = continuity?.revokedInterestEvidence ?? [];
   if (!Array.isArray(earth)) throw new Error("Persisted relationship feedback revocations must be an array");
   if (!Array.isArray(aiWorld)) throw new Error("Persisted AI World evidence revocations must be an array");
-  return { earth, aiWorld };
+  if (!Array.isArray(archivedEvidence)) throw new Error("Persisted revoked AI World evidence archive must be an array");
+  return { earth, aiWorld, archivedEvidence };
 }
 
 /**
@@ -74,8 +78,10 @@ export function listRelationshipFeedbackReview(
   }
 
   const feedback = listUserFeedback(store);
-  const evidenceById = new Map(listAiWorldInterestEvidence(store).map((item) => [item.id, item]));
   const revocations = revocationState(store);
+  const evidenceById = new Map<string, AiWorldInterestEvidence>();
+  for (const item of listAiWorldInterestEvidence(store)) evidenceById.set(item.id, item);
+  for (const item of revocations.archivedEvidence) evidenceById.set(item.id, item);
   const earthByFeedback = new Map(revocations.earth.map((item) => [item.feedbackId, item]));
   const aiByFeedback = new Map(revocations.aiWorld.map((item) => [item.feedbackId, item]));
 
