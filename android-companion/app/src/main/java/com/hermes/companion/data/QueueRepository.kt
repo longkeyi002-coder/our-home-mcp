@@ -6,6 +6,7 @@ import com.hermes.companion.BuildConfig
 import com.hermes.companion.platform.UsageTimelineSummary
 import com.hermes.companion.privacy.PresencePrivacyStore
 import com.hermes.companion.push.PushRegistration
+import com.hermes.companion.vision.ObservationStatusNotification
 import com.hermes.companion.vision.VisualObservationWorker
 import java.time.LocalDate
 import java.util.UUID
@@ -214,11 +215,13 @@ class QueueRepository private constructor(
     /**
      * ACK handling stays enqueue-only. A real request supersedes any older pending marker from
      * the same upload cycle, so Android cannot schedule a redundant follow-up after capture work
-     * has already been handed off.
+     * has already been handed off. The user-visible status is advanced only after Runtime has
+     * actually returned a concrete visual request; local Presence alone never claims AI is looking.
      */
     private fun mergeVisualAck(ack: ApiAck, pendingSoFar: Boolean): Boolean {
         val visualRequest = ack.visualRequest
         if (visualRequest != null) {
+            runCatching { ObservationStatusNotification.markAiComing(settings.context, visualRequest.packageName) }
             runCatching { visualRequestEnqueuer(visualRequest) }
             return false
         }
