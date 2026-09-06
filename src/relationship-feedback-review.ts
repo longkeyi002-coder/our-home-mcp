@@ -49,6 +49,41 @@ export interface RelationshipFeedbackReviewItem {
   aiWorldRevocation?: AiWorldInterestEvidenceRevocation;
 }
 
+function timestamp(value: string, label: string): number {
+  const parsed = Date.parse(value);
+  if (!Number.isFinite(parsed)) throw new Error(`Invalid ${label}: ${value}`);
+  return parsed;
+}
+
+function assertEarthRevocations(records: RelationshipFeedbackRevocationRecord[]): void {
+  const ids = new Set<string>();
+  const keys = new Set<string>();
+  const feedbackIds = new Set<string>();
+  for (const record of records) {
+    if (record.world !== "EARTH" || record.provenance !== "user_declared" || record.source !== "RELATIONSHIP") {
+      throw new Error("Relationship feedback revocation has an invalid Earth boundary");
+    }
+    if (!record.id?.trim() || !record.revocationKey?.trim() || !record.feedbackId?.trim()) {
+      throw new Error("Relationship feedback revocation has invalid structured fields");
+    }
+    if (timestamp(record.occurredAt, "relationship revocation occurredAt") > timestamp(record.createdAt, "relationship revocation createdAt")) {
+      throw new Error("Relationship feedback revocation cannot occur after creation");
+    }
+    if (record.note !== undefined && (!record.note.trim() || record.note.length > 2_000)) {
+      throw new Error("Relationship feedback revocation note is invalid");
+    }
+    if (record.derivedEvidenceRevocationId !== undefined && !record.derivedEvidenceRevocationId.trim()) {
+      throw new Error("Relationship feedback revocation derived evidence id is invalid");
+    }
+    if (ids.has(record.id) || keys.has(record.revocationKey) || feedbackIds.has(record.feedbackId)) {
+      throw new Error("Duplicate relationship feedback revocation identity");
+    }
+    ids.add(record.id);
+    keys.add(record.revocationKey);
+    feedbackIds.add(record.feedbackId);
+  }
+}
+
 function revocationState(store: JsonStore): {
   earth: RelationshipFeedbackRevocationRecord[];
   aiWorld: AiWorldInterestEvidenceRevocation[];
@@ -62,6 +97,7 @@ function revocationState(store: JsonStore): {
   if (!Array.isArray(earth)) throw new Error("Persisted relationship feedback revocations must be an array");
   if (!Array.isArray(aiWorld)) throw new Error("Persisted AI World evidence revocations must be an array");
   if (!Array.isArray(archivedEvidence)) throw new Error("Persisted revoked AI World evidence archive must be an array");
+  assertEarthRevocations(earth);
   return { earth, aiWorld, archivedEvidence };
 }
 
