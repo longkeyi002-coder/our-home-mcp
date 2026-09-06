@@ -102,9 +102,10 @@ function transitionOpportunity(
     return null;
   }
 
-  const budget = decideVisualBudget(observations, transition.deviceId, observedAtMs);
-  if (!budget.allowed) return null;
-
+  // App-transition attention is a separate product rule from optional Curiosity/dwell.
+  // It therefore does not consume the low-frequency Curiosity visual budget. Android's
+  // debounce, exact-session binding, privacy policy, screen/unlock preflight and provider
+  // readiness remain mandatory final guards before any screenshot can occur.
   return {
     deviceId: transition.deviceId,
     packageName,
@@ -181,10 +182,9 @@ function dwellOpportunity(
 }
 
 /**
- * Cheap deterministic eligibility gate. An active App transition may immediately become a
- * visual opportunity; a sustained session may also become one at a sparse dwell milestone.
- * Neither path authorizes a screenshot. Brain still chooses ignore/request_visual, and Android
- * remains the final exact-session/privacy veto.
+ * Cheap deterministic eligibility gate. An active App transition represents mandatory
+ * attention to the newly selected App session; a sustained dwell remains optional Curiosity.
+ * Neither path can bypass Android's exact-session/privacy/screen guard before capture.
  */
 export function deriveVisualOpportunity(
   observation: LifeObservation,
